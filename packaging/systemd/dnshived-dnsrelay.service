@@ -1,0 +1,33 @@
+[Unit]
+Description=dnshived DNS relay/forwarder (per-VLAN, cached upstream forwarding, per-scope ACLs)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/dnshived-dnsrelay --config /etc/dnshived/dnsrelay.json
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2
+User=dnshived
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+# StateDirectory holds only stats.json (cache statistics read by the
+# daemon); not needed for DNS service.
+StateDirectory=dnshived-dnsrelay
+
+# CAP_NET_BIND_SERVICE: binding port 53 as non-root, ambient for the whole
+# process lifetime because sockets are bound later (VIP failover, SIGHUP).
+# No CAP_NET_RAW: one socket pair per address, no SO_BINDTODEVICE.
+# Logs go to the journal; no log_file is set in dnsrelay.json.
+
+# SIGHUP re-reads allowed_interfaces, interface_acls and rewrites without
+# disturbing other VLANs; every other setting needs a restart.
+
+# Each upstream holds a pool of persistent sockets and every TCP query
+# holds one fd; raised well above both configured ceilings.
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

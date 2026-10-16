@@ -1,0 +1,36 @@
+[Unit]
+Description=dnshived privileged helper
+Before=dnshived.service
+After=network.target
+
+[Service]
+Type=simple
+Group=dnshived
+# Runs as root (nftables, systemctl, ip link), the only dnshived
+# component that does. Group=dnshived so its socket is group-owned by
+# dnshived. /run/dnshived is group-writable for the daemon's lease socket;
+# the sticky bit keeps it from replacing keepalived's root-owned PID files.
+ExecStartPre=/bin/mkdir -p /run/dnshived
+ExecStartPre=/bin/chgrp dnshived /run/dnshived
+ExecStartPre=/bin/chmod 1775 /run/dnshived
+ExecStart=/usr/local/bin/dnshived-helper --scopes ""
+# No scope names here: the site-specific allowlist comes from a drop-in
+# (dnshived-helper.service.d/scopes.conf). Without it every scoped command
+# is rejected. Names added at runtime via add-scopes persist in
+# --state-dir (default /var/lib/dnshived-helper). See docs/SECURITY.md,
+# "Rogue scope injection".
+Restart=on-failure
+RestartSec=5
+
+# No PrivateTmp: get-vrrp-state reads keepalived's dump at the host's
+# /tmp/keepalived.data.
+ProtectHome=yes
+ProtectKernelTunables=yes
+# Exception: rp_filter on trunk parents (internal/rpfilter) — the rest
+# of /proc/sys stays read-only.
+ReadWritePaths=/proc/sys/net/ipv4/conf
+ProtectKernelModules=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

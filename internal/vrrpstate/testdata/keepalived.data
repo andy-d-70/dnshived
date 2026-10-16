@@ -1,0 +1,20 @@
+------< Global definitions >------
+ Router ID = node-a.example
+------< VRRP Topology >------
+ VRRP Instance = DNSHIVED_office
+   VRRP Version = 2
+   State = BACKUP
+   Master router = (none)
+   Master priority = 0
+   Interface = van
+   Virtual Router ID = 51
+   Priority = 100
+ VRRP Instance = DNSHIVED_avdante
+   VRRP Version = 2
+   State = MASTER
+   Master router = (local)
+   Interface = van
+   Virtual Router ID = 52
+   Priority = 50
+------< VRRP Sockpool >------
+ fd_in 14 fd_out = 15

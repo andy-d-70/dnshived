@@ -1,0 +1,16 @@
+[Unit]
+Description=dnshived probe host VLAN sub-interface bring-up (octet %i)
+After=network.target
+Before=dnshived-probe.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/bash -c 'until [ -e /sys/class/net/ens19 ]; do sleep 1; done'
+ExecStart=/usr/local/bin/probe-host-vlans.sh %i
+RemainAfterExit=yes
+# probe-host-vlans.sh only runs ip commands.
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,41 @@
+dnshived (0.9.8.5) unstable; urgency=medium
+
+  * Release 0.9.8.5. Summary, upgrade notes and known issues: CHANGELOG.md,
+    section "0.9.8.5 — released".
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Fri, 16 Oct 2026 15:00:53 +0200
+
+dnshived (0.9.8.4) unstable; urgency=medium
+
+  * Release 0.9.8.4. Summary, upgrade notes and known issues: CHANGELOG.md,
+    section "0.9.8.4 — released".
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Thu, 15 Oct 2026 12:30:59 +0200
+
+dnshived (0.9.8.3) unstable; urgency=medium
+
+  * Release 0.9.8.3. Summary, upgrade notes and known issues: CHANGELOG.md,
+    section "0.9.8.3 — released".
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Wed, 14 Oct 2026 20:15:59 +0200
+
+dnshived (0.9.8.2) unstable; urgency=medium
+
+  * Release 0.9.8.2. Summary, upgrade notes and known issues: CHANGELOG.md,
+    section "0.9.8.2 — released".
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Wed, 14 Oct 2026 17:44:20 +0200
+
+dnshived (0.9.8.1) unstable; urgency=medium
+
+  * Release 0.9.8.1. Summary, upgrade notes and known issues: CHANGELOG.md,
+    section "0.9.8.1 — released".
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Tue, 13 Oct 2026 20:20:43 +0200
+
+dnshived (0.9.8) unstable; urgency=low
+
+  * Release 0.9.8. Summary, upgrade notes and known issues: CHANGELOG.md,
+    section "0.9.8 — released".
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Sat, 03 Oct 2026 10:30:00 +0200

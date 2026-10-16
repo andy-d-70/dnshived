@@ -1,0 +1,32 @@
+[Unit]
+Description=dnshived-web-helper (privileged restart companion for dnshived-web)
+Before=dnshived-web.service
+After=network.target
+
+[Service]
+Type=simple
+# Same /run/dnshived mode as dnshived-helper.service sets (root:dnshived
+# 1775); "+" runs the setup outside the capability limits below.
+ExecStartPre=+/bin/mkdir -p /run/dnshived
+ExecStartPre=+/bin/chgrp dnshived /run/dnshived
+ExecStartPre=+/bin/chmod 1775 /run/dnshived
+ExecStart=/usr/local/bin/dnshived-web-helper --socket /run/dnshived/web-helper.sock
+Restart=on-failure
+RestartSec=2
+
+# Runs as root to restart dnshived-web.service, which runs as dnshived and
+# cannot restart itself (its sandboxing implies NoNewPrivileges, so sudo
+# cannot work). Group=dnshived so dnshived-web can reach the socket.
+Group=dnshived
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+# Its only command is `systemctl restart dnshived-web`, which PID 1
+# authorizes by uid 0 alone: no capability needed.
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/run/dnshived
+
+[Install]
+WantedBy=multi-user.target

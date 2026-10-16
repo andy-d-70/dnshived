@@ -1,0 +1,53 @@
+#!/bin/bash
+# dnshived SNMP extend script: node health.
+# Install: copy to /usr/local/bin/ on each cluster node.
+# Configure: extend dnshived-health /usr/local/bin/dnshived-node-health
+# Output: state, serving count, epoch, generation, incarnation, version.
+#
+# snmpd's Debian-snmp user cannot read cluster.json, so scheme and token
+# come from /etc/dnshived/snmp-monitor.conf ("scheme="/"token=" lines,
+# root:Debian-snmp 0640, a readonly-role token); cluster.json is the
+# fallback when run as root.
+
+SNMP_CONF="/etc/dnshived/snmp-monitor.conf"
+CLUSTER_CONF="/etc/dnshived/cluster.json"
+if [ -r "$SNMP_CONF" ]; then
+    SCHEME=$(grep '^scheme=' "$SNMP_CONF" | head -1 | cut -d= -f2-)
+    TOKEN=$(grep '^token=' "$SNMP_CONF" | head -1 | cut -d= -f2-)
+else
+    SCHEME="http"
+    TOKEN=""
+    if grep -q '"tls_cert"' "$CLUSTER_CONF" 2>/dev/null; then
+        SCHEME="https"
+    fi
+    TOKEN=$(grep -o '"token"[[:space:]]*:[[:space:]]*"[^"]*"' "$CLUSTER_CONF" 2>/dev/null | head -1 | sed 's/.*"token"[[:space:]]*:[[:space:]]*"//;s/"$//')
+fi
+CURL_TLS_OPT=""
+[ "$SCHEME" = "https" ] && CURL_TLS_OPT="-k"
+AUTH_OPT=()
+[ -n "$TOKEN" ] && AUTH_OPT=(-H "Authorization: Bearer $TOKEN")
+
+API="$SCHEME://127.0.0.1:9443/api/v1/status"
+DATA=$(curl -s $CURL_TLS_OPT "${AUTH_OPT[@]}" --connect-timeout 2 "$API" 2>/dev/null)
+
+if [ -z "$DATA" ]; then
+    echo "UNREACHABLE"
+    echo "0"
+    echo "0"
+    echo "0"
+    echo "0"
+    echo "unknown"
+    exit 0
+fi
+
+# Flat JSON extraction; head -1 keeps one value per key even if the key
+# appears more than once.
+extract() { echo "$DATA" | grep -o "\"$1\":[^,}]*" | head -1 | sed 's/.*://;s/"//g;s/ //g'; }
+extract_array_len() { echo "$DATA" | grep -o "\"$1\":\[[^]]*\]" | head -1 | tr ',' '\n' | grep -c '"' 2>/dev/null || echo "0"; }
+
+echo "$(extract state)"
+echo "$(extract_array_len serving)"
+echo "$(extract epoch)"
+echo "$(extract generation)"
+echo "$(extract incarnation)"
+echo "$(extract version)"

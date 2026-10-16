@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640">
+<style>
+  .nd { fill: #1F2937; }
+  .mesh { stroke: #9CA3AF; }
+  .ring-dim { stroke: #D1D5DB; }
+  .auth { stroke: #0D9488; }
+  .wm { fill: #1F2937; }
+  .bg { fill: #FAFAFA; }
+  @media (prefers-color-scheme: dark) {
+    .nd { fill: #D1D5DB; }
+    .mesh { stroke: #6B7280; }
+    .ring-dim { stroke: #374151; }
+    .auth { stroke: #14B8A6; }
+    .wm { fill: #E5E7EB; }
+    .bg { fill: #111827; }
+  }
+</style>
+<rect width="1280" height="640" class="bg"/>
+<line x1="640" y1="140" x2="540" y2="310" class="mesh" stroke-width="2"/>
+<line x1="640" y1="140" x2="740" y2="310" class="mesh" stroke-width="2"/>
+<line x1="540" y1="310" x2="740" y2="310" class="mesh" stroke-width="2"/>
+<path d="M 535 304 A 120 120 0 0 1 640 128" fill="none" class="ring-dim" stroke-width="3" stroke-linecap="round"/>
+<path d="M 745 304 A 120 120 0 0 1 535 304" fill="none" class="ring-dim" stroke-width="3" stroke-linecap="round"/>
+<path d="M 640 128 A 120 120 0 0 1 745 304" fill="none" class="auth" stroke-width="4.5" stroke-linecap="round"/>
+<circle cx="640" cy="140" r="12" class="nd" stroke="none"/>
+<circle cx="540" cy="310" r="12" class="nd" stroke="none"/>
+<circle cx="740" cy="310" r="12" class="nd" stroke="none"/>
+<circle cx="640" cy="230" r="2.5" class="nd" opacity="0.2" stroke="none"/>
+<text class="wm" x="640" y="430" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="52" font-weight="500" letter-spacing="-1">dnshived</text>
+<text class="wm" x="640" y="475" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="18" font-weight="400" opacity="0.5">clustered DNS/DHCP reliability appliance</text>
+</svg>

@@ -1,0 +1,36 @@
+[Unit]
+Description=dnshived dnsmasq instance for scope %i (DNS+DHCP, permanent)
+After=network-online.target
+Wants=network-online.target
+# Used for the central core-dhcp/core-dns instances. Started by the agent,
+# never enabled at boot. The start limit bounds a persistent failure (10
+# in 5 minutes).
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+# No pid file: systemd tracks the process, and /run is not writable for
+# dnshived.
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --pid-file= --conf-file=/var/lib/dnshived/dnsmasq-%i.conf
+# SIGHUP re-reads only the hosts/opts/addn-hosts files, never the main
+# config; used to apply reservation and lease-sync changes without a
+# restart.
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2
+
+# Short stop timeout: SIGKILL after 2 seconds.
+TimeoutStopSec=2s
+
+# Never root: binds :53/:67 (NET_BIND_SERVICE), DHCP and the ping check
+# (NET_ADMIN, NET_RAW); its files in /var/lib/dnshived are its own. Root
+# without dac_override (which dnsmasq_t lacks under SELinux) could not
+# read them. No NoNewPrivileges: it blocks the transition to dnsmasq_t.
+User=dnshived
+Group=dnshived
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
+
+[Install]
+WantedBy=multi-user.target

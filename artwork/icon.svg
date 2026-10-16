@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+<style>
+  .nd { fill: #1F2937; }
+  .mesh { stroke: #9CA3AF; }
+  .ring-dim { stroke: #D1D5DB; }
+  .auth { stroke: #0D9488; }
+  @media (prefers-color-scheme: dark) {
+    .nd { fill: #D1D5DB; }
+    .mesh { stroke: #6B7280; }
+    .ring-dim { stroke: #374151; }
+    .auth { stroke: #14B8A6; }
+  }
+</style>
+<line x1="100" y1="38" x2="42" y2="138" class="mesh" stroke-width="1.8"/>
+<line x1="100" y1="38" x2="158" y2="138" class="mesh" stroke-width="1.8"/>
+<line x1="42" y1="138" x2="158" y2="138" class="mesh" stroke-width="1.8"/>
+<path d="M 38 134 A 72 72 0 0 1 100 26" fill="none" class="ring-dim" stroke-width="2.5" stroke-linecap="round"/>
+<path d="M 162 134 A 72 72 0 0 1 38 134" fill="none" class="ring-dim" stroke-width="2.5" stroke-linecap="round"/>
+<path d="M 100 26 A 72 72 0 0 1 162 134" fill="none" class="auth" stroke-width="3.5" stroke-linecap="round"/>
+<circle cx="100" cy="38" r="9" class="nd" stroke="none"/>
+<circle cx="42" cy="138" r="9" class="nd" stroke="none"/>
+<circle cx="158" cy="138" r="9" class="nd" stroke="none"/>
+<circle cx="100" cy="88" r="2" class="nd" opacity="0.2" stroke="none"/>
+</svg>

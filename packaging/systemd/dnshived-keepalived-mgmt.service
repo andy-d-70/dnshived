@@ -1,0 +1,22 @@
+[Unit]
+Description=dnshived management VIP (web UI access, independent of dnshived.service)
+After=network-online.target
+Wants=network-online.target
+# Boot-enabled and self-contained: static-priority VRRP for the mgmt VIP,
+# no gate or token lifecycle. Restart= also covers the first boot, before
+# dnshived has rendered keepalived-mgmt.conf.
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/keepalived -n --dont-respawn -f /var/lib/dnshived/keepalived-mgmt.conf --pid /run/dnshived/keepalived-mgmt.pid --vrrp_pid /run/dnshived/keepalived-mgmt-vrrp.pid
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=2s
+
+# Root, but only the capabilities VRRP and the VIPs need. No
+# NoNewPrivileges: under SELinux it blocks the transition to keepalived_t.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BROADCAST CAP_KILL
+
+[Install]
+WantedBy=multi-user.target

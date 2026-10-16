@@ -1,0 +1,4 @@
+# Enforce LF line endings in the repo regardless of OS.
+# Without this, Windows git converts to CRLF on commit,
+# which makes gofmt fail on the Linux CI runner.
+* text=auto eol=lf

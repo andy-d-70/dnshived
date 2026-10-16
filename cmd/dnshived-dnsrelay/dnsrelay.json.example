@@ -1,0 +1,32 @@
+{
+  "listen_addr": "0.0.0.0:53",
+  "upstreams": ["127.0.0.42"],
+  "allowed_interfaces": ["ens19.42", "ens20.10"],
+  "rate_limit": 100,
+  "rate_burst": 200,
+  "rate_limit_scope": "subnet",
+  "interface_rate_limit": 1000,
+  "interface_rate_burst": 2000,
+  "upstream_socket_pool_size": 16,
+  "cache_size": 5000,
+  "cache_max_bytes": 8388608,
+  "max_outstanding": 10000,
+  "max_tcp_connections": 1000,
+  "max_tcp_per_source": 10,
+  "timeout": "2s",
+  "tcp_timeout": "5s",
+  "max_packet_size": 4096,
+  "addr_refresh_interval": "2s",
+  "interface_acls": {
+    "ens20.10": {
+      "rate_limit": 20,
+      "rate_burst": 40,
+      "denied_qtypes": ["ANY"],
+      "denied_domains": ["blocked.example"]
+    }
+  },
+  "rewrites": [
+    {"match": "printer.office.local", "answer": "192.168.42.53", "ttl": 300},
+    {"match": "*.dante.local", "rewrite": "dante.internal.test"}
+  ]
+}

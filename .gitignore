@@ -1,0 +1,103 @@
+# Local dev-lab scripts, not part of the build.
+/tools/benchmark.sh
+/tools/chaos-gauntlet.sh
+/tools/deploy-update.sh
+/tools/dhcp-hammer.py
+/tools/dhcp-lease-load.py
+/tools/dns-hammer.py
+/tools/dnshived-config
+/tools/gen-cluster.py
+/tools/inject-identity.py
+/tools/lab-deploy-vm.sh
+/tools/lab-monitor.py
+/tools/migrate-role-names.py
+/tools/penetrator-setup.sh
+/tools/probe-parallel-rig.sh
+/tools/random-vlan-load-test.py
+/tools/real-world-bench.sh
+/tools/snmp/deploy-snmp.sh
+/tools/stress-bench-gemini.sh
+/tools/stress-bench.sh
+/tools/test-scenarios.sh
+/tools/top.sh
+/tools/wizard-scale-test.py
+/tools/lab-found-cluster.py
+/tools/lab-add-scopes.py
+
+# Build output
+/builds/
+/rpmbuild/
+/dnshived
+/dnshivectl
+/dnshived-helper
+/dnshived-status
+/dnshived-top
+/dnshived-validate
+/dnshived-web
+/dnshived-web-helper
+/dnshived-dhcp-probe
+/dnshived-dnsrelay-render
+/dnshived-probe
+/dnshived-probe-helper
+/dnshived-relay
+# cmd/dnshived-dnsrelay is its own module; `go build .` there names the
+# binary dnsrelay.
+/cmd/dnshived-dnsrelay/dnsrelay
+/cmd/dnshived-dnsrelay/dnshived-dnsrelay
+/cmd/dnshived-dnsrelay-render/dnshived-dnsrelay-render
+*.exe
+
+# Release tarballs
+*.tar.gz
+*.tgz
+
+# Debian build artifacts
+/debian/dnshived/
+/debian/dnshived-probe/
+/debian/.debhelper/
+/debian/files
+/debian/*.substvars
+/debian/*.log
+/debian/debhelper-build-stamp
+/debian/*.debhelper
+/debian/*.debhelper.log
+*.deb
+*.buildinfo
+*.changes
+
+# Go
+/vendor/
+
+# Editor / OS noise
+*.swp
+*~
+.DS_Store
+.idea/
+.vscode/
+
+# Runtime state (should never be committed; lives in /var/lib/dnshived)
+*.incarnation
+*.fencing
+
+# Local test rig state (tools/dhcp-gate-rig.sh)
+/run/
+
+# Claude Code — per-user local settings, not shareable
+.claude/settings.local.json
+# Claude Code project instructions, kept local
+/CLAUDE.md
+
+# Local API token for tools/top.sh — a real secret, never committed
+/.dnshived-readonly-token
+
+# Local plan/notes, never committed
+/PLAN.md
+
+# Local prototypes, not shared
+/donotshareyet/
+
+# Local log of actions taken by Claude Code, never committed
+/claude_commands_executed.txt
+/tools/commentshrink/
+/tools/web-screenshots.py
+/removed_comments.txt

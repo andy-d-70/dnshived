@@ -1,0 +1,30 @@
+[Unit]
+Description=dnshived-web operator interface
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/dnshived-web -config /etc/dnshived/web.json
+Restart=on-failure
+RestartSec=5
+
+# Never runs as root: serves :8080/:8443 and redirect-only :80/:443 (the
+# one capability below). Every file it uses (web.json, webui-users.json,
+# the TLS pair, web-templates.json) must be owned by dnshived:dnshived.
+User=dnshived
+Group=dnshived
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+
+# Reads /etc/dnshived/webui-users.json and /etc/dnshived/web.json only —
+# never touches any node's cluster.json (see docs/SECURITY.md, "Web UI").
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictRealtime=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

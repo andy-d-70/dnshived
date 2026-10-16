@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300">
+<style>
+  .nd { fill: #1F2937; }
+  .mesh { stroke: #9CA3AF; }
+  .ring-dim { stroke: #D1D5DB; }
+  .auth { stroke: #0D9488; }
+  .wm { fill: #1F2937; }
+  .st { fill: #6B7280; }
+  @media (prefers-color-scheme: dark) {
+    .nd { fill: #D1D5DB; }
+    .mesh { stroke: #6B7280; }
+    .ring-dim { stroke: #374151; }
+    .auth { stroke: #14B8A6; }
+    .wm { fill: #E5E7EB; }
+    .st { fill: #9CA3AF; }
+  }
+</style>
+<line x1="200" y1="48" x2="128" y2="168" class="mesh" stroke-width="1.8"/>
+<line x1="200" y1="48" x2="272" y2="168" class="mesh" stroke-width="1.8"/>
+<line x1="128" y1="168" x2="272" y2="168" class="mesh" stroke-width="1.8"/>
+<path d="M 125 163 A 84 84 0 0 1 200 40" fill="none" class="ring-dim" stroke-width="2.5" stroke-linecap="round"/>
+<path d="M 275 163 A 84 84 0 0 1 125 163" fill="none" class="ring-dim" stroke-width="2.5" stroke-linecap="round"/>
+<path d="M 200 40 A 84 84 0 0 1 275 163" fill="none" class="auth" stroke-width="3.5" stroke-linecap="round"/>
+<circle cx="200" cy="48" r="10" class="nd" stroke="none"/>
+<circle cx="128" cy="168" r="10" class="nd" stroke="none"/>
+<circle cx="272" cy="168" r="10" class="nd" stroke="none"/>
+<circle cx="200" cy="108" r="2" class="nd" opacity="0.2" stroke="none"/>
+<text class="wm" x="200" y="230" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="28" font-weight="500" letter-spacing="-0.5">dnshived</text>
+<text class="st" x="200" y="254" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="9" font-weight="400" letter-spacing="2.5">AUTHORITY WITHOUT CONTRADICTION</text>
+</svg>

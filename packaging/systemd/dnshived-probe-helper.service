@@ -1,0 +1,33 @@
+[Unit]
+Description=dnshived-probe-helper (privileged restart companion for dnshived-probe)
+Before=dnshived-probe.service
+After=network.target
+# Start limit as in dnshived-probe.service.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+# Same /run/dnshived mode as dnshived-helper.service sets (root:dnshived
+# 1775); "+" runs the setup outside the capability limits below.
+ExecStartPre=+/bin/mkdir -p /run/dnshived
+ExecStartPre=+/bin/chgrp dnshived /run/dnshived
+ExecStartPre=+/bin/chmod 1775 /run/dnshived
+ExecStart=/usr/local/bin/dnshived-probe-helper --socket /run/dnshived/probe-helper.sock
+Restart=on-failure
+RestartSec=2
+
+# Runs as root to restart dnshived-probe.service; Group=dnshived so
+# dnshived-probe can reach the socket.
+Group=dnshived
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+# ip link/addr (NET_ADMIN); writes probe.json and sweeps /etc/dnshived and
+# /var/lib/dnshived-probe, both owned by dnshived (DAC_OVERRIDE, CHOWN,
+# FOWNER). systemctl and journalctl need none.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

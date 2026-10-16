@@ -1,0 +1,35 @@
+#!/bin/bash
+# dnshived SNMP extend script: node scope data.
+# Install: copy to /usr/local/bin/ on each cluster node.
+# Configure: extend dnshived-scopes /usr/local/bin/dnshived-node-scopes
+# Output: one line per serving scope.
+# Scheme and token as in dnshived-node-health.
+
+SNMP_CONF="/etc/dnshived/snmp-monitor.conf"
+CLUSTER_CONF="/etc/dnshived/cluster.json"
+if [ -r "$SNMP_CONF" ]; then
+    SCHEME=$(grep '^scheme=' "$SNMP_CONF" | head -1 | cut -d= -f2-)
+    TOKEN=$(grep '^token=' "$SNMP_CONF" | head -1 | cut -d= -f2-)
+else
+    SCHEME="http"
+    TOKEN=""
+    if grep -q '"tls_cert"' "$CLUSTER_CONF" 2>/dev/null; then
+        SCHEME="https"
+    fi
+    TOKEN=$(grep -o '"token"[[:space:]]*:[[:space:]]*"[^"]*"' "$CLUSTER_CONF" 2>/dev/null | head -1 | sed 's/.*"token"[[:space:]]*:[[:space:]]*"//;s/"$//')
+fi
+CURL_TLS_OPT=""
+[ "$SCHEME" = "https" ] && CURL_TLS_OPT="-k"
+AUTH_OPT=()
+[ -n "$TOKEN" ] && AUTH_OPT=(-H "Authorization: Bearer $TOKEN")
+
+API="$SCHEME://127.0.0.1:9443/api/v1/status"
+DATA=$(curl -s $CURL_TLS_OPT "${AUTH_OPT[@]}" --connect-timeout 2 "$API" 2>/dev/null)
+
+if [ -z "$DATA" ]; then
+    echo "UNREACHABLE"
+    exit 0
+fi
+
+# Extract serving array values
+echo "$DATA" | grep -o '"serving":\[[^]]*\]' | grep -o '"[a-zA-Z0-9_-]*"' | sed 's/"//g' | grep -v "serving"

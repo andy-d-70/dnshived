@@ -1,0 +1,77 @@
+#!/bin/sh
+set -e
+
+if ! getent group dnshived >/dev/null; then
+    addgroup --system dnshived
+fi
+if ! getent passwd dnshived >/dev/null; then
+    adduser --system --home /var/lib/dnshived --shell /usr/sbin/nologin \
+            --ingroup dnshived dnshived
+fi
+
+mkdir -p /etc/dnshived
+mkdir -p /var/lib/dnshived
+mkdir -p /var/log/dnshived
+# NOTE: /run/dnshived is NOT created here — it is tmpfs, recreated each
+# boot by dnshived-helper.service's own ExecStartPre (mkdir+chmod).
+
+chown dnshived:dnshived /var/lib/dnshived /var/log/dnshived
+
+# A fresh install does not seed /etc/dnshived/cluster.json: without one
+# the node boots into bootstrap mode (setup wizard and join code).
+# cluster.json.example ships as schema reference only.
+chown dnshived:dnshived /etc/dnshived
+chown dnshived:dnshived /etc/dnshived/cluster.json 2>/dev/null || true
+chmod 0640 /etc/dnshived/cluster.json 2>/dev/null || true
+
+# Environment checks before anything starts (required packages, no
+# conflicting service on dnshived's ports); a failure aborts the install.
+/usr/local/bin/dnshived-preflight
+
+# Remove the old sudoers.d rule for dnshived-web's self-restart;
+# dnshived-web-helper.service replaced it.
+rm -f /etc/sudoers.d/dnshived-web
+
+# The four always-on units are enabled and started by the generated code
+# below (debian/rules override_dh_installsystemd); the other eight are
+# agent- or operator-driven. probe.json is written only by
+# dnshived-probe-helper.
+#DEBHELPER#
+
+# Every daemon except dnshived-helper and keepalived runs as dnshived, so
+# everything under /etc/dnshived and /var/lib/dnshived belongs to it. Run
+# only while dnshived is stopped: a running pre-0.9.8.4 daemon (root)
+# would keep creating root-owned files. The lease socket an old root
+# daemon left in the sticky /run/dnshived would block the new one.
+fix_ownership() {
+    chown -R dnshived:dnshived /etc/dnshived /var/lib/dnshived
+    rm -f /run/dnshived/dhcp-lease.sock
+}
+
+# One ordered restart on configure, replacing debhelper's independent
+# restarts (-r in debian/rules): stop dnshived, fix ownership, restart the
+# helper, start dnshived again, or skip the stop/start if dnshived was not
+# running.
+if [ "$1" = "configure" ]; then
+    if deb-systemd-invoke is-active dnshived.service >/dev/null 2>&1; then
+        deb-systemd-invoke stop dnshived.service >/dev/null 2>&1 || true
+        fix_ownership
+        deb-systemd-invoke restart dnshived-helper.service >/dev/null 2>&1 || true
+        deb-systemd-invoke start dnshived.service >/dev/null 2>&1 || true
+    else
+        fix_ownership
+        deb-systemd-invoke restart dnshived-helper.service >/dev/null 2>&1 || true
+    fi
+fi
+
+# dnshived-web and its helper kept running through the upgrade (-r);
+# restart each only if it is active.
+if [ "$1" = "configure" ]; then
+    for u in dnshived-web.service dnshived-web-helper.service; do
+        if deb-systemd-invoke is-active "$u" >/dev/null 2>&1; then
+            deb-systemd-invoke restart "$u" >/dev/null 2>&1 || true
+        fi
+    done
+fi
+
+exit 0

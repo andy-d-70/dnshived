@@ -1,0 +1,43 @@
+#!/bin/bash
+# dnshived SNMP extend / service check: cluster-wide health, run from one
+# monitoring host. Nagios-compatible exit codes. Uses dnshived-status if
+# installed, else curl.
+
+ADDR="${1:-}"
+if [ -z "$ADDR" ]; then
+    echo "UNKNOWN - usage: $0 <node-address>:9443"
+    exit 3
+fi
+STATUS_BIN="${DNSHIVED_STATUS:-dnshived-status}"
+
+if command -v "$STATUS_BIN" >/dev/null 2>&1; then
+    exec "$STATUS_BIN" --addr "$ADDR"
+fi
+
+# curl fallback: with TLS/api_tokens set DNSHIVED_SCHEME=https and
+# DNSHIVED_TOKEN (no local cluster.json on a monitoring host).
+SCHEME="${DNSHIVED_SCHEME:-http}"
+CURL_TLS_OPT=""
+[ "$SCHEME" = "https" ] && CURL_TLS_OPT="-k"
+AUTH_OPT=()
+[ -n "${DNSHIVED_TOKEN:-}" ] && AUTH_OPT=(-H "Authorization: Bearer $DNSHIVED_TOKEN")
+
+DATA=$(curl -s $CURL_TLS_OPT "${AUTH_OPT[@]}" --connect-timeout 3 "$SCHEME://$ADDR/api/v1/status" 2>/dev/null)
+if [ -z "$DATA" ]; then
+    echo "CRITICAL - cannot reach $ADDR"
+    exit 2
+fi
+
+STATE=$(echo "$DATA" | grep -o '"state":"[^"]*"' | sed 's/.*"state":"//;s/"//')
+SERVING=$(echo "$DATA" | grep -o '"serving":\[[^]]*\]' | grep -o '"[a-zA-Z0-9_-]*"' | grep -v serving | wc -l)
+
+if [ "$STATE" = "STABLE" ]; then
+    echo "OK - $STATE, serving $SERVING scope(s)"
+    exit 0
+elif [ "$STATE" = "DEGRADED" ]; then
+    echo "WARNING - $STATE, serving $SERVING scope(s)"
+    exit 1
+else
+    echo "CRITICAL - $STATE, serving $SERVING scope(s)"
+    exit 2
+fi

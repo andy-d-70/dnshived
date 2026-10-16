@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Verify formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build (static, all shipped binaries)
+        run: |
+          mkdir -p builds
+          for b in dnshived dnshived-status dnshived-validate dnshived-top dnshived-helper dnshived-dhcp-probe dnshived-web; do
+            CGO_ENABLED=0 go build -ldflags "-s -w" -o builds/$b ./cmd/$b
+          done
+
+      - name: Build with race detector (smoke)
+        run: go build -race ./...

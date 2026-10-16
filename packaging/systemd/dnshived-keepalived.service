@@ -1,0 +1,21 @@
+[Unit]
+Description=dnshived keepalived (consolidated — every scope's vrrp_instance)
+After=network-online.target
+Wants=network-online.target
+# Started by the agent at plane construction and kept running; VRRP
+# priority decides the MASTER per scope. Never enabled at boot.
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/keepalived -n --dont-respawn -f /var/lib/dnshived/keepalived.conf --pid /run/dnshived/keepalived.pid --vrrp_pid /run/dnshived/keepalived-vrrp.pid
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=2s
+
+# Root, but only the capabilities VRRP and the VIPs need. No
+# NoNewPrivileges: under SELinux it blocks the transition to keepalived_t.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BROADCAST CAP_KILL
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,86 @@
+#!/usr/bin/make -f
+export DH_VERBOSE=1
+export CGO_ENABLED=0
+
+# VERSION comes from the root Makefile's VERSION= line, not from the
+# changelog's Debian-style version, so a .deb binary and a `make build`
+# binary report the same version string.
+VERSION := $(shell grep '^VERSION=' $(CURDIR)/Makefile | cut -d= -f2)
+GIT_HASH := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+# FULL_VERSION mirrors the root Makefile's derivation from the
+# debian/changelog top entry.
+FULL_VERSION := $(shell \
+	top=$$(grep -m1 '^dnshived' $(CURDIR)/debian/changelog); \
+	if echo "$$top" | grep -q 'dev-[0-9]'; then \
+		dev=$$(echo "$$top" | sed -E 's/.*dev-([0-9]+).*/\1/'); \
+		echo "$(VERSION)-$$dev+$(GIT_HASH)"; \
+	else \
+		echo "$(VERSION)+$(GIT_HASH)"; \
+	fi)
+
+BINARIES := dnshived dnshived-helper dnshived-web dnshived-web-helper dnshived-top dnshived-status dnshived-validate dnshived-dhcp-probe dnshived-relay dnshived-dhcp-lease-hook dnshived-dnsrelay-render dnshived-preflight
+# The probe binaries ship in the same dnshived package; every daemon
+# starts in bootstrap mode and can sit unconfigured.
+PROBE_BINARIES := dnshived-probe dnshived-probe-helper
+# dnshived-dnsrelay is its own Go module (keeps the root module
+# dependency-free), so it is built from its own directory and copied into
+# the same package.
+DNSRELAY_BINARY := dnshived-dnsrelay
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	for b in $(BINARIES) $(PROBE_BINARIES); do \
+		go build -ldflags "-s -w -X main.version=$(FULL_VERSION)" -o builds/$$b ./cmd/$$b || exit 1; \
+	done
+	cd cmd/$(DNSRELAY_BINARY) && go build -ldflags "-s -w -X main.version=$(FULL_VERSION)" -o ../../builds/$(DNSRELAY_BINARY) .
+
+override_dh_auto_install:
+	install -d debian/dnshived/usr/local/bin
+	for b in $(BINARIES) $(PROBE_BINARIES) $(DNSRELAY_BINARY); do \
+		install -m 0755 builds/$$b debian/dnshived/usr/local/bin/$$b || exit 1; \
+	done
+	install -m 0755 tools/probe-host-vlans.sh debian/dnshived/usr/local/bin/probe-host-vlans.sh
+	install -d debian/dnshived/usr/local/share/doc/dnshived
+	install -m 0644 cluster.json.example debian/dnshived/usr/local/share/doc/dnshived/cluster.json.example
+	install -m 0644 cmd/dnshived-dnsrelay/dnsrelay.json.example debian/dnshived/usr/local/share/doc/dnshived/dnsrelay.json.example
+
+override_dh_auto_test:
+	# tests run on the build host; skip in packaging (no cluster here)
+
+# Installs to /usr/local/bin on purpose (docs/FREEZE.md Tier 1); lintian
+# warns about it.
+override_dh_auto_clean:
+	rm -f $(addprefix builds/,$(BINARIES) $(PROBE_BINARIES))
+	dh_auto_clean
+
+# dh_usrlocal hard-errors on files under /usr/local; skipped because the
+# install path is frozen (docs/FREEZE.md Tier 1).
+override_dh_usrlocal:
+
+# Enabled and started at install: dnshived, dnshived-helper,
+# dnshived-probe and dnshived-probe-helper (bootstrap mode when
+# unconfigured). The other eight units are --no-enable --no-start: the
+# agent starts keepalived, dnsmasq@ and the relays when a scope needs
+# them, an operator starts dnshived-web and its helper, and
+# dnshived-probe-vlans@ needs a host-specific instance argument.
+#
+# -r for dnshived and dnshived-helper: dnshived.service Requires= the
+# helper, so two independent restarts would run two overlapping daemon
+# lifecycles racing on the DHCP gate; postinst does one ordered restart
+# instead. -r for dnshived-web and its helper too, so postinst restarts a
+# running web UI instead of it being stopped and left down.
+override_dh_installsystemd:
+	dh_installsystemd -pdnshived -r --name=dnshived
+	dh_installsystemd -pdnshived -r --name=dnshived-helper
+	dh_installsystemd -pdnshived --no-enable --no-start -r --name=dnshived-web
+	dh_installsystemd -pdnshived --no-enable --no-start -r --name=dnshived-web-helper
+	dh_installsystemd -pdnshived --no-enable --no-start --name=dnshived-keepalived
+	dh_installsystemd -pdnshived --no-enable --no-start --name=dnshived-keepalived-mgmt
+	dh_installsystemd -pdnshived --no-enable --no-start --name=dnshived-dnsmasq@
+	dh_installsystemd -pdnshived --no-enable --no-start --name=dnshived-relay
+	dh_installsystemd -pdnshived --no-enable --no-start --name=dnshived-dnsrelay
+	dh_installsystemd -pdnshived --name=dnshived-probe
+	dh_installsystemd -pdnshived --name=dnshived-probe-helper
+	dh_installsystemd -pdnshived --no-enable --no-start --name=dnshived-probe-vlans@

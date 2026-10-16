@@ -1,0 +1,59 @@
+{
+  "schema_version": 2,
+
+  "cluster_id": "lab01",
+  "node_id": "dnshived1022",
+  "role": "core-1",
+  "control_addr": "192.168.0.22:9443",
+
+  "bind_addr": "",
+  "data_dir": "/var/lib/dnshived",
+  "psk": "your-cluster-psk-hex-string",
+
+  "dry_run": true,
+
+  "peers": [
+    "192.168.0.23:9443",
+    "192.168.0.24:9443"
+  ],
+
+  "tls_cert": "/etc/dnshived/tls/cert.pem",
+  "tls_key": "/etc/dnshived/tls/key.pem",
+
+  "api_tokens": [
+    { "name": "operator", "token": "your-api-token-hex", "role": "admin" },
+    { "name": "monitoring", "token": "your-readonly-token-hex", "role": "readonly" }
+  ],
+
+  "log_level": "auto",
+
+  "platform": {
+    "mgmt": "ens18",
+    "workers": ["ens19"]
+  },
+
+  "scopes": {
+    "office": {
+      "parent": "ens19",
+      "vlan_id": 100,
+      "vip": "192.168.100.1/24",
+      "node_ip": "192.168.100.22/24",
+      "dhcp_range": ["192.168.100.100", "192.168.100.200"],
+      "gateway": "192.168.100.1",
+      "upstream": ["1.1.1.1", "8.8.8.8"],
+      "vrrp_id": 51,
+      "preferred_worker": "core-1"
+    },
+    "av-dante": {
+      "parent": "ens19",
+      "vlan_id": 200,
+      "vip": "10.200.0.1/24",
+      "node_ip": "10.200.0.22/24",
+      "dhcp_range": ["10.200.0.100", "10.200.0.200"],
+      "gateway": "10.200.0.1",
+      "upstream": ["1.1.1.1"],
+      "vrrp_id": 52,
+      "preferred_worker": "core-2"
+    }
+  }
+}

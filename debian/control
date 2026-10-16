@@ -1,0 +1,43 @@
+Source: dnshived
+Section: net
+Priority: optional
+Maintainer: Andreas Dunkl <andreas@dunkl.net>
+Build-Depends: debhelper-compat (= 13), golang-go (>= 2:1.21)
+Standards-Version: 4.7.0
+Homepage: https://github.com/andy-d-70/dnshived
+Vcs-Git: https://github.com/andy-d-70/dnshived.git
+
+Package: dnshived
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, systemd, adduser, iproute2
+Recommends: dnsmasq-base, keepalived, nftables
+Description: Clustered DNS/DHCP reliability appliance
+ dnshived is a lightweight, deterministic HA DNS/DHCP platform
+ for VLAN-heavy networks, AV/IoT environments, and SMB datacenters.
+ .
+ Every core node is symmetric (core-1/core-2/core-3); ownership is
+ gated by a five-part safety predicate (quorum, authoritative
+ desired state, valid lease, unfenced token, arbiter-granted witness) so a
+ scope is never served by two nodes at once. The same package installs on
+ every node, including probe hosts — real role is set purely by which
+ config file ends up written (/etc/dnshived/cluster.json for a core
+ role, /etc/dnshived/probe.json for a probe), never by which binaries
+ happen to be present. dnsmasq/keepalived/nftables are Recommends, not
+ hard Depends, since a probe-only node never needs them.
+ .
+ Includes the privileged helper (dnshived-helper), the standalone operator
+ web UI (dnshived-web), the interactive console (dnshived-top), a
+ Nagios-compatible monitor (dnshived-status), the invariant validation
+ framework (dnshived-validate), a DHCP dual-active detector
+ (dnshived-dhcp-probe), a BOOTP/DHCP relay agent (dnshived-relay), a DNS
+ relay (dnshived-dnsrelay), and the probe host itself (dnshived-probe +
+ its privileged companion dnshived-probe-helper) — none of the
+ non-always-on units start by default, all are opt-in/config-driven.
+ .
+ Every bootstrap-capable daemon (dnshived, dnshived-helper, dnshived-probe,
+ dnshived-probe-helper) is enabled and started on a fresh install,
+ sitting in its own independent, unauthenticated bootstrap mode until
+ something configures it. Configuring one role (writing cluster.json OR
+ probe.json) stops and disables whichever OTHER role's daemon pair is
+ now irrelevant on this same host — a node can never simultaneously
+ believe it's both a core role and a probe.

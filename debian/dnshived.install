@@ -1,0 +1,12 @@
+packaging/systemd/dnshived.service usr/lib/systemd/system/
+packaging/systemd/dnshived-helper.service usr/lib/systemd/system/
+packaging/systemd/dnshived-web.service usr/lib/systemd/system/
+packaging/systemd/dnshived-keepalived.service usr/lib/systemd/system/
+packaging/systemd/dnshived-keepalived-mgmt.service usr/lib/systemd/system/
+packaging/systemd/dnshived-dnsmasq@.service usr/lib/systemd/system/
+packaging/systemd/dnshived-relay.service usr/lib/systemd/system/
+packaging/systemd/dnshived-dnsrelay.service usr/lib/systemd/system/
+packaging/systemd/dnshived-web-helper.service usr/lib/systemd/system/
+packaging/systemd/dnshived-probe.service usr/lib/systemd/system/
+packaging/systemd/dnshived-probe-helper.service usr/lib/systemd/system/
+packaging/systemd/dnshived-probe-vlans@.service usr/lib/systemd/system/

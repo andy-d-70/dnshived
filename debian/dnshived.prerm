@@ -1,0 +1,22 @@
+#!/bin/sh
+set -e
+
+# Units this package ships are stopped by the generated code below; it
+# does not know unit names from older package versions.
+#DEBHELPER#
+
+if [ "$1" = "remove" ] || [ "$1" = "upgrade" ]; then
+    if [ -d /run/systemd/system ]; then
+        # Stop per-scope dnshived-keepalived@*.service units left by old
+        # installs; they would compete for the VRRP IDs of the consolidated
+        # dnshived-keepalived.service.
+        for unit in $(systemctl list-units --no-legend --plain \
+                        'dnshived-keepalived@*.service' 2>/dev/null \
+                      | awk '{print $1}'); do
+            deb-systemd-invoke stop "$unit" || true
+            deb-systemd-helper disable "$unit" || true
+        done
+    fi
+fi
+
+exit 0
