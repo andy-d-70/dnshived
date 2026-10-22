@@ -66,7 +66,7 @@ func TestRenderMgmtVIPConfig_ReloadsOnlyWhenConfigChanges(t *testing.T) {
 	a := &Agent{dataDir: t.TempDir(), role: config.RoleCore1}
 	a.SetHelper(helper.NewClient(sock))
 	platform := &config.Platform{Mgmt: "eth0"}
-	vip := &config.MgmtVIPConfig{VIP: "192.168.0.230/24", VRRPID: 60}
+	vip := &config.MgmtVIPConfig{VIP: "192.0.2.230/24", VRRPID: 60}
 
 	steps := []struct {
 		name string
@@ -76,7 +76,7 @@ func TestRenderMgmtVIPConfig_ReloadsOnlyWhenConfigChanges(t *testing.T) {
 		{"first render", vip, "reload-mgmt-keepalived"},
 		{"unchanged save", vip, "ensure-mgmt-keepalived"},
 		{"unchanged save again", vip, "ensure-mgmt-keepalived"},
-		{"vip changed", &config.MgmtVIPConfig{VIP: "192.168.0.231/24", VRRPID: 60}, "reload-mgmt-keepalived"},
+		{"vip changed", &config.MgmtVIPConfig{VIP: "192.0.2.231/24", VRRPID: 60}, "reload-mgmt-keepalived"},
 	}
 	for _, s := range steps {
 		if err := a.RenderMgmtVIPConfig(s.vip, platform); err != nil {
@@ -94,7 +94,7 @@ func TestRenderMgmtVIPConfig_FailedReloadRetriedOnNextSave(t *testing.T) {
 	a := &Agent{dataDir: t.TempDir(), role: config.RoleCore1}
 	a.SetHelper(helper.NewClient(sock))
 	platform := &config.Platform{Mgmt: "eth0"}
-	vip := &config.MgmtVIPConfig{VIP: "192.168.0.230/24", VRRPID: 60}
+	vip := &config.MgmtVIPConfig{VIP: "192.0.2.230/24", VRRPID: 60}
 
 	rh.mu.Lock()
 	rh.fail = true

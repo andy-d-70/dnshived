@@ -385,12 +385,24 @@ func TestLoadPersistedScopes_MissingFileToleratedAsEmpty(t *testing.T) {
 }
 
 func TestHasIPv4(t *testing.T) {
-	v4 := &net.IPNet{IP: net.ParseIP("192.168.0.51"), Mask: net.CIDRMask(24, 32)}
+	v4 := &net.IPNet{IP: net.ParseIP("192.0.2.51"), Mask: net.CIDRMask(24, 32)}
 	v6 := &net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)}
 	if hasIPv4(nil) || hasIPv4([]net.Addr{v6}) {
 		t.Error("no IPv4 address must report false")
 	}
 	if !hasIPv4([]net.Addr{v6, v4}) {
 		t.Error("an IPv4 address must report true")
+	}
+}
+
+func TestExeReplaced(t *testing.T) {
+	for target, want := range map[string]bool{
+		"/usr/local/bin/dnshived-relay":           false,
+		"/usr/local/bin/dnshived-relay (deleted)": true,
+		"": false,
+	} {
+		if got := exeReplaced(target); got != want {
+			t.Errorf("exeReplaced(%q) = %v, want %v", target, got, want)
+		}
 	}
 }

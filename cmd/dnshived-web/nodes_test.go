@@ -23,11 +23,11 @@ import (
 func TestApplyRename_SetsDisplayNameOnMatchingCoreNode(t *testing.T) {
 	cfg := &WebConfig{
 		Nodes: []NodeConfig{
-			{Name: "core-1", Addr: "192.168.0.22:9443"},
-			{Name: "core-2", Addr: "192.168.0.23:9443"},
+			{Name: "core-1", Addr: "192.0.2.22:9443"},
+			{Name: "core-2", Addr: "192.0.2.23:9443"},
 		},
 	}
-	if !applyRename(cfg, "192.168.0.23:9443", "Office Worker") {
+	if !applyRename(cfg, "192.0.2.23:9443", "Office Worker") {
 		t.Fatal("applyRename = false, want true — worker-b's address matches")
 	}
 	if cfg.Nodes[0].DisplayName != "" {
@@ -46,9 +46,9 @@ func TestApplyRename_SetsDisplayNameOnMatchingCoreNode(t *testing.T) {
 // cfg.Nodes.
 func TestApplyRename_SetsDisplayNameOnMatchingProbeHost(t *testing.T) {
 	cfg := &WebConfig{
-		ProbeHosts: []NodeConfig{{Name: "probe", Addr: "192.168.0.42:9444"}},
+		ProbeHosts: []NodeConfig{{Name: "probe", Addr: "192.0.2.42:9444"}},
 	}
-	if !applyRename(cfg, "192.168.0.42:9444", "Lab Probe") {
+	if !applyRename(cfg, "192.0.2.42:9444", "Lab Probe") {
 		t.Fatal("applyRename = false, want true")
 	}
 	if cfg.ProbeHosts[0].DisplayName != "Lab Probe" {
@@ -60,10 +60,10 @@ func TestApplyRename_SetsDisplayNameOnMatchingProbeHost(t *testing.T) {
 // non-matching address changes nothing, in either list.
 func TestApplyRename_NoMatchReturnsFalseAndLeavesConfigUntouched(t *testing.T) {
 	cfg := &WebConfig{
-		Nodes:      []NodeConfig{{Name: "core-1", Addr: "192.168.0.22:9443"}},
-		ProbeHosts: []NodeConfig{{Name: "probe", Addr: "192.168.0.42:9444"}},
+		Nodes:      []NodeConfig{{Name: "core-1", Addr: "192.0.2.22:9443"}},
+		ProbeHosts: []NodeConfig{{Name: "probe", Addr: "192.0.2.42:9444"}},
 	}
-	if applyRename(cfg, "192.168.0.99:9443", "Nope") {
+	if applyRename(cfg, "192.0.2.99:9443", "Nope") {
 		t.Fatal("applyRename = true, want false — no address matches")
 	}
 	if cfg.Nodes[0].DisplayName != "" || cfg.ProbeHosts[0].DisplayName != "" {
@@ -72,9 +72,9 @@ func TestApplyRename_NoMatchReturnsFalseAndLeavesConfigUntouched(t *testing.T) {
 }
 
 func TestApplyRename_DoesNotMutateCallersOriginalSliceOnFailurePath(t *testing.T) {
-	original := &WebConfig{Nodes: []NodeConfig{{Name: "core-1", Addr: "192.168.0.22:9443"}}}
+	original := &WebConfig{Nodes: []NodeConfig{{Name: "core-1", Addr: "192.0.2.22:9443"}}}
 	newCfg := *original // the exact shallow-copy idiom both real call sites use
-	applyRename(&newCfg, "192.168.0.22:9443", "Renamed")
+	applyRename(&newCfg, "192.0.2.22:9443", "Renamed")
 
 	if original.Nodes[0].DisplayName != "" {
 		t.Errorf("original cfg's own Nodes slice was mutated through the shared backing array: DisplayName = %q, want empty", original.Nodes[0].DisplayName)
@@ -88,15 +88,15 @@ func TestApplyRename_DoesNotMutateCallersOriginalSliceOnFailurePath(t *testing.T
 // template-side helper directly.
 func TestProbeHostDisplayNames_BuildsAddrKeyedLookup(t *testing.T) {
 	hosts := []NodeConfig{
-		{Name: "probe", Addr: "192.168.0.42:9444", DisplayName: "Lab Probe"},
-		{Name: "probe2", Addr: "192.168.0.43:9444"},
+		{Name: "probe", Addr: "192.0.2.42:9444", DisplayName: "Lab Probe"},
+		{Name: "probe2", Addr: "192.0.2.43:9444"},
 	}
 	got := probeHostDisplayNames(hosts)
-	if got["192.168.0.42:9444"] != "Lab Probe" {
-		t.Errorf("got[42] = %q, want %q", got["192.168.0.42:9444"], "Lab Probe")
+	if got["192.0.2.42:9444"] != "Lab Probe" {
+		t.Errorf("got[42] = %q, want %q", got["192.0.2.42:9444"], "Lab Probe")
 	}
-	if got["192.168.0.43:9444"] != "" {
-		t.Errorf("got[43] = %q, want empty (no DisplayName set)", got["192.168.0.43:9444"])
+	if got["192.0.2.43:9444"] != "" {
+		t.Errorf("got[43] = %q, want empty (no DisplayName set)", got["192.0.2.43:9444"])
 	}
 }
 
@@ -158,10 +158,10 @@ func TestSiblingWebURL_UsesOwnSchemeAndPortNotCoreAPIs(t *testing.T) {
 		TLSCert:    "/etc/dnshived/webui-tls-cert.pem",
 		TLSKey:     "/etc/dnshived/webui-tls-key.pem",
 	}
-	n := NodeConfig{Name: "core-1", Addr: "192.168.0.22:9443"}
+	n := NodeConfig{Name: "core-1", Addr: "192.0.2.22:9443"}
 
 	got := siblingWebURL(n, cfg)
-	want := "https://192.168.0.22:8443"
+	want := "https://192.0.2.22:8443"
 	if got != want {
 		t.Errorf("siblingWebURL = %q, want %q", got, want)
 	}
@@ -169,10 +169,10 @@ func TestSiblingWebURL_UsesOwnSchemeAndPortNotCoreAPIs(t *testing.T) {
 
 func TestSiblingWebURL_PlainHTTPWhenTLSNotConfigured(t *testing.T) {
 	cfg := &WebConfig{ListenAddr: "0.0.0.0:8080"}
-	n := NodeConfig{Name: "core-1", Addr: "192.168.0.22:9443"}
+	n := NodeConfig{Name: "core-1", Addr: "192.0.2.22:9443"}
 
 	got := siblingWebURL(n, cfg)
-	want := "http://192.168.0.22:8080"
+	want := "http://192.0.2.22:8080"
 	if got != want {
 		t.Errorf("siblingWebURL = %q, want %q", got, want)
 	}
@@ -259,8 +259,8 @@ func TestOffboardNodeFormHandler_StagesWithoutTouchingLocalNodeList(t *testing.T
 	original := &WebConfig{
 		ListenAddr: "127.0.0.1:0",
 		Nodes: []NodeConfig{
-			{Name: "core-1", Addr: "192.168.0.22:9443"},
-			{Name: "core-2", Addr: "192.168.0.23:9443"},
+			{Name: "core-1", Addr: "192.0.2.22:9443"},
+			{Name: "core-2", Addr: "192.0.2.23:9443"},
 			{Name: "core-3", Addr: targetAddr},
 		},
 	}
@@ -302,8 +302,8 @@ func TestExecuteOffboardNode_RemovesTargetFromLocalNodeList(t *testing.T) {
 	original := &WebConfig{
 		ListenAddr: "127.0.0.1:0",
 		Nodes: []NodeConfig{
-			{Name: "core-1", Addr: "192.168.0.22:9443"},
-			{Name: "core-2", Addr: "192.168.0.23:9443"},
+			{Name: "core-1", Addr: "192.0.2.22:9443"},
+			{Name: "core-2", Addr: "192.0.2.23:9443"},
 			{Name: "core-3", Addr: targetAddr},
 		},
 	}
@@ -354,8 +354,8 @@ func TestExecuteOffboardNode_RefreshesClusterNodesOnEveryProbeHost(t *testing.T)
 	original := &WebConfig{
 		ListenAddr: "127.0.0.1:0",
 		Nodes: []NodeConfig{
-			{Name: "core-1", Addr: "192.168.0.22:9443"},
-			{Name: "core-2", Addr: "192.168.0.23:9443"},
+			{Name: "core-1", Addr: "192.0.2.22:9443"},
+			{Name: "core-2", Addr: "192.0.2.23:9443"},
 			{Name: "core-3", Addr: targetAddr},
 		},
 		ProbeHosts: []NodeConfig{
@@ -439,7 +439,7 @@ func TestWouldLeaveZeroCoreNodes(t *testing.T) {
 
 func TestOffboardNodeFormHandler_WarnsButStagesLastRemainingWorker(t *testing.T) {
 	t.Cleanup(clearNodeOp)
-	local := newLocalConfigServer(t, "core-3", "192.168.0.24:9443")
+	local := newLocalConfigServer(t, "core-3", "192.0.2.24:9443")
 	port := localPort(t, local)
 
 	cfgPath := filepath.Join(t.TempDir(), "web.json")
@@ -558,7 +558,7 @@ func TestReplaceNodeFormHandler_StagesWithoutTouchingLocalNodeList(t *testing.T)
 	}
 	ref := newConfigRef(original)
 
-	form := url.Values{"role": {"core-2"}, "addr": {"192.168.0.23:9443"}, "otp": {"JOIN-CODE"}}
+	form := url.Values{"role": {"core-2"}, "addr": {"192.0.2.23:9443"}, "otp": {"JOIN-CODE"}}
 	req := httptest.NewRequest(http.MethodPost, "/nodes/replace", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req = req.WithContext(context.WithValue(req.Context(), userContextKey{}, webauth.User{Name: "tester"}))
@@ -576,8 +576,8 @@ func TestReplaceNodeFormHandler_StagesWithoutTouchingLocalNodeList(t *testing.T)
 		t.Fatalf("cfg.Nodes changed at stage time: %v", ref.Load().Nodes)
 	}
 	op := currentNodeOp()
-	if op == nil || op.Kind != nodeOpReplace || op.Role != "core-2" || op.Addr != "192.168.0.23:9443" {
-		t.Fatalf("currentNodeOp() = %+v, want a staged replace of worker-b with 192.168.0.23:9443", op)
+	if op == nil || op.Kind != nodeOpReplace || op.Role != "core-2" || op.Addr != "192.0.2.23:9443" {
+		t.Fatalf("currentNodeOp() = %+v, want a staged replace of worker-b with 192.0.2.23:9443", op)
 	}
 }
 
@@ -602,7 +602,7 @@ func TestExecuteReplaceNode_AddsMissingRoleToLocalNodeList(t *testing.T) {
 	}
 	ref := newConfigRef(original)
 
-	_, err = executeReplaceNode(cfgPath, ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.168.0.23:80", JoinCode: "JOIN-CODE"}, false)
+	_, err = executeReplaceNode(cfgPath, ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.0.2.23:80", JoinCode: "JOIN-CODE"}, false)
 	if err != nil {
 		t.Fatalf("executeReplaceNode: %v", err)
 	}
@@ -617,7 +617,7 @@ func TestExecuteReplaceNode_AddsMissingRoleToLocalNodeList(t *testing.T) {
 	if found == nil {
 		t.Fatalf("worker-b was never added to cfg.Nodes after a successful replace — the exact invisible-on-Overview/false-UNSERVED bug this test guards against; live.Nodes = %v", live.Nodes)
 	}
-	wantAddr := net.JoinHostPort("192.168.0.23", survivorPort)
+	wantAddr := net.JoinHostPort("192.0.2.23", survivorPort)
 	if found.Addr != wantAddr {
 		t.Errorf("worker-b.Addr = %q, want %q (submitted addr's own host, survivor's own port convention)", found.Addr, wantAddr)
 	}
@@ -645,20 +645,20 @@ func TestExecuteReplaceNode_ForwardsOldAddrFromExistingNodeEntry(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		Nodes: []NodeConfig{
 			{Name: "core-1", Addr: survivorAddr, AdminToken: "shared-tok"},
-			{Name: "core-2", Addr: "192.168.0.22-OLD:9443", AdminToken: "shared-tok"},
+			{Name: "core-2", Addr: "192.0.2.22-OLD:9443", AdminToken: "shared-tok"},
 		},
 	}
 	ref := newConfigRef(original)
 
-	_, err := executeReplaceNode(cfgPath, ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.168.0.22-NEW:9443", JoinCode: "JOIN-CODE"}, false)
+	_, err := executeReplaceNode(cfgPath, ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.0.2.22-NEW:9443", JoinCode: "JOIN-CODE"}, false)
 	if err != nil {
 		t.Fatalf("executeReplaceNode: %v", err)
 	}
 
-	if gotBody["old_addr"] != "192.168.0.22-OLD:9443" {
-		t.Errorf("old_addr sent to cmd/dnshived = %v, want the existing worker-b entry's own address %q", gotBody["old_addr"], "192.168.0.22-OLD:9443")
+	if gotBody["old_addr"] != "192.0.2.22-OLD:9443" {
+		t.Errorf("old_addr sent to cmd/dnshived = %v, want the existing worker-b entry's own address %q", gotBody["old_addr"], "192.0.2.22-OLD:9443")
 	}
-	if gotBody["role"] != "core-2" || gotBody["addr"] != "192.168.0.22-NEW:9443" {
+	if gotBody["role"] != "core-2" || gotBody["addr"] != "192.0.2.22-NEW:9443" {
 		t.Errorf("unexpected role/addr in forwarded body: %+v", gotBody)
 	}
 }
@@ -691,7 +691,7 @@ func TestExecuteReplaceNode_RefreshesClusterNodesOnEveryProbeHost(t *testing.T) 
 		ListenAddr: "127.0.0.1:0",
 		Nodes: []NodeConfig{
 			{Name: "core-1", Addr: survivorAddr, AdminToken: "shared-tok"},
-			{Name: "core-2", Addr: "192.168.0.22-OLD:9443", AdminToken: "shared-tok"},
+			{Name: "core-2", Addr: "192.0.2.22-OLD:9443", AdminToken: "shared-tok"},
 		},
 		ProbeHosts: []NodeConfig{
 			{Name: "probe", Addr: probeAddr, AdminToken: "probe-tok"},
@@ -699,12 +699,12 @@ func TestExecuteReplaceNode_RefreshesClusterNodesOnEveryProbeHost(t *testing.T) 
 	}
 	ref := newConfigRef(original)
 
-	_, err = executeReplaceNode(cfgPath, ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.168.0.22-NEW:9443", JoinCode: "JOIN-CODE"}, false)
+	_, err = executeReplaceNode(cfgPath, ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.0.2.22-NEW:9443", JoinCode: "JOIN-CODE"}, false)
 	if err != nil {
 		t.Fatalf("executeReplaceNode: %v", err)
 	}
 
-	wantNewAddr := net.JoinHostPort("192.168.0.22-NEW", survivorPort)
+	wantNewAddr := net.JoinHostPort("192.0.2.22-NEW", survivorPort)
 	pushed := gotProbeBody["cluster_nodes"]
 	if len(pushed) != 2 {
 		t.Fatalf("probe host received %d cluster_nodes, want 2 (worker-a + the newly-replaced worker-b): %+v", len(pushed), pushed)
@@ -714,7 +714,7 @@ func TestExecuteReplaceNode_RefreshesClusterNodesOnEveryProbeHost(t *testing.T) 
 		if n.Name == "core-2" && n.Addr == wantNewAddr {
 			sawNewWorkerB = true
 		}
-		if n.Addr == "192.168.0.22-OLD:9443" {
+		if n.Addr == "192.0.2.22-OLD:9443" {
 			t.Errorf("probe host was pushed the OLD, just-replaced address %q — stale by construction", n.Addr)
 		}
 	}
@@ -727,7 +727,7 @@ func TestExecuteReplaceNode_PushedClusterNodesIncludesSelf(t *testing.T) {
 	var gotProbeBody map[string][]probeClusterNodePatch
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/config", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `{"role":"core-3","control_addr":"192.168.0.43:9443"}`)
+		fmt.Fprintf(w, `{"role":"core-3","control_addr":"192.0.2.43:9443"}`)
 	})
 	mux.HandleFunc("/api/v1/nodes/replace", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -752,7 +752,7 @@ func TestExecuteReplaceNode_PushedClusterNodesIncludesSelf(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		Nodes: []NodeConfig{
 			{Name: "core-1", Addr: survivorAddr, TLS: true, AdminToken: "shared-tok"},
-			{Name: "core-2", Addr: "192.168.0.22-OLD:9443", AdminToken: "shared-tok"},
+			{Name: "core-2", Addr: "192.0.2.22-OLD:9443", AdminToken: "shared-tok"},
 		},
 		ProbeHosts: []NodeConfig{
 			{Name: "probe", Addr: probeAddr, AdminToken: "probe-tok"},
@@ -760,7 +760,7 @@ func TestExecuteReplaceNode_PushedClusterNodesIncludesSelf(t *testing.T) {
 	}
 	ref := newConfigRef(original)
 
-	_, err := executeReplaceNode(cfgPath, ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.168.0.22-NEW:9443", JoinCode: "JOIN-CODE"}, false)
+	_, err := executeReplaceNode(cfgPath, ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.0.2.22-NEW:9443", JoinCode: "JOIN-CODE"}, false)
 	if err != nil {
 		t.Fatalf("executeReplaceNode: %v", err)
 	}
@@ -768,7 +768,7 @@ func TestExecuteReplaceNode_PushedClusterNodesIncludesSelf(t *testing.T) {
 	pushed := gotProbeBody["cluster_nodes"]
 	var sawSelf bool
 	for _, n := range pushed {
-		if n.Name == "core-3" && n.Addr == "192.168.0.43:9443" {
+		if n.Name == "core-3" && n.Addr == "192.0.2.43:9443" {
 			sawSelf = true
 		}
 	}
@@ -807,11 +807,11 @@ func TestExecuteReplaceNode_FallsBackToSelfWhenNodesIsEmpty(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "web.json")
 	original := &WebConfig{
 		ListenAddr: "127.0.0.1:0",
-		Nodes:      []NodeConfig{{Name: "core-2", Addr: "192.168.0.23-STALE:" + localPort(t, srv)}},
+		Nodes:      []NodeConfig{{Name: "core-2", Addr: "192.0.2.23-STALE:" + localPort(t, srv)}},
 	}
 	ref := newConfigRef(original)
 
-	_, err = executeReplaceNode(cfgPath, ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.168.0.23:9443", JoinCode: "JOIN-CODE"}, false)
+	_, err = executeReplaceNode(cfgPath, ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.0.2.23:9443", JoinCode: "JOIN-CODE"}, false)
 	if err != nil {
 		t.Fatalf("executeReplaceNode: %v", err)
 	}
@@ -819,7 +819,7 @@ func TestExecuteReplaceNode_FallsBackToSelfWhenNodesIsEmpty(t *testing.T) {
 		t.Fatal("executeReplaceNode never called self's own /api/v1/nodes/replace — self-fallback failed silently")
 	}
 
-	wantAddr := net.JoinHostPort("192.168.0.23", selfPort)
+	wantAddr := net.JoinHostPort("192.0.2.23", selfPort)
 	live := ref.Load()
 	found := false
 	for _, n := range live.Nodes {
@@ -849,17 +849,17 @@ func TestExecuteReplaceNode_UpdatesStaleAddrForExistingRole(t *testing.T) {
 		ListenAddr: "127.0.0.1:0",
 		Nodes: []NodeConfig{
 			{Name: "core-1", Addr: survivorAddr, AdminToken: "shared-tok"},
-			{Name: "core-2", Addr: "192.168.0.99:9443"}, // stale, dead address
+			{Name: "core-2", Addr: "192.0.2.99:9443"}, // stale, dead address
 		},
 	}
 	ref := newConfigRef(original)
 
-	_, err = executeReplaceNode(cfgPath, ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.168.0.23:9443", JoinCode: "JOIN-CODE"}, false)
+	_, err = executeReplaceNode(cfgPath, ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.0.2.23:9443", JoinCode: "JOIN-CODE"}, false)
 	if err != nil {
 		t.Fatalf("executeReplaceNode: %v", err)
 	}
 
-	wantAddr := net.JoinHostPort("192.168.0.23", survivorPort)
+	wantAddr := net.JoinHostPort("192.0.2.23", survivorPort)
 	live := ref.Load()
 	if len(live.Nodes) != 2 {
 		t.Fatalf("live.Nodes has %d entries, want exactly 2 (updated in place, not duplicated): %v", len(live.Nodes), live.Nodes)
@@ -873,7 +873,7 @@ func TestExecuteReplaceNode_UpdatesStaleAddrForExistingRole(t *testing.T) {
 
 func TestOffboardNodeFormHandler_AllowsSelfsOwnRole(t *testing.T) {
 	t.Cleanup(clearNodeOp)
-	local := newLocalConfigServer(t, "core-3", "192.168.0.22:9443")
+	local := newLocalConfigServer(t, "core-3", "192.0.2.22:9443")
 	port := localPort(t, local)
 
 	cfgPath := filepath.Join(t.TempDir(), "web.json")
@@ -979,7 +979,7 @@ func localPort(t *testing.T, srv *httptest.Server) string {
 }
 
 func TestSelfNodeConfig_QueriesTheLocalCoreDaemonOverLoopback(t *testing.T) {
-	local := newLocalConfigServer(t, "core-3", "192.168.0.22:9443")
+	local := newLocalConfigServer(t, "core-3", "192.0.2.22:9443")
 	port := localPort(t, local)
 
 	cfg := &WebConfig{Nodes: []NodeConfig{{Name: "core-1", Addr: "192.168.9.9:" + port, AdminToken: "shared-tok"}}}
@@ -991,14 +991,14 @@ func TestSelfNodeConfig_QueriesTheLocalCoreDaemonOverLoopback(t *testing.T) {
 	if self.Name != "core-3" {
 		t.Errorf("self.Name = %q, want %q", self.Name, "core-3")
 	}
-	if self.Addr != "192.168.0.22:9443" {
+	if self.Addr != "192.0.2.22:9443" {
 		t.Errorf("self.Addr = %q, want the real control_addr, not loopback", self.Addr)
 	}
 }
 
 func TestNodesSharedToken_FallsBackToCoordinatorWhenNodesEmpty(t *testing.T) {
 	cfg := &WebConfig{
-		CoordinatorNode: &NodeConfig{Name: "coordinator", Addr: "192.168.0.230:9443", AdminToken: "shared-tok"},
+		CoordinatorNode: &NodeConfig{Name: "coordinator", Addr: "192.0.2.230:9443", AdminToken: "shared-tok"},
 	}
 	if got := nodesSharedToken(cfg); got != "shared-tok" {
 		t.Errorf("nodesSharedToken = %q, want the CoordinatorNode's own token %q", got, "shared-tok")
@@ -1055,7 +1055,7 @@ func TestNodesSharedToken_EmptySelfAdminTokenFallsBackToNodes(t *testing.T) {
 }
 
 func TestSelfNodeConfig_CarriesSelfDisplayName(t *testing.T) {
-	local := newLocalConfigServer(t, "core-3", "192.168.0.22:9443")
+	local := newLocalConfigServer(t, "core-3", "192.0.2.22:9443")
 	port := localPort(t, local)
 
 	cfg := &WebConfig{
@@ -1084,7 +1084,7 @@ func TestSelfNodeConfig_UnreachableReturnsNotOK(t *testing.T) {
 func TestSelfNodeConfig_FailedSelfProbeNeverPoisonsRealPeerAtSameAddress(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"role":"core-2","control_addr":"192.168.0.23:9443"}`)
+		fmt.Fprint(w, `{"role":"core-2","control_addr":"192.0.2.23:9443"}`)
 	}))
 	defer srv.Close()
 	addr := strings.TrimPrefix(srv.URL, "http://")
@@ -1103,7 +1103,7 @@ func TestSelfNodeConfig_FailedSelfProbeNeverPoisonsRealPeerAtSameAddress(t *test
 }
 
 func TestMissingCoreRolesExcludingSelf_RemovesOwnRoleFromTheResult(t *testing.T) {
-	local := newLocalConfigServer(t, "core-3", "192.168.0.22:9443")
+	local := newLocalConfigServer(t, "core-3", "192.0.2.22:9443")
 	port := localPort(t, local)
 
 	cfg := &WebConfig{Nodes: []NodeConfig{
@@ -1118,7 +1118,7 @@ func TestMissingCoreRolesExcludingSelf_RemovesOwnRoleFromTheResult(t *testing.T)
 }
 
 func TestMissingCoreRolesExcludingSelf_StillReportsAGenuinelyMissingRole(t *testing.T) {
-	local := newLocalConfigServer(t, "core-3", "192.168.0.22:9443")
+	local := newLocalConfigServer(t, "core-3", "192.0.2.22:9443")
 	port := localPort(t, local)
 
 	cfg := &WebConfig{Nodes: []NodeConfig{{Name: "core-1", Addr: "192.168.9.9:" + port}}}
@@ -1131,7 +1131,7 @@ func TestMissingCoreRolesExcludingSelf_StillReportsAGenuinelyMissingRole(t *test
 }
 
 func TestNodesIncludingSelf_AddsOwnRowInCanonicalOrder(t *testing.T) {
-	local := newLocalConfigServer(t, "core-3", "192.168.0.22:9443")
+	local := newLocalConfigServer(t, "core-3", "192.0.2.22:9443")
 	port := localPort(t, local)
 
 	cfg := &WebConfig{Nodes: []NodeConfig{
@@ -1149,7 +1149,7 @@ func TestNodesIncludingSelf_AddsOwnRowInCanonicalOrder(t *testing.T) {
 			t.Errorf("got[%d].Name = %q, want %q (canonical order)", i, n.Name, want[i])
 		}
 	}
-	if got[2].Addr != "192.168.0.22:9443" {
+	if got[2].Addr != "192.0.2.22:9443" {
 		t.Errorf("self (core-3) entry's Addr = %q, want its real control_addr, not loopback", got[2].Addr)
 	}
 }
@@ -1163,13 +1163,13 @@ func TestNodesIncludingSelf_FallsBackWhenSelfUnresolvable(t *testing.T) {
 }
 
 func TestNodesIncludingSelf_DropsStaleSameNamedEntryFromCfgNodes(t *testing.T) {
-	local := newLocalConfigServer(t, "core-3", "192.168.0.27:9443")
+	local := newLocalConfigServer(t, "core-3", "192.0.2.27:9443")
 	port := localPort(t, local)
 
 	cfg := &WebConfig{Nodes: []NodeConfig{
 		{Name: "core-1", Addr: "192.168.9.9:" + port},
 		{Name: "core-2", Addr: "192.168.9.10:" + port},
-		{Name: "core-3", Addr: "192.168.0.24:9443"},
+		{Name: "core-3", Addr: "192.0.2.24:9443"},
 	}}
 
 	got := nodesIncludingSelf(cfg)
@@ -1180,8 +1180,8 @@ func TestNodesIncludingSelf_DropsStaleSameNamedEntryFromCfgNodes(t *testing.T) {
 	for _, n := range got {
 		if n.Name == "core-3" {
 			core3Count++
-			if n.Addr != "192.168.0.27:9443" {
-				t.Errorf("core-3 entry's Addr = %q, want self's real, live-resolved address (192.168.0.27:9443), not the stale cfg.Nodes leftover", n.Addr)
+			if n.Addr != "192.0.2.27:9443" {
+				t.Errorf("core-3 entry's Addr = %q, want self's real, live-resolved address (192.0.2.27:9443), not the stale cfg.Nodes leftover", n.Addr)
 			}
 		}
 	}
@@ -1191,7 +1191,7 @@ func TestNodesIncludingSelf_DropsStaleSameNamedEntryFromCfgNodes(t *testing.T) {
 }
 
 func TestRoleIsMissing_FalseForSelfsOwnRoleEvenWhenAbsentFromNodes(t *testing.T) {
-	local := newLocalConfigServer(t, "core-3", "192.168.0.22:9443")
+	local := newLocalConfigServer(t, "core-3", "192.0.2.22:9443")
 	port := localPort(t, local)
 
 	// cfg.Nodes lists only the two workers — exactly the real shape
@@ -1256,9 +1256,9 @@ func TestPushProbeSelfDecommission_RejectionAndUnreachableReturnNotes(t *testing
 
 func TestResolveProbeAddr_AlwaysForcesTheRealProbePort(t *testing.T) {
 	cases := map[string]string{
-		"192.168.0.42:80":   "192.168.0.42:9444",
-		"192.168.0.42:9443": "192.168.0.42:9444",
-		"192.168.0.42:9444": "192.168.0.42:9444",
+		"192.0.2.42:80":   "192.0.2.42:9444",
+		"192.0.2.42:9443": "192.0.2.42:9444",
+		"192.0.2.42:9444": "192.0.2.42:9444",
 	}
 	for in, want := range cases {
 		if got := resolveProbeAddr(in); got != want {
@@ -1268,20 +1268,20 @@ func TestResolveProbeAddr_AlwaysForcesTheRealProbePort(t *testing.T) {
 }
 
 func TestResolveAddrs_BareHostGetsConventionPort(t *testing.T) {
-	if got := resolveProbeAddr("192.168.0.54"); got != "192.168.0.54:9444" {
-		t.Errorf("resolveProbeAddr(bare host) = %q, want 192.168.0.54:9444", got)
+	if got := resolveProbeAddr("192.0.2.54"); got != "192.0.2.54:9444" {
+		t.Errorf("resolveProbeAddr(bare host) = %q, want 192.0.2.54:9444", got)
 	}
-	if got := resolveReplacementControlAddr("192.168.0.52", "192.168.0.51:9443"); got != "192.168.0.52:9443" {
-		t.Errorf("resolveReplacementControlAddr(bare host) = %q, want 192.168.0.52:9443", got)
+	if got := resolveReplacementControlAddr("192.0.2.52", "192.0.2.51:9443"); got != "192.0.2.52:9443" {
+		t.Errorf("resolveReplacementControlAddr(bare host) = %q, want 192.0.2.52:9443", got)
 	}
-	if got := resolveReplacementControlAddr("192.168.0.52:80", "192.168.0.51:9443"); got != "192.168.0.52:9443" {
-		t.Errorf("resolveReplacementControlAddr(bootstrap port) = %q, want 192.168.0.52:9443", got)
+	if got := resolveReplacementControlAddr("192.0.2.52:80", "192.0.2.51:9443"); got != "192.0.2.52:9443" {
+		t.Errorf("resolveReplacementControlAddr(bootstrap port) = %q, want 192.0.2.52:9443", got)
 	}
 	malformed := "fe80::1:80"
 	if got := resolveProbeAddr(malformed); got != malformed {
 		t.Errorf("resolveProbeAddr(malformed) = %q, want it unchanged", got)
 	}
-	if got := resolveReplacementControlAddr(malformed, "192.168.0.51:9443"); got != malformed {
+	if got := resolveReplacementControlAddr(malformed, "192.0.2.51:9443"); got != malformed {
 		t.Errorf("resolveReplacementControlAddr(malformed) = %q, want it unchanged", got)
 	}
 }

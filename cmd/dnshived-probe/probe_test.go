@@ -266,7 +266,7 @@ func TestProbeOneScope_UntaggedScopeChecksBareParent(t *testing.T) {
 	cfg := &ProbeConfig{TrunkParent: "ens19"}
 	byNodeID := map[string]probeConfigResponse{
 		"core-1": {NodeID: "core-1", Scopes: map[string]remoteScope{
-			"mgmt-like": {Parent: "ens19", VLANID: 0, NodeIP: "192.168.0.22/24", ProbeDisabled: true},
+			"mgmt-like": {Parent: "ens19", VLANID: 0, NodeIP: "192.0.2.22/24", ProbeDisabled: true},
 		}},
 	}
 

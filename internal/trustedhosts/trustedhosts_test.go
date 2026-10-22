@@ -17,21 +17,21 @@ func TestEmptySetAllowsEverything(t *testing.T) {
 }
 
 func TestConfiguredSetOnlyAllowsListedHosts(t *testing.T) {
-	s := New([]string{"192.168.0.22", "192.168.0.23"})
-	if !s.Allowed("192.168.0.22:9443") {
+	s := New([]string{"192.0.2.22", "192.0.2.23"})
+	if !s.Allowed("192.0.2.22:9443") {
 		t.Fatal("listed host with port should be allowed")
 	}
-	if !s.Allowed("192.168.0.23:54321") {
+	if !s.Allowed("192.0.2.23:54321") {
 		t.Fatal("listed host with different port should be allowed")
 	}
-	if s.Allowed("192.168.0.43:9443") {
+	if s.Allowed("192.0.2.43:9443") {
 		t.Fatal("unlisted host must be denied")
 	}
 }
 
 func TestAllowedHandlesBareHostWithoutPort(t *testing.T) {
-	s := New([]string{"192.168.0.22"})
-	if !s.Allowed("192.168.0.22") {
+	s := New([]string{"192.0.2.22"})
+	if !s.Allowed("192.0.2.22") {
 		t.Fatal("bare host (no port) should still match")
 	}
 }

@@ -98,7 +98,7 @@ func TestPropagateLinkedScopes_DanglingLinkLeavesFieldUntouched(t *testing.T) {
 	s := storeWithTemplates(t)
 	scopes := map[string]config.ScopeConfig{
 		"rw-1": {
-			DHCPOptions: []string{"option:66,192.168.0.5"},
+			DHCPOptions: []string{"option:66,192.0.2.5"},
 			ContentLinks: map[string]config.ContentLink{
 				"dhcp_options": {Kind: ContentLinkKindTemplate, SourceID: "deleted-template"},
 			},
@@ -108,7 +108,7 @@ func TestPropagateLinkedScopes_DanglingLinkLeavesFieldUntouched(t *testing.T) {
 	if changed {
 		t.Error("expected no change when the only link present is dangling")
 	}
-	if got := updated["rw-1"].DHCPOptions; len(got) != 1 || got[0] != "option:66,192.168.0.5" {
+	if got := updated["rw-1"].DHCPOptions; len(got) != 1 || got[0] != "option:66,192.0.2.5" {
 		t.Errorf("expected DHCPOptions left untouched, got %v", got)
 	}
 }

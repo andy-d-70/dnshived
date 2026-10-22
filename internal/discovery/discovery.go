@@ -197,6 +197,10 @@ func bindToDeviceUDP4(iface string) net.ListenConfig {
 }
 
 func BroadcastOnInterface(ctx context.Context, iface, hostname string) error {
+	return broadcastOnInterfaceAt(ctx, iface, hostname, InterfaceProbePort)
+}
+
+func broadcastOnInterfaceAt(ctx context.Context, iface, hostname string, port int) error {
 	linkUp(iface)
 
 	payload, err := json.Marshal(InterfaceProbe{
@@ -214,7 +218,7 @@ func BroadcastOnInterface(ctx context.Context, iface, hostname string) error {
 	}
 	defer pc.Close()
 
-	dst := &net.UDPAddr{IP: net.IPv4bcast, Port: InterfaceProbePort}
+	dst := &net.UDPAddr{IP: net.IPv4bcast, Port: port}
 	ticker := time.NewTicker(interfaceProbeInterval)
 	defer ticker.Stop()
 	logged := false
@@ -238,8 +242,12 @@ func BroadcastOnInterface(ctx context.Context, iface, hostname string) error {
 // ListenOnInterface binds to localIface via SO_BINDTODEVICE and waits up
 // to timeout for one valid InterfaceProbe.
 func ListenOnInterface(ctx context.Context, localIface string, timeout time.Duration) (probe InterfaceProbe, ok bool) {
+	return listenOnInterfaceAt(ctx, localIface, timeout, InterfaceProbePort)
+}
+
+func listenOnInterfaceAt(ctx context.Context, localIface string, timeout time.Duration, port int) (probe InterfaceProbe, ok bool) {
 	lc := bindToDeviceUDP4(localIface)
-	pc, err := lc.ListenPacket(ctx, "udp4", fmt.Sprintf(":%d", InterfaceProbePort))
+	pc, err := lc.ListenPacket(ctx, "udp4", fmt.Sprintf(":%d", port))
 	if err != nil {
 		log.Printf("[DISCOVERY:ERROR] listen for interface probes on %s: %v", localIface, err)
 		return InterfaceProbe{}, false

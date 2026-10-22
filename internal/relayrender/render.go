@@ -71,6 +71,9 @@ func WriteRelayConfig(path string, cluster config.Cluster, serverAddr string) er
 		if err := json.Unmarshal(data, &existing); err == nil {
 			cfg.RateLimit = existing.RateLimit
 			cfg.RateBurst = existing.RateBurst
+			cfg.PendingPerVLAN = existing.PendingPerVLAN
+			cfg.ClientRateLimit = existing.ClientRateLimit
+			cfg.ClientRateBurst = existing.ClientRateBurst
 			existingByName := make(map[string]dhcprelay.ClientInterfaceConfig, len(existing.ClientInterfaces))
 			for _, ci := range existing.ClientInterfaces {
 				existingByName[ci.Name] = ci

@@ -13,7 +13,7 @@ import (
 func testCluster() config.Cluster {
 	return config.Cluster{
 		Platform:           &config.Platform{Workers: []string{"ens19", "ens20"}},
-		DefaultDHCPOptions: []string{"option:42,192.168.0.1"},
+		DefaultDHCPOptions: []string{"option:42,192.0.2.1"},
 		Scopes: map[string]config.ScopeConfig{
 			"office": {
 				Parent:    "ens19",
@@ -33,7 +33,7 @@ func testCluster() config.Cluster {
 				NodeIP:      "172.16.100.22/24",
 				Gateway:     "172.16.100.1",
 				DHCPRange:   [2]string{"172.16.100.100", "172.16.100.200"},
-				DHCPOptions: []string{"option:66,192.168.0.5"},
+				DHCPOptions: []string{"option:66,192.0.2.5"},
 			},
 			"incomplete": {
 				Parent: "ens19",
@@ -110,7 +110,7 @@ func TestRender_TagScopesCustomDHCPOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	if !strings.Contains(out, "dhcp-option=tag:av-dante,option:66,192.168.0.5") {
+	if !strings.Contains(out, "dhcp-option=tag:av-dante,option:66,192.0.2.5") {
 		t.Errorf("av-dante's own DHCPOptions must be tag-scoped to av-dante; got:\n%s", out)
 	}
 }
@@ -183,14 +183,14 @@ func TestRender_ServerIdentifierIsScopeVIP(t *testing.T) {
 func TestRender_MultiValueGatewayRendersAsDnsmasqMultiRouterOption(t *testing.T) {
 	c := testCluster()
 	sc := c.Scopes["office"]
-	sc.Gateway = "192.168.0.1,192.168.0.2"
+	sc.Gateway = "192.0.2.1,192.0.2.2"
 	c.Scopes["office"] = sc
 
 	out, err := Render(c, "/var/lib/dnshived")
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	if !strings.Contains(out, "dhcp-option=tag:office,option:router,192.168.0.1,192.168.0.2") {
+	if !strings.Contains(out, "dhcp-option=tag:office,option:router,192.0.2.1,192.0.2.2") {
 		t.Errorf("expected office's multi-value gateway to render verbatim; got:\n%s", out)
 	}
 }
@@ -200,10 +200,10 @@ func TestRender_FallsBackToClusterDefaultDHCPOptionsWhenScopeHasNone(t *testing.
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	if !strings.Contains(out, "dhcp-option=tag:office,option:42,192.168.0.1") {
+	if !strings.Contains(out, "dhcp-option=tag:office,option:42,192.0.2.1") {
 		t.Errorf("office should inherit tag-scoped DefaultDHCPOptions; got:\n%s", out)
 	}
-	if strings.Contains(out, "dhcp-option=tag:av-dante,option:42,192.168.0.1") {
+	if strings.Contains(out, "dhcp-option=tag:av-dante,option:42,192.0.2.1") {
 		t.Errorf("av-dante has its own DHCPOptions and must NOT also inherit the cluster default; got:\n%s", out)
 	}
 }

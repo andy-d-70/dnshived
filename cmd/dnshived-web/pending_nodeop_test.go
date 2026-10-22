@@ -42,8 +42,8 @@ func TestHandlePendingNodeOpCommit_ExecutesAndClearsTheStagedOp(t *testing.T) {
 
 	cfgPath := filepath.Join(t.TempDir(), "web.json")
 	cfg := &WebConfig{Nodes: []NodeConfig{
-		{Name: "core-1", Addr: "192.168.0.22:9443"},
-		{Name: "core-2", Addr: "192.168.0.23:9443"},
+		{Name: "core-1", Addr: "192.0.2.22:9443"},
+		{Name: "core-2", Addr: "192.0.2.23:9443"},
 		{Name: "core-3", Addr: targetAddr},
 	}}
 	ref := newConfigRef(cfg)
@@ -148,7 +148,7 @@ func TestHandlePendingNodeOpCommit_ForceOffboardSkipsLiveCallToTarget(t *testing
 	cfgPath := filepath.Join(t.TempDir(), "web.json")
 	cfg := &WebConfig{Nodes: []NodeConfig{
 		{Name: "core-1", Addr: targetAddr},
-		{Name: "core-2", Addr: "192.168.0.23:9443"},
+		{Name: "core-2", Addr: "192.0.2.23:9443"},
 	}}
 	ref := newConfigRef(cfg)
 
@@ -182,7 +182,7 @@ func TestHandlePendingNodeOpCommit_ClearsOpEvenOnFailure(t *testing.T) {
 	cfg := &WebConfig{}
 	ref := newConfigRef(cfg)
 
-	if err := stageNodeOp(pendingNodeOp{Kind: nodeOpReplace, Role: probeRoleName, Addr: "192.168.0.99:9443", JoinCode: "X", Onboarding: true}); err != nil {
+	if err := stageNodeOp(pendingNodeOp{Kind: nodeOpReplace, Role: probeRoleName, Addr: "192.0.2.99:9443", JoinCode: "X", Onboarding: true}); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
 
@@ -233,7 +233,7 @@ func TestHandlePendingNodeOpDiscard_ClearsWithoutExecuting(t *testing.T) {
 // TestPendingNodeOp_DescribeRedactsJoinCode confirms Describe never
 // includes the join code.
 func TestPendingNodeOp_DescribeRedactsJoinCode(t *testing.T) {
-	op := pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.168.0.23:9443", JoinCode: "SECRET-CODE"}
+	op := pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.0.2.23:9443", JoinCode: "SECRET-CODE"}
 	if strings.Contains(op.Describe(), "SECRET-CODE") {
 		t.Errorf("Describe() leaked the join code: %q", op.Describe())
 	}
@@ -288,7 +288,7 @@ func TestHandlePending_RendersStagedNodeOp(t *testing.T) {
 	srv := candidateTestServer(t, config.Cluster{}, nil)
 	defer srv.Close()
 
-	if err := stageNodeOp(pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.168.0.23:9443", JoinCode: "X", StagedBy: "tester"}); err != nil {
+	if err := stageNodeOp(pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.0.2.23:9443", JoinCode: "X", StagedBy: "tester"}); err != nil {
 		t.Fatalf("stage: %v", err)
 	}
 
@@ -298,7 +298,7 @@ func TestHandlePending_RendersStagedNodeOp(t *testing.T) {
 	handlePending(newConfigRef(cfg))(rec, req)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, "Replace core-2 with 192.168.0.23:9443") {
+	if !strings.Contains(body, "Replace core-2 with 192.0.2.23:9443") {
 		t.Errorf("expected the staged node action described on /pending, got:\n%s", body)
 	}
 	if !strings.Contains(body, `action="/pending/nodeop/commit"`) || !strings.Contains(body, `action="/pending/nodeop/discard"`) {

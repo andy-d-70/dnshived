@@ -22,7 +22,7 @@ func TestSelfLoopbackAddr_ExtractsPortFromVariousListenAddrShapes(t *testing.T) 
 	}{
 		{":9443", "127.0.0.1:9443"},
 		{"0.0.0.0:9443", "127.0.0.1:9443"},
-		{"192.168.0.23:9443", "127.0.0.1:9443"},
+		{"192.0.2.23:9443", "127.0.0.1:9443"},
 	}
 	for _, c := range cases {
 		if got := selfLoopbackAddr(c.listenAddr); got != c.want {

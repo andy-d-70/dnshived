@@ -29,6 +29,7 @@ import (
 	"text/template"
 	"time"
 
+	"dnshived/internal/arbiter"
 	"dnshived/internal/cluster"
 	"dnshived/internal/config"
 	"dnshived/internal/daemonstatus"
@@ -136,6 +137,12 @@ type ReconcileInputs struct {
 	SelfToken   fencing.Token
 	Watermark   fencing.Token
 	Now         int64
+
+	// DesiredOwners is this node's desired-state owner role per scope and
+	// ServedBy the role observed serving each scope (peers + self); both
+	// only feed the unserved-scope warning.
+	DesiredOwners map[string]string
+	ServedBy      map[string]string
 }
 
 // ServeState is the agent's current decision for a single scope.
@@ -418,6 +425,8 @@ type Agent struct {
 	// already serving it.
 	rebalanceDelay time.Duration
 	antiFlap       map[string]*AntiFlap
+	unserved       map[string]*unservedState
+	unservedKnown  map[string]bool
 
 	quickReclaimDelay   time.Duration
 	antiFlapQuietWindow time.Duration
@@ -485,6 +494,8 @@ func New(role, nodeID string, incarnation uint64, psk string, dataDir string, sc
 		quickReclaimDelay:   5 * time.Second,
 		antiFlapQuietWindow: 5 * time.Minute,
 		antiFlap:            make(map[string]*AntiFlap),
+		unserved:            make(map[string]*unservedState),
+		unservedKnown:       make(map[string]bool),
 		vrrpPriority:        make(map[string]int),
 		lastAppliedGate:     make(map[string]string),
 		witnessClient:       newWitnessClient(false),
@@ -2744,6 +2755,19 @@ func (a *Agent) Reconcile(in ReconcileInputs) Decision {
 			ss.ReadySince = &readySince
 		}
 		result.Scopes[scope] = ss
+		if !currentScopes[scope].DNSMasqDisabled {
+			a.trackUnserved(scope, ss.Serving, reason, in, time.Unix(in.Now, 0))
+		}
+	}
+	for scope := range a.unserved {
+		if _, ok := currentScopes[scope]; !ok {
+			delete(a.unserved, scope)
+		}
+	}
+	for scope := range a.unservedKnown {
+		if _, ok := currentScopes[scope]; !ok {
+			delete(a.unservedKnown, scope)
+		}
 	}
 
 	// Manage the renewal loop.
@@ -2763,6 +2787,58 @@ func (a *Agent) Reconcile(in ReconcileInputs) Decision {
 	a.mu.Unlock()
 
 	return result
+}
+
+const (
+	unservedWarnAfter = 30 * time.Second
+	unservedRepeat    = 5 * time.Minute
+	unservedGapLog    = 5 * time.Second
+)
+
+type unservedState struct {
+	since   time.Time
+	lastLog time.Time
+	// atStart: the gap was already there when this node first looked at
+	// the scope, so its start is unknown.
+	atStart bool
+}
+
+// trackUnserved warns when no node serves scope: after unservedWarnAfter,
+// again every unservedRepeat, and once when a node serves it again; a
+// shorter gap of at least unservedGapLog is logged when it ends.
+func (a *Agent) trackUnserved(scope string, servingHere bool, reason string, in ReconcileInputs, now time.Time) {
+	servedBy := in.ServedBy[scope]
+	if servingHere {
+		servedBy = a.role
+	}
+	known := a.unservedKnown[scope]
+	a.unservedKnown[scope] = true
+	st := a.unserved[scope]
+	if servedBy != "" {
+		switch {
+		case st == nil:
+		case !st.lastLog.IsZero():
+			log.Printf("[AGENT:UNSERVED] scope %s served again by %s after %s", scope, servedBy, now.Sub(st.since).Round(time.Second))
+		case !st.atStart && now.Sub(st.since) >= unservedGapLog:
+			log.Printf("[AGENT:UNSERVED] scope %s was served by no node for %s, now served by %s", scope, now.Sub(st.since).Round(time.Second), servedBy)
+		}
+		delete(a.unserved, scope)
+		return
+	}
+	if st == nil {
+		a.unserved[scope] = &unservedState{since: now, atStart: !known}
+		return
+	}
+	if now.Sub(st.since) < unservedWarnAfter || (!st.lastLog.IsZero() && now.Sub(st.lastLog) < unservedRepeat) {
+		return
+	}
+	owner := in.DesiredOwners[scope]
+	if owner == "" {
+		owner = "none"
+	}
+	log.Printf("[AGENT:UNSERVED] WARNING scope %s served by no node for %s — this node (%s, %s): %s; desired owner here: %s (generation %d)",
+		scope, now.Sub(st.since).Round(time.Second), a.role, in.State, reason, owner, in.SelfToken.Generation)
+	st.lastLog = now
 }
 
 // --- DHCP gate actions ---
@@ -3110,7 +3186,7 @@ func (a *Agent) acquireWitness(scope string) bool {
 	return true
 }
 
-func (a *Agent) postWitnessRequest(addr, path string, body []byte) (raw json.RawMessage, expiresAt int64, accepted, dialFailed bool) {
+func (a *Agent) postWitnessRequest(addr, path, scope string, body []byte) (raw json.RawMessage, expiresAt int64, accepted, dialFailed bool) {
 	url := a.witnessScheme() + "://" + addr + path
 	resp, err := a.witnessHTTPClient().Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
@@ -3127,7 +3203,35 @@ func (a *Agent) postWitnessRequest(addr, path string, body []byte) (raw json.Raw
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || !result.Accepted {
 		return nil, 0, false, false
 	}
-	return result.Token, a.parseTokenExpiry(result.Token), true, false
+	expiresAt, err = a.checkGrant(scope, result.Token)
+	if err != nil {
+		log.Printf("[AGENT:TOKEN_DENY] grant from %s for scope %s rejected: %v", addr, scope, err)
+		return nil, 0, false, false
+	}
+	return result.Token, expiresAt, true, false
+}
+
+const maxGrantAhead = time.Minute
+
+func (a *Agent) checkGrant(scope string, raw json.RawMessage) (int64, error) {
+	var tok arbiter.Token
+	if err := json.Unmarshal(raw, &tok); err != nil {
+		return 0, fmt.Errorf("unreadable token: %w", err)
+	}
+	if !tok.Verify([]byte(a.psk)) {
+		return 0, errors.New("bad signature")
+	}
+	if tok.Scope != scope || tok.Owner != a.nodeID || tok.Incarnation != a.incarnation {
+		return 0, fmt.Errorf("token is for scope %s, owner %s, incarnation %d", tok.Scope, tok.Owner, tok.Incarnation)
+	}
+	now := time.Now()
+	if !tok.ExpiresAt.After(now) {
+		return 0, errors.New("token already expired")
+	}
+	if tok.ExpiresAt.After(now.Add(maxGrantAhead)) {
+		return 0, fmt.Errorf("expiry %s is more than %s ahead", tok.ExpiresAt.Format(time.RFC3339), maxGrantAhead)
+	}
+	return tok.ExpiresAt.Unix(), nil
 }
 
 // acquireFromInstance requests or renews a witness token for scope from
@@ -3138,7 +3242,7 @@ func (a *Agent) acquireFromInstance(scope string, c arbiterCandidate) (json.RawM
 	a.tokenMu.RUnlock()
 
 	if hasExisting {
-		if raw, expiresAt, ok := a.renewFromInstance(c, existing); ok {
+		if raw, expiresAt, ok := a.renewFromInstance(scope, c, existing); ok {
 			return raw, expiresAt, true
 		}
 	}
@@ -3161,10 +3265,10 @@ func (a *Agent) acquireFromInstance(scope string, c arbiterCandidate) (json.RawM
 		return nil, 0, false
 	}
 
-	raw, expiresAt, accepted, dialFailed := a.postWitnessRequest(c.addr, "/api/v1/token/request", body)
+	raw, expiresAt, accepted, dialFailed := a.postWitnessRequest(c.addr, "/api/v1/token/request", scope, body)
 	if dialFailed && c.fallback != "" {
 		log.Printf("[AGENT:TOKEN_DENY] request to %s failed for scope %s, trying fallback %s", c.addr, scope, c.fallback)
-		raw, expiresAt, accepted, dialFailed = a.postWitnessRequest(c.fallback, "/api/v1/token/request", body)
+		raw, expiresAt, accepted, dialFailed = a.postWitnessRequest(c.fallback, "/api/v1/token/request", scope, body)
 	}
 	if dialFailed {
 		log.Printf("[AGENT:TOKEN_DENY] request to %s failed for scope %s: no reachable path", c.addr, scope)
@@ -3177,7 +3281,7 @@ func (a *Agent) acquireFromInstance(scope string, c arbiterCandidate) (json.RawM
 
 // renewFromInstance renews an already-held raw token against exactly one
 // arbiter instance (c).
-func (a *Agent) renewFromInstance(c arbiterCandidate, tokenJSON json.RawMessage) (json.RawMessage, int64, bool) {
+func (a *Agent) renewFromInstance(scope string, c arbiterCandidate, tokenJSON json.RawMessage) (json.RawMessage, int64, bool) {
 	now := time.Now().Unix()
 	nonce := randomHex(16)
 	reqBody := map[string]interface{}{
@@ -3190,26 +3294,14 @@ func (a *Agent) renewFromInstance(c arbiterCandidate, tokenJSON json.RawMessage)
 		return nil, 0, false
 	}
 
-	raw, expiresAt, accepted, dialFailed := a.postWitnessRequest(c.addr, "/api/v1/token/renew", body)
+	raw, expiresAt, accepted, dialFailed := a.postWitnessRequest(c.addr, "/api/v1/token/renew", scope, body)
 	if dialFailed && c.fallback != "" {
-		raw, expiresAt, accepted, _ = a.postWitnessRequest(c.fallback, "/api/v1/token/renew", body)
+		raw, expiresAt, accepted, _ = a.postWitnessRequest(c.fallback, "/api/v1/token/renew", scope, body)
 	}
 	if !accepted {
 		return nil, 0, false
 	}
 	return raw, expiresAt, true
-}
-
-// parseTokenExpiry extracts the expires_at unix timestamp from a raw
-// token.
-func (a *Agent) parseTokenExpiry(raw json.RawMessage) int64 {
-	var tok struct {
-		ExpiresAt time.Time `json:"expires_at"`
-	}
-	if err := json.Unmarshal(raw, &tok); err != nil {
-		return 0
-	}
-	return tok.ExpiresAt.Unix()
 }
 
 // --- token renewal loop ---

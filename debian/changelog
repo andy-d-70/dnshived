@@ -1,3 +1,80 @@
+dnshived (0.9.8.6~dev-9) unstable; urgency=medium
+
+  * Privileged helper socket: per-connection deadline and request size limit,
+    at most 64 connections at once, bounded shutdown wait, a stale socket is
+    removed only if it is a socket, the socket is created 0660, and denials and
+    privileged verbs log the caller's uid and pid.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Wed, 21 Oct 2026 19:50:00 +0200
+
+dnshived (0.9.8.6~dev-8) unstable; urgency=medium
+
+  * Audit follow-ups: [DESIRED:SPLIT] lists at most 20 scopes; the DHCP relay
+    tracks at most 1024 client MACs per VLAN and 16384 in total; idle client
+    sweeps run at most once a second; make rpm adds new files only under the
+    source directories.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Wed, 21 Oct 2026 18:13:45 +0200
+
+dnshived (0.9.8.6~dev-7) unstable; urgency=medium
+
+  * A remembered owner that is not serving is dropped at once when a peer's
+    map at the same generation disagrees (faster handover after a restart).
+  * make rpm includes untracked source files.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Wed, 21 Oct 2026 05:43:19 +0200
+
+dnshived (0.9.8.6~dev-6) unstable; urgency=medium
+
+  * Desired-state split warning only after 45 s (beyond the 30 s grace that
+    heals a restarted owner); shorter splits are logged when they heal.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Wed, 21 Oct 2026 05:24:59 +0200
+
+dnshived (0.9.8.6~dev-5) unstable; urgency=medium
+
+  * Helper restarts a DHCP/DNS relay running a replaced binary instead of
+    reloading it (RPM upgrades left the old relay running).
+  * Rejoining core adopts its peers' watermark before its first desired map.
+  * Cores compare desired-state maps and log a split at equal generation.
+  * Every handover gap of 5 s or more is logged when it ends.
+  * DHCP relay: per-VLAN pending cap, 30 s entry lifetime, per-client rate
+    limit, warnings and counters, all on by default.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Wed, 21 Oct 2026 05:14:44 +0200
+
+dnshived (0.9.8.6~dev-4) unstable; urgency=medium
+
+  * A scope no longer stays unserved after its non-preferred owner restarts:
+    a remembered owner is kept only while it is seen serving the scope.
+  * Unserved scopes and desired-state owner changes are logged.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Wed, 21 Oct 2026 04:55:35 +0200
+
+dnshived (0.9.8.6~dev-3) unstable; urgency=medium
+
+  * DHCP relay hardening: server socket swapped atomically on reload, new
+    interfaces get the reload's cluster-wide rate limit, cheaper drop path,
+    one clock read per request, no per-packet allocations; fuzz tests and
+    benchmarks for the packet paths.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Wed, 21 Oct 2026 04:34:32 +0200
+
+dnshived (0.9.8.6~dev-2) unstable; urgency=medium
+
+  * Core nodes verify each witness grant and renewal (PSK signature, scope,
+    owner, incarnation, plausible expiry) before counting it as a vote.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Sun, 18 Oct 2026 12:51:11 +0200
+
+dnshived (0.9.8.6~dev-1) unstable; urgency=medium
+
+  * Web UI search dropdowns: a "N more — type to narrow" row when the list
+    is cut at 200 entries, an exact match listed first, and the field's
+    text selected on focus so typing replaces it.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Sun, 18 Oct 2026 09:56:44 +0200
+
 dnshived (0.9.8.5) unstable; urgency=medium
 
   * Release 0.9.8.5. Summary, upgrade notes and known issues: CHANGELOG.md,

@@ -51,7 +51,7 @@ func TestIsValidSetupRole_RejectsAnythingOutsideTheFixedSet(t *testing.T) {
 }
 
 func TestBuilderState_SetSelfAddr_RejectsMissingOrMalformedAddress(t *testing.T) {
-	for _, addr := range []string{"", "192.168.0.22", "not-an-address", ":9443extra:bad", "192.168.0.22:"} {
+	for _, addr := range []string{"", "192.0.2.22", "not-an-address", ":9443extra:bad", "192.0.2.22:"} {
 		b := &builderState{}
 		if err := b.setSelfAddr(addr); err == nil {
 			t.Errorf("setSelfAddr(%q) returned nil error, want a rejection", addr)
@@ -66,11 +66,11 @@ func TestBuilderState_SetSelfAddr_RejectsMissingOrMalformedAddress(t *testing.T)
 // host:port is accepted.
 func TestBuilderState_SetSelfAddr_AcceptsValidHostPort(t *testing.T) {
 	b := &builderState{}
-	if err := b.setSelfAddr("192.168.0.22:9443"); err != nil {
+	if err := b.setSelfAddr("192.0.2.22:9443"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := b.getSelfAddr(); got != "192.168.0.22:9443" {
-		t.Errorf("getSelfAddr() = %q, want 192.168.0.22:9443", got)
+	if got := b.getSelfAddr(); got != "192.0.2.22:9443" {
+		t.Errorf("getSelfAddr() = %q, want 192.0.2.22:9443", got)
 	}
 }
 
@@ -159,7 +159,7 @@ func TestBootstrapSetRoleHandler_ValidRoleSavesAndRedirects(t *testing.T) {
 }
 
 func TestBootstrapSetRoleHandler_AlsoSetsSelfAddrFromTheRequest(t *testing.T) {
-	withFakeOutboundAddrDetection(t, "192.168.0.22:9443", nil)
+	withFakeOutboundAddrDetection(t, "192.0.2.22:9443", nil)
 	state := &builderState{}
 	handler := bootstrapSetRoleHandler("worker-a-test", "9443", state)
 
@@ -169,7 +169,7 @@ func TestBootstrapSetRoleHandler_AlsoSetsSelfAddrFromTheRequest(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
-	if got := state.getSelfAddr(); got != "192.168.0.22:9443" {
+	if got := state.getSelfAddr(); got != "192.0.2.22:9443" {
 		t.Errorf("state address = %q, want the auto-derived address, set with zero separate operator input", got)
 	}
 }
@@ -227,9 +227,9 @@ func withFakeOutboundAddrDetection(t *testing.T, addr string, err error) {
 }
 
 func TestNewBootstrapSetupData_AutoFillsAddressWhenNoneSavedYet(t *testing.T) {
-	withFakeOutboundAddrDetection(t, "192.168.0.22:9443", nil)
+	withFakeOutboundAddrDetection(t, "192.0.2.22:9443", nil)
 	data := newBootstrapSetupData("host", "9443", &builderState{})
-	if data.CurrentAddr != "192.168.0.22:9443" {
+	if data.CurrentAddr != "192.0.2.22:9443" {
 		t.Errorf("CurrentAddr = %q, want the detected default", data.CurrentAddr)
 	}
 }
@@ -237,7 +237,7 @@ func TestNewBootstrapSetupData_AutoFillsAddressWhenNoneSavedYet(t *testing.T) {
 // TestNewBootstrapSetupData_NeverOverwritesAnAlreadySavedAddress confirms
 // auto-fill is a DEFAULT only, never forced.
 func TestNewBootstrapSetupData_NeverOverwritesAnAlreadySavedAddress(t *testing.T) {
-	withFakeOutboundAddrDetection(t, "192.168.0.99:9443", nil)
+	withFakeOutboundAddrDetection(t, "192.0.2.99:9443", nil)
 	state := &builderState{}
 	if err := state.setSelfAddr("10.0.0.5:9443"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -365,13 +365,13 @@ func TestBootstrapSetNetworkHandler_EmptyMgmtRejectedInline(t *testing.T) {
 
 func TestBootstrapSetMgmtVIPHandler_ValidVIPSavesAndRedirectsToStep4(t *testing.T) {
 	state := &builderState{}
-	if err := state.setSelfAddr("192.168.0.22:9443"); err != nil {
+	if err := state.setSelfAddr("192.0.2.22:9443"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	withFakeInterfaceDetection(t, "192.168.0.22", "eth0")
+	withFakeInterfaceDetection(t, "192.0.2.22", "eth0")
 	handler := bootstrapSetMgmtVIPHandler("host", "9443", state)
 
-	form := url.Values{"mgmt_vip": {"192.168.0.230/24"}, "vrrp_id": {"77"}}
+	form := url.Values{"mgmt_vip": {"192.0.2.230/24"}, "vrrp_id": {"77"}}
 	req := httptest.NewRequest(http.MethodPost, "/setup/mgmt-vip", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
@@ -384,8 +384,8 @@ func TestBootstrapSetMgmtVIPHandler_ValidVIPSavesAndRedirectsToStep4(t *testing.
 		t.Errorf("Location = %q, want /?step=4", got)
 	}
 	vip, vrrpID, _ := state.getMgmtVIP()
-	if vip != "192.168.0.230/24" || vrrpID != 77 {
-		t.Errorf("mgmt VIP = %q/%d, want 192.168.0.230/24/77", vip, vrrpID)
+	if vip != "192.0.2.230/24" || vrrpID != 77 {
+		t.Errorf("mgmt VIP = %q/%d, want 192.0.2.230/24/77", vip, vrrpID)
 	}
 }
 
@@ -426,7 +426,7 @@ func TestBootstrapSetTLSHandler_RedirectsToStep5(t *testing.T) {
 
 func TestBootstrapAddNodeHandler_SuccessStaysOnStep5(t *testing.T) {
 	state := &builderState{}
-	if err := state.setSelfAddr("192.168.0.22:9443"); err != nil {
+	if err := state.setSelfAddr("192.0.2.22:9443"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if err := state.setRole(config.RoleCore1); err != nil {
@@ -435,7 +435,7 @@ func TestBootstrapAddNodeHandler_SuccessStaysOnStep5(t *testing.T) {
 	handler := bootstrapAddNodeHandler("host", "9443", state)
 
 	form := url.Values{
-		"addr": {"192.168.0.23:9443"},
+		"addr": {"192.0.2.23:9443"},
 		"role": {config.RoleCore2},
 		"otp":  {"CODE"},
 	}
@@ -459,13 +459,13 @@ func TestBootstrapSetupTmpl_ReviewStepShowsFullSummary(t *testing.T) {
 	if err := state.setRole(config.RoleCore1); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := state.setSelfAddr("192.168.0.22:9443"); err != nil {
+	if err := state.setSelfAddr("192.0.2.22:9443"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if err := state.setPlatform("eth0", []string{"ens19"}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := state.addNode("192.168.0.23:9443", config.RoleCore2, "CODE", ""); err != nil {
+	if err := state.addNode("192.0.2.23:9443", config.RoleCore2, "CODE", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	handler := bootstrapSetupHandler("host", "9443", state)
@@ -475,7 +475,7 @@ func TestBootstrapSetupTmpl_ReviewStepShowsFullSummary(t *testing.T) {
 	handler(rec, req)
 
 	body := rec.Body.String()
-	for _, want := range []string{config.RoleCore1, "192.168.0.22:9443", "192.168.0.23:9443", "eth0", "Trunk 1", "ens19", "Create cluster"} {
+	for _, want := range []string{config.RoleCore1, "192.0.2.22:9443", "192.0.2.23:9443", "eth0", "Trunk 1", "ens19", "Create cluster"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("review step body missing %q: %s", want, body)
 		}

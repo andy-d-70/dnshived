@@ -164,7 +164,7 @@ func resolveOldDeadAddr(reqOldAddr, thirdAddr string, peers []string) string {
 }
 
 // lastIPv4Octet returns addr's host part's final dotted-quad segment (e.g.
-// "22" from "192.168.0.22:9443"), or "" if addr isn't a recognizable IPv4
+// "22" from "192.0.2.22:9443"), or "" if addr isn't a recognizable IPv4
 // host:port.
 func lastIPv4Octet(addr string) string {
 	host, _, err := net.SplitHostPort(addr)

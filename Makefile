@@ -1,4 +1,4 @@
-VERSION=0.9.8.5
+VERSION=0.9.8.6
 GIT_HASH=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 # FULL_VERSION comes from debian/changelog's top entry, so the package and
 # the binaries report the same version: VERSION-N+HASH for a dev-N entry,
@@ -12,7 +12,7 @@ FULL_VERSION=$(shell \
 		echo "$(VERSION)+$(GIT_HASH)"; \
 	fi)
 
-VM_IPS = 192.168.0.22 192.168.0.23 192.168.0.24
+VM_IPS ?= 192.0.2.22 192.0.2.23 192.0.2.24
 SSH_USER = admin
 SSH_OPTS = -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR
 
@@ -45,15 +45,18 @@ deb-check: deb
 
 # .rpm packages (dnshived + dnshived-probe) via rpm/dnshived.spec;
 # tools/rpm-version.sh derives Version/Release from debian/changelog.
-# The source tarball comes from `git stash create` + `git archive`, so
-# uncommitted changes are included, as in the .deb build.
+# The source tarball is the working tree as a temporary git tree (a
+# separate index, so the real one is untouched) + `git archive`: tracked
+# changes anywhere, and new files under the source directories only, so a
+# stray directory in the checkout never ends up in the package.
 RPM_TOPDIR := $(CURDIR)/rpmbuild
 .PHONY: rpm rpm-check
 rpm:
 	@eval "$$(tools/rpm-version.sh)"; \
 	mkdir -p $(RPM_TOPDIR)/SOURCES $(RPM_TOPDIR)/SPECS $(RPM_TOPDIR)/BUILD $(RPM_TOPDIR)/BUILDROOT $(RPM_TOPDIR)/RPMS $(RPM_TOPDIR)/SRPMS; \
 	rm -f $(RPM_TOPDIR)/RPMS/*/dnshived-*.rpm; \
-	TREEISH=$$(git stash create); TREEISH=$${TREEISH:-HEAD}; \
+	TMPIDX=$$(mktemp); cp "$$(git rev-parse --git-path index)" "$$TMPIDX"; \
+	GIT_INDEX_FILE="$$TMPIDX" git add -u && GIT_INDEX_FILE="$$TMPIDX" git add -A -- $(wildcard cmd internal rpm debian tools); TREEISH=$$(GIT_INDEX_FILE="$$TMPIDX" git write-tree); rm -f "$$TMPIDX"; \
 	git archive --format=tar --prefix=dnshived-$$RPM_VERSION/ $$TREEISH \
 		| gzip > $(RPM_TOPDIR)/SOURCES/dnshived-$$RPM_VERSION.tar.gz; \
 	echo "Building dnshived $$RPM_VERSION-$$RPM_RELEASE ..."; \

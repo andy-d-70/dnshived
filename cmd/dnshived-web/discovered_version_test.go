@@ -14,7 +14,7 @@ func TestConfigFormTmpl_DiscoveredVersionMismatchFlaggedWarn(t *testing.T) {
 	data := clusterFormData{
 		ThisVersion: "0.9.8-63+c313d6a",
 		Discovered: []discovery.Candidate{
-			{Addr: "192.168.0.50", Hostname: "old-node", Version: "0.9.5-3+abc1234", BootstrapPort: 9080},
+			{Addr: "192.0.2.50", Hostname: "old-node", Version: "0.9.5-3+abc1234", BootstrapPort: 9080},
 		},
 	}
 	var buf strings.Builder
@@ -40,7 +40,7 @@ func TestConfigFormTmpl_DiscoveredSameVersionIsNotFlagged(t *testing.T) {
 	data := clusterFormData{
 		ThisVersion: "0.9.8-63+c313d6a",
 		Discovered: []discovery.Candidate{
-			{Addr: "192.168.0.50", Hostname: "same-version-node", Version: "0.9.8-63+c313d6a", BootstrapPort: 9080},
+			{Addr: "192.0.2.50", Hostname: "same-version-node", Version: "0.9.8-63+c313d6a", BootstrapPort: 9080},
 		},
 	}
 	var buf strings.Builder

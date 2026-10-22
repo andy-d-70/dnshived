@@ -93,6 +93,21 @@ func isDHCPPacket(p []byte) bool {
 	return cookie == dhcpMagicCookie
 }
 
+func ip4IsZero(b []byte) bool {
+	return b[0]|b[1]|b[2]|b[3] == 0
+}
+
+var clientBroadcastAddr = &net.UDPAddr{IP: net.IPv4bcast, Port: dhcpClientPort}
+
+// clientDestination is determineClientDestination as a send address,
+// sharing one broadcast address instead of allocating per reply.
+func clientDestination(p []byte) *net.UDPAddr {
+	if ip4IsZero(p[bootpCIAddrOffset:]) {
+		return clientBroadcastAddr
+	}
+	return &net.UDPAddr{IP: extractCIAddr(p), Port: dhcpClientPort}
+}
+
 // determineClientDestination decides where to send a relayed reply on the
 // client segment.
 func determineClientDestination(p []byte) net.IP {

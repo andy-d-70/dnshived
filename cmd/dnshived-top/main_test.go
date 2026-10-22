@@ -167,9 +167,9 @@ func TestProbeCell_TransportErrorNotMisreportedAsDisabled(t *testing.T) {
 func TestCheckProbeHostIssues_DisabledScopesProduceNoIssues(t *testing.T) {
 	disabled := probeResult{Scope: "rw-100", Enabled: false}
 	results := map[string]map[string]probeResult{
-		"192.168.0.42:9444": {"rw-100": disabled},
+		"192.0.2.42:9444": {"rw-100": disabled},
 	}
-	issues, mismatches := checkProbeHostIssues(results, []string{"192.168.0.42:9444"}, nil, map[string]tokenInfo{}, nil, nil)
+	issues, mismatches := checkProbeHostIssues(results, []string{"192.0.2.42:9444"}, nil, map[string]tokenInfo{}, nil, nil)
 	if len(issues) != 0 {
 		t.Errorf("issues = %v, want none — disabled scopes were never actually tested", issues)
 	}
@@ -310,10 +310,10 @@ func TestCheckProbeHostIssues_NoIssuesWhenAllHealthy(t *testing.T) {
 	okPR.DHCP.Verdict = "ok"
 
 	results := map[string]map[string]probeResult{
-		"192.168.0.42:9444": {"office": okPR},
+		"192.0.2.42:9444": {"office": okPR},
 	}
 	tokens := map[string]tokenInfo{"office": {Owner: "dnshived1022"}}
-	issues, mismatches := checkProbeHostIssues(results, []string{"192.168.0.42:9444"}, nil, tokens, nil, map[string]bool{"office": true})
+	issues, mismatches := checkProbeHostIssues(results, []string{"192.0.2.42:9444"}, nil, tokens, nil, map[string]bool{"office": true})
 	if len(issues) != 0 {
 		t.Errorf("issues = %v, want none for an all-healthy, authorized round", issues)
 	}
@@ -330,9 +330,9 @@ func TestCheckProbeHostIssues_PendingOrTransportErrorIsNotAnIssue(t *testing.T) 
 	degraded.DNS.Error = "connection refused"
 
 	results := map[string]map[string]probeResult{
-		"192.168.0.42:9444": {"office": degraded},
+		"192.0.2.42:9444": {"office": degraded},
 	}
-	if issues, _ := checkProbeHostIssues(results, []string{"192.168.0.42:9444"}, nil, nil, nil, map[string]bool{"office": true}); len(issues) != 0 {
+	if issues, _ := checkProbeHostIssues(results, []string{"192.0.2.42:9444"}, nil, nil, nil, map[string]bool{"office": true}); len(issues) != 0 {
 		t.Errorf("issues = %v, want none — a transport error is not a confirmed failure", issues)
 	}
 }
@@ -344,10 +344,10 @@ func TestCheckProbeHostIssues_UnclaimedScopeNeverReportsAConfirmedIssue(t *testi
 	noAnswer.DHCP.Verdict = "no_answer"
 
 	results := map[string]map[string]probeResult{
-		"192.168.0.42:9444": {"rw-129": noAnswer},
+		"192.0.2.42:9444": {"rw-129": noAnswer},
 	}
 	// serving is nil — no worker claims rw-129 yet (still starting).
-	issues, _ := checkProbeHostIssues(results, []string{"192.168.0.42:9444"}, nil, nil, nil, nil)
+	issues, _ := checkProbeHostIssues(results, []string{"192.0.2.42:9444"}, nil, nil, nil, nil)
 	if len(issues) != 0 {
 		t.Errorf("issues = %v, want none — a scope nobody currently claims to serve must not report a confirmed issue", issues)
 	}
@@ -365,18 +365,18 @@ func TestCheckProbeHostIssues_NoAnswerAndDualActiveAreReported(t *testing.T) {
 	dual.DHCP.Verdict = "dual_active"
 
 	results := map[string]map[string]probeResult{
-		"192.168.0.42:9444": {"office": noAnswer, "av-dante": dual},
+		"192.0.2.42:9444": {"office": noAnswer, "av-dante": dual},
 	}
 	tokens := map[string]tokenInfo{"av-dante": {Owner: "dnshived1022"}}
 	serving := map[string]bool{"office": true, "av-dante": true}
-	issues, _ := checkProbeHostIssues(results, []string{"192.168.0.42:9444"}, nil, tokens, nil, serving)
+	issues, _ := checkProbeHostIssues(results, []string{"192.0.2.42:9444"}, nil, tokens, nil, serving)
 	if len(issues) != 2 {
 		t.Fatalf("issues = %v, want 2 entries", issues)
 	}
-	if issues[0].Text != "av-dante (from 192.168.0.42): DHCP✖DUAL" {
+	if issues[0].Text != "av-dante (from 192.0.2.42): DHCP✖DUAL" {
 		t.Errorf("issues[0] = %q, want the av-dante dual-active line (scopes sorted first)", issues[0])
 	}
-	if issues[1].Text != "office (from 192.168.0.42): DHCP-NONE" {
+	if issues[1].Text != "office (from 192.0.2.42): DHCP-NONE" {
 		t.Errorf("issues[1] = %q, want the office no_answer line", issues[1])
 	}
 	if issues[0].Color != cRed || issues[1].Color != cRed {
@@ -432,10 +432,10 @@ func TestCheckProbeHostIssues_PartialFailureIsReported(t *testing.T) {
 	partial.DHCP.Verdict = "ok"
 
 	results := map[string]map[string]probeResult{
-		"192.168.0.42:9444": {"office": partial},
+		"192.0.2.42:9444": {"office": partial},
 	}
 	tokens := map[string]tokenInfo{"office": {Owner: "dnshived1022"}}
-	issues, _ := checkProbeHostIssues(results, []string{"192.168.0.42:9444"}, nil, tokens, nil, map[string]bool{"office": true})
+	issues, _ := checkProbeHostIssues(results, []string{"192.0.2.42:9444"}, nil, tokens, nil, map[string]bool{"office": true})
 	if len(issues) != 1 {
 		t.Fatalf("issues = %v, want 1 entry for a partial (yellow) failure", issues)
 	}
@@ -448,27 +448,27 @@ func TestCheckProbeHostIssues_AnsweringWithNoValidTokenIsReported(t *testing.T) 
 	okPR.DHCP.Verdict = "ok"
 
 	results := map[string]map[string]probeResult{
-		"192.168.0.42:9444": {"orphan-scope": okPR},
+		"192.0.2.42:9444": {"orphan-scope": okPR},
 	}
-	issues, mismatches := checkProbeHostIssues(results, []string{"192.168.0.42:9444"}, nil, map[string]tokenInfo{}, nil, nil) // no token at all
+	issues, mismatches := checkProbeHostIssues(results, []string{"192.0.2.42:9444"}, nil, map[string]tokenInfo{}, nil, nil) // no token at all
 	if len(issues) != 0 {
 		t.Errorf("issues = %v, want none — the token mismatch is never an immediate issue", issues)
 	}
-	if !mismatches["orphan-scope|192.168.0.42"] {
-		t.Fatalf("mismatches = %v, want orphan-scope|192.168.0.42 present", mismatches)
+	if !mismatches["orphan-scope|192.0.2.42"] {
+		t.Fatalf("mismatches = %v, want orphan-scope|192.0.2.42 present", mismatches)
 	}
 
 	// Confirmed once the SAME mismatch is seen on a second, independent round.
 	confirmedLines, confirmedKeys := confirmProbeMismatches(mismatches, mismatches)
-	want := "orphan-scope (from 192.168.0.42): DHCP is being answered but no valid arbiter token authorizes this scope"
+	want := "orphan-scope (from 192.0.2.42): DHCP is being answered but no valid arbiter token authorizes this scope"
 	if len(confirmedLines) != 1 || confirmedLines[0].Text != want {
 		t.Errorf("confirmed = %v, want [%q]", confirmedLines, want)
 	}
 	if confirmedLines[0].Color != cYellow {
 		t.Errorf("confirmed[0].Color = %q, want cYellow — a token mismatch on otherwise-healthy DHCP is not as severe as a confirmed dual-active/no-answer", confirmedLines[0].Color)
 	}
-	if !confirmedKeys["orphan-scope|192.168.0.42"] {
-		t.Errorf("confirmedKeys = %v, want orphan-scope|192.168.0.42 present", confirmedKeys)
+	if !confirmedKeys["orphan-scope|192.0.2.42"] {
+		t.Errorf("confirmedKeys = %v, want orphan-scope|192.0.2.42 present", confirmedKeys)
 	}
 }
 
@@ -504,10 +504,10 @@ func TestCheckProbeHostIssues_ExpiredTokenAlsoCountsAsNoValidToken(t *testing.T)
 	okPR.DHCP.Verdict = "ok"
 
 	results := map[string]map[string]probeResult{
-		"192.168.0.42:9444": {"office": okPR},
+		"192.0.2.42:9444": {"office": okPR},
 	}
 	tokens := map[string]tokenInfo{"office": {Owner: "dnshived1022", Expired: true}}
-	issues, mismatches := checkProbeHostIssues(results, []string{"192.168.0.42:9444"}, nil, tokens, nil, map[string]bool{"office": true})
+	issues, mismatches := checkProbeHostIssues(results, []string{"192.0.2.42:9444"}, nil, tokens, nil, map[string]bool{"office": true})
 	if len(issues) != 0 {
 		t.Fatalf("issues = %v, want none from checkProbeHostIssues directly", issues)
 	}
@@ -530,12 +530,12 @@ func TestCheckProbeHostIssues_SurfacesExternalProbeFailures(t *testing.T) {
 	good.DHCP.Verdict = "ok"
 
 	results := map[string]map[string]probeResult{
-		"192.168.0.42:9444": {"rw-129": bad, "rw-111": good},
-		"192.168.0.43:9444": {"rw-129": good},
+		"192.0.2.42:9444": {"rw-129": bad, "rw-111": good},
+		"192.0.2.43:9444": {"rw-129": good},
 	}
 	serving := map[string]bool{"rw-129": true, "rw-111": true}
-	issues, _ := checkProbeHostIssues(results, []string{"192.168.0.42:9444", "192.168.0.43:9444"}, nil, nil, nil, serving)
-	want := []string{"rw-129 (from 192.168.0.42): DHCP-NONE  [DHCP: no answer]"}
+	issues, _ := checkProbeHostIssues(results, []string{"192.0.2.42:9444", "192.0.2.43:9444"}, nil, nil, nil, serving)
+	want := []string{"rw-129 (from 192.0.2.42): DHCP-NONE  [DHCP: no answer]"}
 	if len(issues) != len(want) || issues[0].Text != want[0] {
 		t.Errorf("issues = %v, want %v", issues, want)
 	}
@@ -550,19 +550,19 @@ func TestCheckProbeHostIssues_DetectsTokenMismatch(t *testing.T) {
 	answering.DHCP.Verdict = "ok"
 
 	results := map[string]map[string]probeResult{
-		"192.168.0.42:9444": {"orphan-scope": answering},
+		"192.0.2.42:9444": {"orphan-scope": answering},
 	}
-	_, mismatches := checkProbeHostIssues(results, []string{"192.168.0.42:9444"}, nil, map[string]tokenInfo{}, nil, nil)
-	if !mismatches["orphan-scope|192.168.0.42"] {
-		t.Errorf("mismatches = %v, want orphan-scope|192.168.0.42 present", mismatches)
+	_, mismatches := checkProbeHostIssues(results, []string{"192.0.2.42:9444"}, nil, map[string]tokenInfo{}, nil, nil)
+	if !mismatches["orphan-scope|192.0.2.42"] {
+		t.Errorf("mismatches = %v, want orphan-scope|192.0.2.42 present", mismatches)
 	}
 }
 
 // TestProbeHostLabel_PrefersConfiguredName checks a configured probe-host
 // name is shown instead of the bare IP.
 func TestProbeHostLabel_PrefersConfiguredName(t *testing.T) {
-	s := &appState{probeHostNames: map[string]string{"192.168.0.42:9444": "probe"}}
-	if got := probeHostLabel(s, "192.168.0.42:9444"); got != "probe" {
+	s := &appState{probeHostNames: map[string]string{"192.0.2.42:9444": "probe"}}
+	if got := probeHostLabel(s, "192.0.2.42:9444"); got != "probe" {
 		t.Errorf("probeHostLabel = %q, want the configured name %q", got, "probe")
 	}
 }
@@ -571,8 +571,8 @@ func TestProbeHostLabel_PrefersConfiguredName(t *testing.T) {
 // host is labeled by its address.
 func TestProbeHostLabel_FallsBackToAddressWhenUnnamed(t *testing.T) {
 	s := &appState{probeHostNames: map[string]string{}}
-	if got := probeHostLabel(s, "192.168.0.42:9444"); got != "192.168.0.42" {
-		t.Errorf("probeHostLabel = %q, want the stripped address %q", got, "192.168.0.42")
+	if got := probeHostLabel(s, "192.0.2.42:9444"); got != "192.0.2.42" {
+		t.Errorf("probeHostLabel = %q, want the stripped address %q", got, "192.0.2.42")
 	}
 }
 
@@ -1002,12 +1002,12 @@ func TestTabOrder_MatchesDnshivedWebNavOrder(t *testing.T) {
 
 func TestRenderOverview_ProbeHostShowsRunningStatusWord(t *testing.T) {
 	s := &appState{
-		probeHostAddrs: []string{"192.168.0.42:9444", "192.168.0.43:9444", "192.168.0.44:9444"},
+		probeHostAddrs: []string{"192.0.2.42:9444", "192.0.2.43:9444", "192.0.2.44:9444"},
 		probeHostErrors: map[string]string{
-			"192.168.0.43:9444": "connection refused",
+			"192.0.2.43:9444": "connection refused",
 		},
 		probeHosts: map[string]nodeStatus{
-			"192.168.0.42:9444": {ConfiguredScopes: []string{"rw-200", "rw-201"}},
+			"192.0.2.42:9444": {ConfiguredScopes: []string{"rw-200", "rw-201"}},
 		},
 	}
 
@@ -1027,11 +1027,11 @@ func TestRenderOverview_ProbeHostShowsRunningStatusWord(t *testing.T) {
 	var healthyLine, downLine, waitingLine string
 	for _, l := range lines {
 		switch {
-		case strings.Contains(l, "192.168.0.42:9444"):
+		case strings.Contains(l, "192.0.2.42:9444"):
 			healthyLine = l
-		case strings.Contains(l, "192.168.0.43:9444"):
+		case strings.Contains(l, "192.0.2.43:9444"):
 			downLine = l
-		case strings.Contains(l, "192.168.0.44:9444"):
+		case strings.Contains(l, "192.0.2.44:9444"):
 			waitingLine = l
 		}
 	}
@@ -1046,7 +1046,7 @@ func TestRenderOverview_ProbeHostShowsRunningStatusWord(t *testing.T) {
 		t.Errorf("waiting probe host line = %q, want it to contain \"waiting for first sweep\"", waitingLine)
 	}
 
-	nameCol := func(l string) int { return strings.Index(l, "192.168.0.4") }
+	nameCol := func(l string) int { return strings.Index(l, "192.0.2.4") }
 	if nameCol(healthyLine) != nameCol(downLine) || nameCol(downLine) != nameCol(waitingLine) {
 		t.Errorf("addr column not aligned across row states: healthy=%d down=%d waiting=%d",
 			nameCol(healthyLine), nameCol(downLine), nameCol(waitingLine))
@@ -1055,8 +1055,8 @@ func TestRenderOverview_ProbeHostShowsRunningStatusWord(t *testing.T) {
 
 func TestRenderProbes_HeaderShowsErrorCountFromSharedProbeIssues(t *testing.T) {
 	s := &appState{
-		probeHostAddrs: []string{"192.168.0.42:9444"},
-		probeHostNames: map[string]string{"192.168.0.42:9444": "probe-a"},
+		probeHostAddrs: []string{"192.0.2.42:9444"},
+		probeHostNames: map[string]string{"192.0.2.42:9444": "probe-a"},
 		nodes: []nodeData{
 			{Reachable: true, Status: &nodeStatus{Role: "worker", ConfiguredScopes: []string{"office"}}},
 		},
@@ -1152,13 +1152,13 @@ func TestCheckProbeHostIssues_ExcludesStaleReadingsFromOwnerRestart(t *testing.T
 	pr.DNS.Answered = true
 	pr.DHCP.Verdict = "no_answer"
 	pr.DHCP.Reason = "no answer"
-	results := map[string]map[string]probeResult{"192.168.0.42:9444": {"rw-129": pr}}
+	results := map[string]map[string]probeResult{"192.0.2.42:9444": {"rw-129": pr}}
 	tokens := map[string]tokenInfo{"rw-129": {Owner: "dnshived1022"}}
 	// Owner's dnshived has been up only 30s — the 90s-old reading
 	// predates this restart.
 	ownerUptime := map[string]int64{"dnshived1022": 30}
 
-	issues, _ := checkProbeHostIssues(results, []string{"192.168.0.42:9444"}, nil, tokens, ownerUptime, map[string]bool{"rw-129": true})
+	issues, _ := checkProbeHostIssues(results, []string{"192.0.2.42:9444"}, nil, tokens, ownerUptime, map[string]bool{"rw-129": true})
 	if len(issues) != 0 {
 		t.Errorf("issues = %v, want none — the reading predates the owner's own restart", issues)
 	}
@@ -1186,7 +1186,7 @@ func TestCheckCoherence_PlaneWarningsSurfacedWithNodeIdentity(t *testing.T) {
 
 func TestCheckCoherence_UnreachableNodePlaneWarningsIgnored(t *testing.T) {
 	nodes := []nodeData{
-		{Reachable: false, Addr: "192.168.0.22:9443"},
+		{Reachable: false, Addr: "192.0.2.22:9443"},
 	}
 	warnings := checkCoherence(nodes, map[string]tokenInfo{})
 	for _, w := range warnings {

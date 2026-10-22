@@ -199,7 +199,7 @@ necessarily already discovered.</p>
 {{range .ReplaceTargets}}<option value="{{.}}">{{.}} (occupied — replace)</option>{{end}}
 </select>
 </label><br>
-<label>Address (host:port): <input type="text" name="addr" id="manual-inspect-addr" placeholder="192.168.0.22:9443"></label><br>
+<label>Address (host:port): <input type="text" name="addr" id="manual-inspect-addr" placeholder="192.0.2.22:9443"></label><br>
 <label>Join code (read from the fresh node's own bootstrap console): <input type="password" name="otp" autocomplete="off"></label><br>
 <button type="submit">Onboard / Replace</button>
 </form>

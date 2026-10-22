@@ -22,10 +22,10 @@ func TestPendingNodeOp_DescribeDistinguishesOnboardVsReplace(t *testing.T) {
 		op   pendingNodeOp
 		want string
 	}{
-		{"core role missing", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.168.0.23:9443", Onboarding: true}, "Onboard 192.168.0.23:9443 as core-2"},
-		{"core role occupied", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.168.0.23:9443", Onboarding: false}, "Replace core-2 with 192.168.0.23:9443"},
-		{"probe missing", pendingNodeOp{Kind: nodeOpReplace, Role: probeRoleName, Addr: "192.168.0.43:9444", Onboarding: true}, "Onboard 192.168.0.43:9444 as the probe host"},
-		{"probe occupied", pendingNodeOp{Kind: nodeOpReplace, Role: probeRoleName, Addr: "192.168.0.43:9444", Onboarding: false}, "Replace the probe host with 192.168.0.43:9444"},
+		{"core role missing", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.0.2.23:9443", Onboarding: true}, "Onboard 192.0.2.23:9443 as core-2"},
+		{"core role occupied", pendingNodeOp{Kind: nodeOpReplace, Role: "core-2", Addr: "192.0.2.23:9443", Onboarding: false}, "Replace core-2 with 192.0.2.23:9443"},
+		{"probe missing", pendingNodeOp{Kind: nodeOpReplace, Role: probeRoleName, Addr: "192.0.2.43:9444", Onboarding: true}, "Onboard 192.0.2.43:9444 as the probe host"},
+		{"probe occupied", pendingNodeOp{Kind: nodeOpReplace, Role: probeRoleName, Addr: "192.0.2.43:9444", Onboarding: false}, "Replace the probe host with 192.0.2.43:9444"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -72,7 +72,7 @@ func TestRoleIsMissing(t *testing.T) {
 	if !roleIsMissing(cfg, probeRoleName) {
 		t.Error("probe should be missing with zero ProbeHosts")
 	}
-	cfg.ProbeHosts = []NodeConfig{{Name: "probe", Addr: "192.168.0.43:9444"}}
+	cfg.ProbeHosts = []NodeConfig{{Name: "probe", Addr: "192.0.2.43:9444"}}
 	if roleIsMissing(cfg, probeRoleName) {
 		t.Error("probe should NOT be missing once one is adopted")
 	}
@@ -114,12 +114,12 @@ func TestExecuteReplaceProbe_RemovesExistingProbeFirst(t *testing.T) {
 
 	cfg := &WebConfig{
 		Nodes:      []NodeConfig{{Name: "core-1", Addr: strings.TrimPrefix(core.URL, "http://"), AdminToken: "admin-tok"}},
-		ProbeHosts: []NodeConfig{{Name: "probe", Addr: "192.168.0.43:9444"}}, // the OLD probe
+		ProbeHosts: []NodeConfig{{Name: "probe", Addr: "192.0.2.43:9444"}}, // the OLD probe
 	}
 	ref := newConfigRef(cfg)
 	cfgPath := t.TempDir() + "/web.json"
 
-	op := pendingNodeOp{Kind: nodeOpReplace, Role: probeRoleName, Addr: "192.168.0.99:9444", JoinCode: "X", Onboarding: false}
+	op := pendingNodeOp{Kind: nodeOpReplace, Role: probeRoleName, Addr: "192.0.2.99:9444", JoinCode: "X", Onboarding: false}
 	if _, err := executeReplaceProbe(cfgPath, ref, "tester", op); err != nil {
 		t.Fatalf("executeReplaceProbe: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestExecuteReplaceProbe_RemovesExistingProbeFirst(t *testing.T) {
 	if len(hosts) != 1 {
 		t.Fatalf("ProbeHosts = %v, want exactly 1 entry (the new one, old one removed)", hosts)
 	}
-	if hosts[0].Addr != "192.168.0.99:9444" {
+	if hosts[0].Addr != "192.0.2.99:9444" {
 		t.Errorf("ProbeHosts[0].Addr = %q, want the new address", hosts[0].Addr)
 	}
 }
@@ -146,12 +146,12 @@ func TestExecuteReplaceProbe_NoExistingProbeAddsCleanly(t *testing.T) {
 	ref := newConfigRef(cfg)
 	cfgPath := t.TempDir() + "/web.json"
 
-	op := pendingNodeOp{Kind: nodeOpReplace, Role: probeRoleName, Addr: "192.168.0.43:9444", JoinCode: "X", Onboarding: true}
+	op := pendingNodeOp{Kind: nodeOpReplace, Role: probeRoleName, Addr: "192.0.2.43:9444", JoinCode: "X", Onboarding: true}
 	if _, err := executeReplaceProbe(cfgPath, ref, "tester", op); err != nil {
 		t.Fatalf("executeReplaceProbe: %v", err)
 	}
 	hosts := ref.Load().ProbeHosts
-	if len(hosts) != 1 || hosts[0].Addr != "192.168.0.43:9444" {
+	if len(hosts) != 1 || hosts[0].Addr != "192.0.2.43:9444" {
 		t.Fatalf("ProbeHosts = %v, want exactly the new entry", hosts)
 	}
 }
@@ -169,13 +169,13 @@ func TestExecuteReplaceProbe_ResolvesRealPortNotTheDiscoveredBootstrapPort(t *te
 	ref := newConfigRef(cfg)
 	cfgPath := t.TempDir() + "/web.json"
 
-	op := pendingNodeOp{Kind: nodeOpReplace, Role: probeRoleName, Addr: "192.168.0.42:80", JoinCode: "X", Onboarding: true}
+	op := pendingNodeOp{Kind: nodeOpReplace, Role: probeRoleName, Addr: "192.0.2.42:80", JoinCode: "X", Onboarding: true}
 	if _, err := executeReplaceProbe(cfgPath, ref, "tester", op); err != nil {
 		t.Fatalf("executeReplaceProbe: %v", err)
 	}
 	hosts := ref.Load().ProbeHosts
-	if len(hosts) != 1 || hosts[0].Addr != "192.168.0.42:9444" {
-		t.Fatalf("ProbeHosts = %v, want exactly one entry at 192.168.0.42:9444 (the probe's own real port, not the discovered :80)", hosts)
+	if len(hosts) != 1 || hosts[0].Addr != "192.0.2.42:9444" {
+		t.Fatalf("ProbeHosts = %v, want exactly one entry at 192.0.2.42:9444 (the probe's own real port, not the discovered :80)", hosts)
 	}
 }
 
@@ -204,13 +204,13 @@ func TestExecuteReplaceProbe_FallsBackToSelfWhenNodesIsEmpty(t *testing.T) {
 	ref := newConfigRef(cfg)
 	cfgPath := t.TempDir() + "/web.json"
 
-	op := pendingNodeOp{Kind: nodeOpReplace, Role: probeRoleName, Addr: "192.168.0.43:9444", JoinCode: "X", Onboarding: true}
+	op := pendingNodeOp{Kind: nodeOpReplace, Role: probeRoleName, Addr: "192.0.2.43:9444", JoinCode: "X", Onboarding: true}
 	if _, err := executeReplaceProbe(cfgPath, ref, "tester", op); err != nil {
 		t.Fatalf("executeReplaceProbe: %v", err)
 	}
 
 	hosts := ref.Load().ProbeHosts
-	if len(hosts) != 1 || hosts[0].Addr != "192.168.0.43:9444" {
+	if len(hosts) != 1 || hosts[0].Addr != "192.0.2.43:9444" {
 		t.Fatalf("ProbeHosts = %v, want exactly the new entry", hosts)
 	}
 }
@@ -221,7 +221,7 @@ func TestReplaceNodeFormHandler_SetsOnboardingFlagFromLiveState(t *testing.T) {
 	ref := newConfigRef(cfg)
 	cfgPath := t.TempDir() + "/web.json"
 
-	form := "role=core-2&addr=192.168.0.23%3A9443&otp=X"
+	form := "role=core-2&addr=192.0.2.23%3A9443&otp=X"
 	req := httptest.NewRequest(http.MethodPost, "/nodes/replace", strings.NewReader(form))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req = req.WithContext(context.WithValue(req.Context(), userContextKey{}, webauth.User{Name: "tester"}))
@@ -232,7 +232,7 @@ func TestReplaceNodeFormHandler_SetsOnboardingFlagFromLiveState(t *testing.T) {
 	if op == nil || !op.Onboarding {
 		t.Fatalf("currentNodeOp() = %+v, want Onboarding=true for a missing role", op)
 	}
-	if !strings.Contains(rec.Body.String(), "Onboard 192.168.0.23:9443 as core-2") {
+	if !strings.Contains(rec.Body.String(), "Onboard 192.0.2.23:9443 as core-2") {
 		t.Errorf("expected the onboard wording in the staged response, got: %s", rec.Body.String())
 	}
 }

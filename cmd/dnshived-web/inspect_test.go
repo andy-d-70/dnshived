@@ -14,7 +14,7 @@ import (
 // TestFormatInspectResult_AllDetectedReadsClean confirms the happy path
 // — every trunk matched by name — reads as a clear go-ahead.
 func TestFormatInspectResult_AllDetectedReadsClean(t *testing.T) {
-	out := formatInspectResult("192.168.0.25:9443", inspectResponse{
+	out := formatInspectResult("192.0.2.25:9443", inspectResponse{
 		OK: true, OS: "Debian GNU/Linux 13 (trixie)",
 		CandidateInterfaces: []string{"ens19", "ens20"},
 		Mapping:             map[string]string{"ens19": "ens19", "ens20": "ens20"},
@@ -33,7 +33,7 @@ func TestFormatInspectResult_AllDetectedReadsClean(t *testing.T) {
 // TestFormatInspectResult_UndetectedTrunkWarnsClearly checks an undetected
 // trunk assignment tells the operator to choose one.
 func TestFormatInspectResult_UndetectedTrunkWarnsClearly(t *testing.T) {
-	out := formatInspectResult("192.168.0.25:9443", inspectResponse{
+	out := formatInspectResult("192.0.2.25:9443", inspectResponse{
 		OK: true, OS: "Debian GNU/Linux 13 (trixie)",
 		CandidateInterfaces: []string{"ens19"},
 		Mapping:             map[string]string{"ens19": "ens19", "ens20": ""},
@@ -50,7 +50,7 @@ func TestFormatInspectResult_UndetectedTrunkWarnsClearly(t *testing.T) {
 }
 
 func TestFormatInspectResult_DifferentNameFlaggedNotSilentlyAccepted(t *testing.T) {
-	out := formatInspectResult("192.168.0.25:9443", inspectResponse{
+	out := formatInspectResult("192.0.2.25:9443", inspectResponse{
 		OK: true, OS: "Some OS",
 		CandidateInterfaces: []string{"eth1"},
 		Mapping:             map[string]string{"ens19": "eth1"},
@@ -61,7 +61,7 @@ func TestFormatInspectResult_DifferentNameFlaggedNotSilentlyAccepted(t *testing.
 }
 
 func TestFormatInspectResult_VersionMismatchWarnsButDoesNotBlock(t *testing.T) {
-	out := formatInspectResult("192.168.0.25:9443", inspectResponse{
+	out := formatInspectResult("192.0.2.25:9443", inspectResponse{
 		OK: true, OS: "Debian GNU/Linux 13 (trixie)",
 		CandidateInterfaces: []string{"ens19"},
 		Mapping:             map[string]string{"ens19": "ens19"},
@@ -85,7 +85,7 @@ func TestFormatInspectResult_VersionMismatchWarnsButDoesNotBlock(t *testing.T) {
 // case (same version, or a candidate that never reported one) prints no
 // warning at all.
 func TestFormatInspectResult_NoVersionMismatchIsSilent(t *testing.T) {
-	out := formatInspectResult("192.168.0.25:9443", inspectResponse{
+	out := formatInspectResult("192.0.2.25:9443", inspectResponse{
 		OK: true, OS: "Some OS",
 		CandidateInterfaces: []string{"ens19"},
 		Mapping:             map[string]string{"ens19": "ens19"},
@@ -98,7 +98,7 @@ func TestFormatInspectResult_NoVersionMismatchIsSilent(t *testing.T) {
 // TestFormatInspectResult_FailureShowsError confirms a hard failure (e.g.
 // candidate unreachable) is shown plainly, not silently blank.
 func TestFormatInspectResult_FailureShowsError(t *testing.T) {
-	out := formatInspectResult("192.168.0.25:9443", inspectResponse{OK: false, Error: "reach candidate: dial tcp: timeout"})
+	out := formatInspectResult("192.0.2.25:9443", inspectResponse{OK: false, Error: "reach candidate: dial tcp: timeout"})
 	if !strings.Contains(out, "FAILED: reach candidate: dial tcp: timeout") {
 		t.Errorf("expected the failure reason surfaced, got:\n%s", out)
 	}
@@ -115,9 +115,9 @@ func TestInspectNodeFormHandler_Core3CanBeTheRunnerNow(t *testing.T) {
 
 	cfg := &WebConfig{Nodes: []NodeConfig{
 		{Name: "core-3", Addr: core3Addr}, // first in order, reachable — must be picked
-		{Name: "core-1", Addr: "192.168.0.99:9443"},
+		{Name: "core-1", Addr: "192.0.2.99:9443"},
 	}}
-	req := httptest.NewRequest(http.MethodPost, "/nodes/inspect", strings.NewReader("addr=192.168.0.25:9443"))
+	req := httptest.NewRequest(http.MethodPost, "/nodes/inspect", strings.NewReader("addr=192.0.2.25:9443"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	inspectNodeFormHandler(newConfigRef(cfg))(rec, req)

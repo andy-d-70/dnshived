@@ -299,3 +299,47 @@ func TestWriteRelayConfig_GroupOwnedByDnshived(t *testing.T) {
 		t.Errorf("relay.json group gid = %d, want %d (dnshived) — the relay process (User=dnshived) must be able to read its own config", stat.Gid, wantGid)
 	}
 }
+
+func TestWriteRelayConfig_PreservesOptionalLimitsAcrossRerender(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "relay.json")
+	if err := WriteRelayConfig(path, testCluster(), ""); err != nil {
+		t.Fatalf("first WriteRelayConfig: %v", err)
+	}
+	loaded, err := dhcprelay.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if loaded.PendingPerVLAN != 0 || loaded.ClientRateLimit != 0 || loaded.ClientRateBurst != 0 {
+		t.Fatalf("a fresh render must leave the optional limits at their defaults (0): %+v", loaded)
+	}
+	loaded.PendingPerVLAN, loaded.ClientRateLimit, loaded.ClientRateBurst = 500, -1, 7
+	data, _ := json.MarshalIndent(loaded, "", "  ")
+	if err := os.WriteFile(path, data, 0640); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := WriteRelayConfig(path, testCluster(), ""); err != nil {
+		t.Fatalf("second WriteRelayConfig: %v", err)
+	}
+	reloaded, err := dhcprelay.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig after re-render: %v", err)
+	}
+	if reloaded.PendingPerVLAN != 500 || reloaded.ClientRateLimit != -1 || reloaded.ClientRateBurst != 7 {
+		t.Errorf("optional limits lost on re-render: %d %d %d", reloaded.PendingPerVLAN, reloaded.ClientRateLimit, reloaded.ClientRateBurst)
+	}
+}
+
+func TestLoadConfig_OldRelayJSONWithoutOptionalLimits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "relay.json")
+	old := `{"client_interfaces":[{"name":"ens19.42","giaddr":"10.42.0.22"}],"server_addr":"127.0.0.21:67","server_interface":"lo","rate_limit":50}`
+	if err := os.WriteFile(path, []byte(old), 0640); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := dhcprelay.LoadConfig(path)
+	if err != nil {
+		t.Fatalf("relay.json from an older release no longer loads: %v", err)
+	}
+	if cfg.RateLimit != 50 || cfg.PendingPerVLAN != 0 {
+		t.Errorf("old fields changed meaning: %+v", cfg)
+	}
+}

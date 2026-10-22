@@ -607,7 +607,7 @@ func TestHandleConfigGet_RendersFullClusterWithoutError(t *testing.T) {
 		json.NewEncoder(w).Encode(config.Cluster{
 			ClusterID: "lab01", NodeID: "worker-a-node", Role: "core-1",
 			Platform:         &config.Platform{Mgmt: "eth0", Workers: []string{"ens19", "ens20"}, InterfaceLabels: map[string]string{"ens19": "Interface Office"}},
-			MgmtVIP:          &config.MgmtVIPConfig{VIP: "192.168.0.230/24", VRRPID: 60},
+			MgmtVIP:          &config.MgmtVIPConfig{VIP: "192.0.2.230/24", VRRPID: 60},
 			APITokens:        []config.APIToken{{Name: "admin", Token: "x", Role: "admin"}},
 			DefaultDNSChecks: []config.DNSCheck{{Name: "example.com.", Type: "A"}},
 			GlobalDNSRecords: []config.DNSRecord{{Name: "fileserver.lan", Type: "A", Value: "10.0.0.50"}},
@@ -626,7 +626,7 @@ func TestHandleConfigGet_RendersFullClusterWithoutError(t *testing.T) {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "192.168.0.230/24") {
+	if !strings.Contains(body, "192.0.2.230/24") {
 		t.Errorf("rendered page missing expected content (mgmt VIP), got:\n%s", body)
 	}
 	if strings.Contains(body, "<h2>Scopes</h2>") {
@@ -647,7 +647,7 @@ func TestHandleConfigGet_OnboardTargetsNeverOfferSelfsOwnRoleAsMissing(t *testin
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(config.Cluster{
 			ClusterID: "lab01", NodeID: "arbiter-node", Role: "core-3",
-			ControlAddr:   "192.168.0.24:9443",
+			ControlAddr:   "192.0.2.24:9443",
 			Platform:      &config.Platform{Mgmt: "eth0", Workers: []string{"ens19"}},
 			APITokens:     []config.APIToken{{Name: "admin", Token: "x", Role: "admin"}},
 			ScopeDefaults: &config.ScopeDefaults{GatewaySuffix: "1"},

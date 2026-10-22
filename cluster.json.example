@@ -4,7 +4,7 @@
   "cluster_id": "lab01",
   "node_id": "dnshived1022",
   "role": "core-1",
-  "control_addr": "192.168.0.22:9443",
+  "control_addr": "192.0.2.22:9443",
 
   "bind_addr": "",
   "data_dir": "/var/lib/dnshived",
@@ -13,8 +13,8 @@
   "dry_run": true,
 
   "peers": [
-    "192.168.0.23:9443",
-    "192.168.0.24:9443"
+    "192.0.2.23:9443",
+    "192.0.2.24:9443"
   ],
 
   "tls_cert": "/etc/dnshived/tls/cert.pem",

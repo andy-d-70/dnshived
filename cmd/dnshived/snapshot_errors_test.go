@@ -14,7 +14,7 @@ func TestFetchJSONFrom_ReadableErrors(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/redirect":
-			http.Redirect(w, r, "https://192.168.0.254:8443/x", http.StatusMovedPermanently)
+			http.Redirect(w, r, "https://192.0.2.254:8443/x", http.StatusMovedPermanently)
 		case "/text":
 			w.Header().Set("Content-Type", "text/plain")
 			w.Write([]byte("authentication required\n"))

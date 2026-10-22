@@ -26,12 +26,12 @@ func TestReplaceNodeHandler_RefusesUndetectedTrunkWithoutChanges(t *testing.T) {
 
 	origCfg := currentConfig.Load()
 	t.Cleanup(func() { currentConfig.Store(origCfg) })
-	cfg := &config.Cluster{Role: "core-1", ControlAddr: "192.168.0.51:9443",
+	cfg := &config.Cluster{Role: "core-1", ControlAddr: "192.0.2.51:9443",
 		Platform: &config.Platform{Mgmt: "ens18", Workers: []string{"ens19"}}}
 	currentConfig.Store(cfg)
 	cfgPath := filepath.Join(t.TempDir(), "cluster.json")
 
-	observer := cluster.NewObserver(identity.Identity{Role: "core-1"}, "192.168.0.51:9443", nil, "")
+	observer := cluster.NewObserver(identity.Identity{Role: "core-1"}, "192.0.2.51:9443", nil, "")
 	handler := replaceNodeHandler(cfgPath, observer, nil, nil, nil)
 
 	body, _ := json.Marshal(replaceNodeRequest{Role: "core-3", Addr: candidateAt(t, candidate), OTP: "x"})

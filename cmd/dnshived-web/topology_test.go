@@ -91,7 +91,7 @@ func TestBuildTopologyNode_GroupsScopesUnderTheirParentInterfaceSortedByVLAN(t *
 func TestBuildTopologyNode_Core3GetsFullTreeLikeAnyOtherRole(t *testing.T) {
 	c := config.Cluster{
 		Platform: &config.Platform{Mgmt: "ens18", Workers: []string{"ens19"}},
-		MgmtVIP:  &config.MgmtVIPConfig{VIP: "192.168.0.230/24", VRRPID: 60},
+		MgmtVIP:  &config.MgmtVIPConfig{VIP: "192.0.2.230/24", VRRPID: 60},
 		Scopes: map[string]config.ScopeConfig{
 			"office": {Parent: "ens19", VLANID: 104},
 		},
@@ -109,7 +109,7 @@ func TestBuildTopologyNode_Core3GetsFullTreeLikeAnyOtherRole(t *testing.T) {
 	if tn.Interfaces[0].VLANs[0].Badge != "standby" {
 		t.Errorf("Badge = %q, want standby — st.Serving is nil in this fixture", tn.Interfaces[0].VLANs[0].Badge)
 	}
-	if tn.MgmtVIP != "192.168.0.230/24" {
+	if tn.MgmtVIP != "192.0.2.230/24" {
 		t.Errorf("MgmtVIP = %q, want the real configured VIP — core-3 is the mgmt VIP's preferred holder now, not excluded from it", tn.MgmtVIP)
 	}
 	if tn.MgmtIface != "ens18" {
@@ -525,10 +525,10 @@ func TestBuildCombinedTopology_CarriesInterfaceLabelThrough(t *testing.T) {
 func TestBuildTopologyNode_MgmtVIPSurfacedWhenPresent(t *testing.T) {
 	c := config.Cluster{
 		Platform: &config.Platform{Mgmt: "ens18"},
-		MgmtVIP:  &config.MgmtVIPConfig{VIP: "192.168.0.100/24", VRRPID: 99},
+		MgmtVIP:  &config.MgmtVIPConfig{VIP: "192.0.2.100/24", VRRPID: 99},
 	}
 	tn := buildTopologyNode(NodeConfig{Name: "core-1"}, nodeStatus{Role: config.RoleCore1}, nil, c, nil)
-	if tn.MgmtVIP != "192.168.0.100/24" {
-		t.Errorf("MgmtVIP = %q, want 192.168.0.100/24", tn.MgmtVIP)
+	if tn.MgmtVIP != "192.0.2.100/24" {
+		t.Errorf("MgmtVIP = %q, want 192.0.2.100/24", tn.MgmtVIP)
 	}
 }

@@ -956,7 +956,7 @@ func TestListenAddr(t *testing.T) {
 func TestMgmtVIPValid(t *testing.T) {
 	cfg := validBase()
 	cfg["mgmt_vip"] = map[string]interface{}{
-		"vip":     "192.168.0.100/24",
+		"vip":     "192.0.2.100/24",
 		"vrrp_id": 200,
 	}
 	path := writeConfig(t, cfg)
@@ -964,8 +964,8 @@ func TestMgmtVIPValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid mgmt_vip should load: %v", err)
 	}
-	if c.MgmtVIP == nil || c.MgmtVIP.VIP != "192.168.0.100/24" {
-		t.Errorf("MgmtVIP = %+v, want VIP=192.168.0.100/24", c.MgmtVIP)
+	if c.MgmtVIP == nil || c.MgmtVIP.VIP != "192.0.2.100/24" {
+		t.Errorf("MgmtVIP = %+v, want VIP=192.0.2.100/24", c.MgmtVIP)
 	}
 }
 
@@ -980,7 +980,7 @@ func TestMgmtVIPMissingVIP(t *testing.T) {
 
 func TestMgmtVIPOutOfRange(t *testing.T) {
 	cfg := validBase()
-	cfg["mgmt_vip"] = map[string]interface{}{"vip": "192.168.0.100/24", "vrrp_id": 256}
+	cfg["mgmt_vip"] = map[string]interface{}{"vip": "192.0.2.100/24", "vrrp_id": 256}
 	path := writeConfig(t, cfg)
 	if _, err := Load(path); err == nil {
 		t.Error("expected error for mgmt_vip vrrp_id out of range")
@@ -992,7 +992,7 @@ func TestMgmtVIPOutOfRange(t *testing.T) {
 func TestMgmtVIPCollidesWithScope(t *testing.T) {
 	cfg := validBase()
 	// office already uses vrrp_id 51 in validBase().
-	cfg["mgmt_vip"] = map[string]interface{}{"vip": "192.168.0.100/24", "vrrp_id": 51}
+	cfg["mgmt_vip"] = map[string]interface{}{"vip": "192.0.2.100/24", "vrrp_id": 51}
 	path := writeConfig(t, cfg)
 	if _, err := Load(path); err == nil {
 		t.Error("expected error for mgmt_vip vrrp_id colliding with a scope's vrrp_id")
@@ -1294,7 +1294,7 @@ func TestDNSClientMismatch_WarnsViaClientDNSServerField(t *testing.T) {
 
 func TestDNSClientMismatch_WarnsViaGlobalRecordsAndDefaultOptions(t *testing.T) {
 	c := &Cluster{
-		GlobalDNSRecords:   []DNSRecord{{Name: "ntp.local", Type: "A", Value: "192.168.0.10"}},
+		GlobalDNSRecords:   []DNSRecord{{Name: "ntp.local", Type: "A", Value: "192.0.2.10"}},
 		DefaultDHCPOptions: []string{"option:dns-server,1.1.1.1"},
 		Scopes: map[string]ScopeConfig{
 			"av-dante": {},
@@ -1658,7 +1658,7 @@ func TestNonOverlappingDHCPRanges_NoWarning(t *testing.T) {
 }
 
 func TestTrustedHosts_RejectsMalformedIP(t *testing.T) {
-	c := &Cluster{TrustedHosts: []string{"192.168.0.22", "not-an-ip"}}
+	c := &Cluster{TrustedHosts: []string{"192.0.2.22", "not-an-ip"}}
 	res := c.ValidateExtended()
 	found := false
 	for _, e := range res.Errors {

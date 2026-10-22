@@ -3,7 +3,10 @@
 
 package dhcprelay
 
-import "net"
+import (
+	"bytes"
+	"net"
+)
 
 func (r *Relay) handleServerReplies(ci *clientInterface) {
 	buf := make([]byte, maxPacketLen)
@@ -13,11 +16,10 @@ func (r *Relay) handleServerReplies(ci *clientInterface) {
 			if r.closing.Load() || ci.removing.Load() {
 				return
 			}
-			r.logThrottled("reply_read_error:"+ci.name, "read reply socket for %s: %v", ci.name, err)
+			r.logThrottled(throttleKey{"reply_read_error", ci.name}, "read reply socket for %s: %v", ci.name, err)
 			continue
 		}
-		packet := append([]byte(nil), buf[:n]...)
-		r.handleServerReply(ci, packet, from)
+		r.handleServerReply(ci, buf[:n], from)
 	}
 }
 
@@ -33,13 +35,12 @@ func (r *Relay) handleServerReply(ci *clientInterface, packet []byte, from *net.
 		return
 	}
 
-	giaddr := extractGIAddr(packet)
-	if !giaddr.Equal(ci.giaddr) {
+	if !bytes.Equal(packet[bootpGIAddrOffset:bootpGIAddrOffset+4], ci.giaddr.To4()) {
 		r.metrics.repliesDropped.Add(1)
 		return
 	}
 
-	key, ok := makeTransactionKey(packet, giaddr)
+	key, ok := makeTransactionKey(packet, ci.giaddr)
 	if !ok {
 		r.metrics.repliesDropped.Add(1)
 		return
@@ -52,10 +53,10 @@ func (r *Relay) handleServerReply(ci *clientInterface, packet []byte, from *net.
 
 	rewriteServerIdentifier(packet, ci.effectiveServerIdentifier())
 
-	dst := &net.UDPAddr{IP: determineClientDestination(packet), Port: dhcpClientPort}
+	dst := clientDestination(packet)
 
 	if _, err := ci.conn.WriteToUDP(packet, dst); err != nil {
-		r.logThrottled("downstream_write_error:"+ci.name, "forward reply to %s via %s: %v", dst, ci.name, err)
+		r.logThrottled(throttleKey{"downstream_write_error", ci.name}, "forward reply to %s via %s: %v", dst, ci.name, err)
 		return
 	}
 

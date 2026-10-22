@@ -80,9 +80,9 @@ func (b *builderState) setSelfAddr(addr string) error {
 		return &setupError{msg: "address is required"}
 	}
 	if _, port, err := net.SplitHostPort(addr); err != nil {
-		return &setupError{msg: "address must be host:port, e.g. 192.168.0.22:9443: " + err.Error()}
+		return &setupError{msg: "address must be host:port, e.g. 192.0.2.22:9443: " + err.Error()}
 	} else if port == "" {
-		return &setupError{msg: "address must include a port, e.g. 192.168.0.22:9443"}
+		return &setupError{msg: "address must include a port, e.g. 192.0.2.22:9443"}
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -199,7 +199,7 @@ func (b *builderState) setMgmtVIP(vip string, vrrpID int) error {
 		return nil
 	}
 	if _, _, err := net.ParseCIDR(vip); err != nil {
-		return &setupError{msg: "management VIP must be an address with a prefix, e.g. 192.168.0.230/24: " + err.Error()}
+		return &setupError{msg: "management VIP must be an address with a prefix, e.g. 192.0.2.230/24: " + err.Error()}
 	}
 	if vrrpID < 1 || vrrpID > 255 {
 		return &setupError{msg: "VRRP ID must be between 1 and 255"}
@@ -456,7 +456,7 @@ var bootstrapSetupTmpl = template.Must(template.New("bootstrap-setup").Parse(`<!
 <h2>Management VIP (optional)</h2>
 <p class="hint">A floating address shared by the whole cluster for reaching the web UI, regardless of which node currently holds it. Leave blank and continue to skip this entirely.</p>
 <form method="post" action="/setup/mgmt-vip">
-<label>Management VIP (e.g. 192.168.0.230/24): <input type="text" name="mgmt_vip" value="{{.CurrentMgmtVIP}}" placeholder="192.168.0.230/24"></label><br>
+<label>Management VIP (e.g. 192.0.2.230/24): <input type="text" name="mgmt_vip" value="{{.CurrentMgmtVIP}}" placeholder="192.0.2.230/24"></label><br>
 <label>VRRP ID (only used if a management VIP is set, default 60): <input type="text" name="vrrp_id" value="{{.CurrentMgmtVRRPID}}" placeholder="60"></label><br>
 <button type="submit">Save and continue</button>
 </form>
@@ -482,7 +482,7 @@ var bootstrapSetupTmpl = template.Must(template.New("bootstrap-setup").Parse(`<!
 {{range .Nodes}}<li>{{.Role}} at {{.Addr}}{{if .TrunkParent}} (trunk: {{.TrunkParent}}){{end}}{{template "detected" .}}</li>{{end}}
 </ul>{{else}}<p>None recorded yet — a single-node cluster is a real, supported starting point; onboard peers and a probe host later too, whenever you're ready.</p>{{end}}
 <form method="post" action="/setup/nodes">
-<label>Address: <input type="text" name="addr" placeholder="192.168.0.23:9443" required></label><br>
+<label>Address: <input type="text" name="addr" placeholder="192.0.2.23:9443" required></label><br>
 <label>Role:
 <select name="role" required>
 {{range .Roles}}<option value="{{.}}">{{.}}</option>{{end}}

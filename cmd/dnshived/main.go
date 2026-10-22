@@ -414,6 +414,8 @@ func main() {
 		events:      events,
 		role:        cfg.Role,
 		incarnation: self.Incarnation,
+		split:       desired.NewSplitTracker(),
+		splitDetail: make(map[string]string),
 	}
 	go func() {
 		ticker := time.NewTicker(lease.DefaultRenewInterval)
@@ -1429,8 +1431,10 @@ type reconcileLoop struct {
 	role        string
 	incarnation uint64
 
-	lastState fsm.State
-	lastWM    fencing.Token
+	lastState   fsm.State
+	lastWM      fencing.Token
+	split       *desired.SplitTracker
+	splitDetail map[string]string
 }
 
 // once runs exactly one reconcile pass.
@@ -1455,18 +1459,26 @@ func (rl *reconcileLoop) once(reason string) {
 	}
 
 	if st == fsm.StateStable {
+		if wmTok, moved := rl.observer.AdvanceWatermark(rl.watermark, verdict); moved && wmTok.Compare(rl.lastWM) != 0 {
+			log.Printf("[FENCING:ADVANCE] watermark advanced to %s from peers before the desired-state pass (trigger: %s)", wmTok, reason)
+			rl.events.Add("INFO", "FENCING:ADVANCE", fmt.Sprintf("watermark advanced to %s from peers before the desired-state pass (trigger: %s)", wmTok, reason))
+			rl.lastWM = wmTok
+		}
 		rl.machine.FloorToken(rl.watermark.Current())
 	}
 
 	core1Alive, core2Alive, core3Alive := rl.observer.CoreRoleLiveness()
-	rl.engine.Reconcile(st, desired.WorkerLiveness{
+	observedServing := rl.collectObservedServing()
+	desiredMap := rl.engine.Reconcile(st, desired.WorkerLiveness{
 		Core1Alive:  core1Alive,
 		Core2Alive:  core2Alive,
 		Core3Alive:  core3Alive,
 		TrunkHealth: rl.collectTrunkHealth(),
 		TrunkScore:  rl.collectTrunkScore(),
-		Observed:    rl.collectObservedServing(),
+		Observed:    observedServing,
 	}, rl.watermark.Current().Generation)
+	desiredOwners := desired.OwnerMap(desiredMap.Assignments)
+	rl.compareDesiredMaps(desiredMap, desiredOwners)
 
 	owned, gen := rl.engine.OwnedScopes(rl.role)
 	rl.leaseMgr.Reconcile(owned, gen, rl.incarnation)
@@ -1493,6 +1505,9 @@ func (rl *reconcileLoop) once(reason string) {
 		SelfToken:   tok,
 		Watermark:   rl.watermark.Current(),
 		Now:         time.Now().Unix(),
+
+		DesiredOwners: desiredOwners,
+		ServedBy:      observedServing,
 	})
 	newServing := rl.ag.Serving()
 	if !stringSlicesEqual(prevServing, newServing) {
@@ -1501,6 +1516,60 @@ func (rl *reconcileLoop) once(reason string) {
 	rl.observer.UpdateServing(newServing)
 	rl.observer.UpdateTrunkHealth(rl.ag.TrunkHealth())
 	rl.observer.UpdateTrunkScore(rl.ag.LocalTrunkScores())
+}
+
+func (rl *reconcileLoop) compareDesiredMaps(m desired.Map, owners map[string]string) {
+	hash := desired.MapHash(owners)
+	announced := owners
+	if len(owners) > desired.MaxAnnouncedOwners {
+		announced = nil
+	}
+	rl.observer.UpdateDesired(m.Generation, m.Authoritative, hash, announced)
+
+	now := time.Now()
+	seen := make(map[string]bool)
+	for _, p := range rl.observer.PeerDesiredMaps() {
+		seen[p.Role] = true
+		split := m.Authoritative && p.Authoritative && p.Generation == m.Generation && p.Hash != hash
+		if split {
+			detail := "map too large to compare per scope"
+			disputed := make([]string, 0, len(owners))
+			if p.Owners != nil && announced != nil {
+				detail = desired.JoinDiff(desired.DiffOwners(owners, p.Owners))
+				disputed = desired.DisputedScopes(owners, p.Owners)
+			} else {
+				for s := range owners {
+					disputed = append(disputed, s)
+				}
+			}
+			rl.splitDetail[p.Role] = detail
+			rl.engine.DisputeUnservedOwners(disputed)
+		}
+		detail := rl.splitDetail[p.Role]
+		if !split {
+			delete(rl.splitDetail, p.Role)
+		}
+		action, lasted := rl.split.Observe(now, p.Role, split)
+		switch action {
+		case desired.SplitWarn:
+			msg := fmt.Sprintf("desired-state map differs from %s at generation %d for %s (hash here %s, peer %s): %s",
+				p.Role, m.Generation, lasted.Round(time.Second), hash, p.Hash, detail)
+			log.Printf("[DESIRED:SPLIT] WARNING %s", msg)
+			rl.events.Add("WARNING", "DESIRED:SPLIT", msg)
+		case desired.SplitResolved:
+			msg := fmt.Sprintf("desired-state map agrees with %s again after %s", p.Role, lasted.Round(time.Second))
+			log.Printf("[DESIRED:SPLIT] %s", msg)
+			rl.events.Add("INFO", "DESIRED:SPLIT", msg)
+		case desired.SplitHealed:
+			log.Printf("[DESIRED:SPLIT] desired-state map differed from %s for %s at the same generation, healed by itself: %s", p.Role, lasted.Round(time.Second), detail)
+		}
+	}
+	rl.split.Forget(seen)
+	for role := range rl.splitDetail {
+		if !seen[role] {
+			delete(rl.splitDetail, role)
+		}
+	}
 }
 
 func (rl *reconcileLoop) collectObservedServing() desired.CurrentServing {

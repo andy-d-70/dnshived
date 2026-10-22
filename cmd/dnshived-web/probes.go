@@ -626,7 +626,7 @@ probe results right after saving.</p>
 </form>
 {{else}}<p>None adopted.</p>{{end}}
 <form method="post" action="/nodes/probe/add">
-<label>Address (host:port): <input type="text" name="addr" placeholder="192.168.0.43:9444"></label><br>
+<label>Address (host:port): <input type="text" name="addr" placeholder="192.0.2.43:9444"></label><br>
 <label>Join code (read from the probe's own bootstrap console): <input type="password" name="otp" autocomplete="off"></label><br>
 <p class="dim">Trunk coverage is derived automatically from the cluster's own configured worker interfaces — a probe host always covers every one of them, no separate entry needed here.</p>
 <button type="submit">Add probe</button>

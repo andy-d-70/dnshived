@@ -229,21 +229,21 @@ func TestObserver_HandlePing_AnnouncesOwnServing(t *testing.T) {
 func TestObserver_SetTrustedHosts_TakesEffectOnAnAlreadyRunningObserver(t *testing.T) {
 	self := identity.Identity{ClusterID: "test-cluster", NodeID: "self", Role: "core-1"}
 	o := NewObserver(self, "self-addr", nil, "")
-	o.SetTrustedHosts([]string{"192.168.0.23"})
+	o.SetTrustedHosts([]string{"192.0.2.23"})
 
 	deny := httptest.NewRecorder()
 	denyReq := httptest.NewRequest(http.MethodPost, "/api/v1/ping", nil)
-	denyReq.RemoteAddr = "192.168.0.22:54321"
+	denyReq.RemoteAddr = "192.0.2.22:54321"
 	o.HandlePing(deny, denyReq)
 	if deny.Code != http.StatusForbidden {
 		t.Fatalf("status = %d before SetTrustedHosts includes .22, want 403", deny.Code)
 	}
 
-	o.SetTrustedHosts([]string{"192.168.0.22", "192.168.0.23"})
+	o.SetTrustedHosts([]string{"192.0.2.22", "192.0.2.23"})
 
 	allow := httptest.NewRecorder()
 	allowReq := httptest.NewRequest(http.MethodPost, "/api/v1/ping", nil)
-	allowReq.RemoteAddr = "192.168.0.22:54321"
+	allowReq.RemoteAddr = "192.0.2.22:54321"
 	o.HandlePing(allow, allowReq)
 	if allow.Code != http.StatusOK {
 		t.Fatalf("status = %d after a live SetTrustedHosts update including .22, want 200 — the exact live-update-doesn't-take-effect bug this test guards against", allow.Code)
@@ -1272,8 +1272,8 @@ func TestDeriveRoleAddr_LiveIdentifiedPeer(t *testing.T) {
 	self := identity.Identity{ClusterID: "c", NodeID: "self", Role: "core-1"}
 	o := NewObserver(self, "self-addr", nil, "")
 
-	o.SetPeerForTest("192.168.0.23:9443", &PeerState{
-		Addr: "192.168.0.23:9443", Reachable: true,
+	o.SetPeerForTest("192.0.2.23:9443", &PeerState{
+		Addr: "192.0.2.23:9443", Reachable: true,
 		Identity: &identity.Identity{Role: "core-2"},
 	})
 
@@ -1298,8 +1298,8 @@ func TestDeriveRoleAddr_UnreachableButPreviouslyIdentifiedStillResolves(t *testi
 	self := identity.Identity{ClusterID: "c", NodeID: "self", Role: "core-1"}
 	o := NewObserver(self, "self-addr", nil, "")
 
-	o.SetPeerForTest("192.168.0.24:9443", &PeerState{
-		Addr: "192.168.0.24:9443", Reachable: false,
+	o.SetPeerForTest("192.0.2.24:9443", &PeerState{
+		Addr: "192.0.2.24:9443", Reachable: false,
 		Identity: &identity.Identity{Role: "core-3"},
 	})
 

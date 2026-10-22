@@ -334,7 +334,7 @@ func TestPendingTable_SweepRemovesOnlyExpired(t *testing.T) {
 	// Force "stale" into the past directly, without waiting EntryTTL.
 	s := pt.shard(stale)
 	s.mu.Lock()
-	s.entries[stale] = time.Now().Add(-time.Second)
+	s.entries[stale] = pendingEntry{expiresAt: time.Now().Add(-time.Second)}
 	s.mu.Unlock()
 
 	pt.sweepShard(int(stale.xid % ShardCount))
@@ -511,7 +511,7 @@ func newTestRelay(t *testing.T) (*Relay, *fakeUDPConn, *clientInterface) {
 		t.Fatalf("New: %v", err)
 	}
 	serverConn := newFakeUDPConn()
-	r.serverConn = serverConn
+	r.setServerConn(serverConn)
 	ci := r.clientIfaces[0]
 	ci.conn = newFakeUDPConn()
 	ci.reply = newFakeUDPConn()
@@ -534,7 +534,7 @@ func newTestRelayTwoBackends(t *testing.T) (r *Relay, serverConn *fakeUDPConn, c
 		t.Fatalf("New: %v", err)
 	}
 	serverConn = newFakeUDPConn()
-	relay.serverConn = serverConn
+	relay.setServerConn(serverConn)
 	for _, cif := range relay.clientIfaces {
 		cif.conn = newFakeUDPConn()
 		cif.reply = newFakeUDPConn()
@@ -1005,7 +1005,7 @@ func TestHandleServerReply_RewritesServerIdentifierToConfiguredVIP(t *testing.T)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	r.serverConn = newFakeUDPConn()
+	r.setServerConn(newFakeUDPConn())
 	ci := r.clientIfaces[0]
 	ci.conn = newFakeUDPConn()
 	ci.reply = newFakeUDPConn()

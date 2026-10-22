@@ -11,9 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"dnshived/internal/arbiter"
 	"dnshived/internal/cluster"
 	"dnshived/internal/config"
 	"dnshived/internal/identity"
+	"dnshived/internal/timehealth"
 )
 
 // --- arbiterAddrs ---
@@ -160,6 +162,7 @@ type fakeArbiter struct {
 	accept       atomic.Bool
 	requestCalls atomic.Int64
 	renewCalls   atomic.Int64
+	tamper       func(*arbiter.Token)
 }
 
 func newFakeArbiter(accept bool) *fakeArbiter {
@@ -172,25 +175,42 @@ func (f *fakeArbiter) server() *httptest.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/token/request", func(w http.ResponseWriter, r *http.Request) {
 		f.requestCalls.Add(1)
-		f.respond(w)
+		var req struct {
+			Scope       string `json:"scope"`
+			NodeID      string `json:"node_id"`
+			Incarnation uint64 `json:"incarnation"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		f.respond(w, req.Scope, req.NodeID, req.Incarnation)
 	})
 	mux.HandleFunc("/api/v1/token/renew", func(w http.ResponseWriter, r *http.Request) {
 		f.renewCalls.Add(1)
-		f.respond(w)
+		var req struct {
+			Token arbiter.Token `json:"token"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		f.respond(w, req.Token.Scope, req.Token.Owner, req.Token.Incarnation)
 	})
 	return httptest.NewServer(mux)
 }
 
-func (f *fakeArbiter) respond(w http.ResponseWriter) {
+func (f *fakeArbiter) respond(w http.ResponseWriter, scope, owner string, incarnation uint64) {
 	w.Header().Set("Content-Type", "application/json")
 	if !f.accept.Load() {
 		json.NewEncoder(w).Encode(map[string]interface{}{"accepted": false})
 		return
 	}
-	tok := map[string]interface{}{
-		"scope":      "office",
-		"owner":      "test-node",
-		"expires_at": time.Now().Add(15 * time.Second).Format(time.RFC3339),
+	tok := &arbiter.Token{
+		Scope:       scope,
+		Owner:       owner,
+		Incarnation: incarnation,
+		GrantedAt:   time.Now(),
+		ExpiresAt:   time.Now().Add(15 * time.Second),
+		Nonce:       "n",
+	}
+	tok.Signature = tok.Sign([]byte("psk"))
+	if f.tamper != nil {
+		f.tamper(tok)
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{"accepted": true, "token": tok})
 }
@@ -425,5 +445,94 @@ func TestAcquireFromInstance_ADenialFromPrimaryIsNotRetriedViaFallback(t *testin
 	}
 	if got := fallback.requestCalls.Load(); got != 0 {
 		t.Errorf("fallback requestCalls = %d, want 0 — a real decline must never be retried elsewhere", got)
+	}
+}
+
+func TestAcquireFromInstance_RejectsGrantsThatAreNotGenuineOrNotOurs(t *testing.T) {
+	resign := func(tok *arbiter.Token) { tok.Signature = tok.Sign([]byte("psk")) }
+	cases := []struct {
+		name   string
+		tamper func(*arbiter.Token)
+	}{
+		{"unsigned", func(tok *arbiter.Token) { tok.Signature = "" }},
+		{"signed with another psk", func(tok *arbiter.Token) { tok.Signature = tok.Sign([]byte("other")) }},
+		{"altered after signing", func(tok *arbiter.Token) { tok.ExpiresAt = tok.ExpiresAt.Add(10 * time.Second) }},
+		{"other scope", func(tok *arbiter.Token) { tok.Scope = "dante"; resign(tok) }},
+		{"other owner", func(tok *arbiter.Token) { tok.Owner = "worker-b-node"; resign(tok) }},
+		{"other incarnation", func(tok *arbiter.Token) { tok.Incarnation++; resign(tok) }},
+		{"expired", func(tok *arbiter.Token) { tok.ExpiresAt = time.Now().Add(-time.Second); resign(tok) }},
+		{"expiry too far ahead", func(tok *arbiter.Token) { tok.ExpiresAt = time.Now().Add(2 * time.Minute); resign(tok) }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			arb := newFakeArbiter(true)
+			arb.tamper = tc.tamper
+			srv := arb.server()
+			t.Cleanup(srv.Close)
+			fallback := newFakeArbiter(true)
+			fallbackSrv := fallback.server()
+			t.Cleanup(fallbackSrv.Close)
+
+			a := New(config.RoleCore1, "test-node", 1, "psk", "/tmp", testScopes("office"), nil)
+			c := arbiterCandidate{addr: srv.Listener.Addr().String(), fallback: fallbackSrv.Listener.Addr().String()}
+			if _, _, ok := a.acquireFromInstance("office", c); ok {
+				t.Fatal("acquireFromInstance() ok = true, want false")
+			}
+			if got := fallback.requestCalls.Load(); got != 0 {
+				t.Errorf("fallback requestCalls = %d, want 0 — a rejected answer is not a dial failure", got)
+			}
+		})
+	}
+}
+
+func TestAcquireFromInstance_AcceptsGenuineGrantAndUsesItsExpiry(t *testing.T) {
+	arb := newFakeArbiter(true)
+	srv := arb.server()
+	t.Cleanup(srv.Close)
+
+	a := New(config.RoleCore1, "test-node", 1, "psk", "/tmp", testScopes("office"), nil)
+	_, expiresAt, ok := a.acquireFromInstance("office", arbiterCandidate{addr: srv.Listener.Addr().String()})
+	if !ok {
+		t.Fatal("acquireFromInstance() ok = false, want true for a correctly signed grant")
+	}
+	if d := time.Until(time.Unix(expiresAt, 0)); d < 10*time.Second || d > 16*time.Second {
+		t.Errorf("expiresAt is %s ahead, want about 15s", d)
+	}
+}
+
+func TestAcquireWitness_ForgedRenewalLosesTheVote(t *testing.T) {
+	a, arbiterFake, selfFake, _ := witnessTestSetup(t, true, true, false)
+	if !a.acquireWitness("office") {
+		t.Fatal("first acquireWitness() = false, want true")
+	}
+	forge := func(tok *arbiter.Token) { tok.Signature = "" }
+	arbiterFake.tamper = forge
+	selfFake.tamper = forge
+	if a.acquireWitness("office") {
+		t.Fatal("second acquireWitness() = true, want false — both renewals and fresh requests were forged")
+	}
+	if a.witnessFor("office").Held {
+		t.Error("witnessFor(office).Held = true, want false")
+	}
+}
+
+func TestAcquireFromInstance_AcceptsGrantAndRenewalFromRealArbiter(t *testing.T) {
+	if !timehealth.IsHealthyStrict(5 * time.Second) {
+		t.Skip("host clock not synchronised; the real arbiter refuses grants")
+	}
+	m := arbiter.New([]byte("psk"), func() bool { return true }, t.TempDir())
+	mux := http.NewServeMux()
+	m.AddRoutes(mux)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	a := New(config.RoleCore1, "test-node", 7, "psk", "/tmp", testScopes("office"), nil)
+	c := arbiterCandidate{addr: srv.Listener.Addr().String()}
+	raw, _, ok := a.acquireFromInstance("office", c)
+	if !ok {
+		t.Fatal("acquireFromInstance() ok = false, want true for a grant from the real arbiter")
+	}
+	if _, _, ok := a.renewFromInstance("office", c, raw); !ok {
+		t.Fatal("renewFromInstance() ok = false, want true for a renewal from the real arbiter")
 	}
 }

@@ -12,8 +12,8 @@ import (
 func TestRedirectToHTTPS_PreservesHostAndPath(t *testing.T) {
 	handler := redirectToHTTPS("0.0.0.0:8443", fixedHost(""))
 
-	req := httptest.NewRequest(http.MethodGet, "http://192.168.0.230:8080/scopes?page=2", nil)
-	req.Host = "192.168.0.230:8080"
+	req := httptest.NewRequest(http.MethodGet, "http://192.0.2.230:8080/scopes?page=2", nil)
+	req.Host = "192.0.2.230:8080"
 	rec := httptest.NewRecorder()
 
 	handler(rec, req)
@@ -21,7 +21,7 @@ func TestRedirectToHTTPS_PreservesHostAndPath(t *testing.T) {
 	if rec.Code != http.StatusMovedPermanently {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusMovedPermanently)
 	}
-	want := "https://192.168.0.230:8443/scopes?page=2"
+	want := "https://192.0.2.230:8443/scopes?page=2"
 	if got := rec.Header().Get("Location"); got != want {
 		t.Errorf("Location = %q, want %q", got, want)
 	}
@@ -168,9 +168,9 @@ func TestRedirectToHTTPS_BootstrapPortsGoToWebUIPort(t *testing.T) {
 	cases := []struct {
 		vip, host, want string
 	}{
-		{"192.168.0.230", "192.168.0.51:443", "https://192.168.0.230:8443/scopes"},
-		{"192.168.0.230", "192.168.0.51", "https://192.168.0.230:8443/scopes"},
-		{"", "192.168.0.51:443", "https://192.168.0.51:8443/scopes"},
+		{"192.0.2.230", "192.0.2.51:443", "https://192.0.2.230:8443/scopes"},
+		{"192.0.2.230", "192.0.2.51", "https://192.0.2.230:8443/scopes"},
+		{"", "192.0.2.51:443", "https://192.0.2.51:8443/scopes"},
 	}
 	for _, c := range cases {
 		req := httptest.NewRequest(http.MethodGet, "/scopes", nil)
@@ -186,13 +186,13 @@ func TestRedirectToHTTPS_BootstrapPortsGoToWebUIPort(t *testing.T) {
 func fixedHost(h string) func() string { return func() string { return h } }
 
 func TestVIPHostMiddleware_FollowsLiveVIPChange(t *testing.T) {
-	vip := "192.168.0.230"
+	vip := "192.0.2.230"
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
 	handler := vipHostMiddleware(func() string { return vip }, nil, "https", "8443", inner)
 
-	vip = "192.168.0.231"
+	vip = "192.0.2.231"
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Host = "192.168.0.231:8443"
+	req.Host = "192.0.2.231:8443"
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -201,7 +201,7 @@ func TestVIPHostMiddleware_FollowsLiveVIPChange(t *testing.T) {
 
 	vip = ""
 	req = httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Host = "192.168.0.51:8443"
+	req.Host = "192.0.2.51:8443"
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

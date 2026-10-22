@@ -38,11 +38,11 @@ func newSignedRequestBody(psk []byte, scope, nodeID string) []byte {
 func TestUntrustedHostDeniedDespiteValidHMAC(t *testing.T) {
 	psk := []byte("test-psk")
 	m := New(psk, func() bool { return true }, t.TempDir())
-	m.SetTrustedHosts([]string{"192.168.0.22", "192.168.0.23", "192.168.0.24"})
+	m.SetTrustedHosts([]string{"192.0.2.22", "192.0.2.23", "192.0.2.24"})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/token/request",
 		bytes.NewReader(newSignedRequestBody(psk, "rw-100", "rogue-node")))
-	req.RemoteAddr = "192.168.0.43:55555" // not in trusted_hosts
+	req.RemoteAddr = "192.0.2.43:55555" // not in trusted_hosts
 	w := httptest.NewRecorder()
 
 	m.handleRequest(w, req)
@@ -60,11 +60,11 @@ func TestUntrustedHostDeniedDespiteValidHMAC(t *testing.T) {
 func TestTrustedHostStillGrantedWithValidHMAC(t *testing.T) {
 	psk := []byte("test-psk")
 	m := New(psk, func() bool { return true }, t.TempDir())
-	m.SetTrustedHosts([]string{"192.168.0.22"})
+	m.SetTrustedHosts([]string{"192.0.2.22"})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/token/request",
 		bytes.NewReader(newSignedRequestBody(psk, "rw-100", "core-1")))
-	req.RemoteAddr = "192.168.0.22:55555"
+	req.RemoteAddr = "192.0.2.22:55555"
 	w := httptest.NewRecorder()
 
 	m.handleRequest(w, req)
@@ -108,7 +108,7 @@ func TestEmptyTrustedHostsFailsOpen(t *testing.T) {
 func TestUntrustedHostDeniedOnRenewToo(t *testing.T) {
 	psk := []byte("test-psk")
 	m := New(psk, func() bool { return true }, t.TempDir())
-	m.SetTrustedHosts([]string{"192.168.0.22"})
+	m.SetTrustedHosts([]string{"192.0.2.22"})
 
 	// Seed a token directly (bypassing handleRequest) so renew has
 	// something to act on.
@@ -124,7 +124,7 @@ func TestUntrustedHostDeniedOnRenewToo(t *testing.T) {
 		"token": tok, "timestamp": time.Now().Unix(), "nonce": "renew-nonce",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/token/renew", bytes.NewReader(body))
-	req.RemoteAddr = "192.168.0.43:55555" // not trusted
+	req.RemoteAddr = "192.0.2.43:55555" // not trusted
 	w := httptest.NewRecorder()
 
 	m.handleRenew(w, req)
@@ -140,7 +140,7 @@ func renewRequest(tok *Token) *http.Request {
 		"token": tok, "timestamp": time.Now().Unix(), "nonce": "renew-nonce-" + tok.Nonce,
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/token/renew", bytes.NewReader(body))
-	req.RemoteAddr = "192.168.0.22:55555"
+	req.RemoteAddr = "192.0.2.22:55555"
 	return req
 }
 
@@ -191,10 +191,10 @@ func TestTokenPersistence_SurvivesRestart(t *testing.T) {
 	psk := []byte("test-psk")
 
 	m1 := New(psk, func() bool { return true }, dir)
-	m1.SetTrustedHosts([]string{"192.168.0.22"})
+	m1.SetTrustedHosts([]string{"192.0.2.22"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/token/request",
 		bytes.NewReader(newSignedRequestBody(psk, "rw-100", "core-2")))
-	req.RemoteAddr = "192.168.0.22:55555"
+	req.RemoteAddr = "192.0.2.22:55555"
 	w := httptest.NewRecorder()
 	m1.handleRequest(w, req)
 	if w.Code != http.StatusOK {
@@ -216,10 +216,10 @@ func TestTokenPersistence_SurvivesRestart(t *testing.T) {
 		t.Fatal("a fresh Manager built against the same dataDir has no memory of the prior grant — persistence did not survive the simulated restart")
 	}
 
-	m2.SetTrustedHosts([]string{"192.168.0.22"})
+	m2.SetTrustedHosts([]string{"192.0.2.22"})
 	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/token/request",
 		bytes.NewReader(newSignedRequestBody(psk, "rw-100", "core-1")))
-	req2.RemoteAddr = "192.168.0.22:55555"
+	req2.RemoteAddr = "192.0.2.22:55555"
 	w2 := httptest.NewRecorder()
 	m2.handleRequest(w2, req2)
 	var resp struct {
@@ -236,7 +236,7 @@ func TestTokenPersistence_SurvivesRestart(t *testing.T) {
 func TestHandleRenew_SelfHealsFromValidSignedTokenAfterRestart(t *testing.T) {
 	psk := []byte("test-psk")
 	m := New(psk, func() bool { return true }, t.TempDir())
-	m.SetTrustedHosts([]string{"192.168.0.22"})
+	m.SetTrustedHosts([]string{"192.0.2.22"})
 
 	tok := &Token{
 		Scope: "rw-100", Owner: "core-2", Incarnation: 3,
@@ -267,7 +267,7 @@ func TestHandleRenew_SelfHealsFromValidSignedTokenAfterRestart(t *testing.T) {
 func TestHandleRenew_RejectsExpiredTokenEvenWithValidSignature(t *testing.T) {
 	psk := []byte("test-psk")
 	m := New(psk, func() bool { return true }, t.TempDir())
-	m.SetTrustedHosts([]string{"192.168.0.22"})
+	m.SetTrustedHosts([]string{"192.0.2.22"})
 
 	tok := &Token{
 		Scope: "rw-100", Owner: "core-2", Incarnation: 1,

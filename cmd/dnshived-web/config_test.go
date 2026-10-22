@@ -43,7 +43,7 @@ func TestParseClusterConfigForm_CoreAddressesRoundTrip(t *testing.T) {
 
 func TestParseClusterConfigForm_MgmtVIPBlankVRRPIDDefaultsTo60(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(
-		"mgmt_vip_vip=192.168.0.230%2F24&mgmt_vip_vrrp_id="))
+		"mgmt_vip_vip=192.0.2.230%2F24&mgmt_vip_vrrp_id="))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	if err := r.ParseForm(); err != nil {
 		t.Fatalf("ParseForm: %v", err)
@@ -63,7 +63,7 @@ func TestParseClusterConfigForm_MgmtVIPBlankVRRPIDDefaultsTo60(t *testing.T) {
 
 func TestParseClusterConfigForm_MgmtVIPExplicitVRRPIDIsPreserved(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/config", strings.NewReader(
-		"mgmt_vip_vip=192.168.0.230%2F24&mgmt_vip_vrrp_id=77"))
+		"mgmt_vip_vip=192.0.2.230%2F24&mgmt_vip_vrrp_id=77"))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	if err := r.ParseForm(); err != nil {
 		t.Fatalf("ParseForm: %v", err)
@@ -249,7 +249,7 @@ func TestHandleConfigExport_ScopesModeExcludesSecrets(t *testing.T) {
 		ClusterID: "lab01",
 		PSK:       "supersecretpsk",
 		APITokens: []config.APIToken{{Name: "web-ui", Token: "tok123", Role: "admin"}},
-		Peers:     []string{"192.168.0.23:9443"},
+		Peers:     []string{"192.0.2.23:9443"},
 		Scopes:    map[string]config.ScopeConfig{"office": {VLANID: 100, NodeIP: "172.16.100.22/24"}},
 	}
 	srv := fakeConfigServer(t, c)
@@ -270,7 +270,7 @@ func TestHandleConfigExport_ScopesModeExcludesSecrets(t *testing.T) {
 	if strings.Contains(body, "tok123") {
 		t.Errorf("scopes-mode export leaked an api_token: %s", body)
 	}
-	if strings.Contains(body, "192.168.0.23:9443") {
+	if strings.Contains(body, "192.0.2.23:9443") {
 		t.Errorf("scopes-mode export leaked peers: %s", body)
 	}
 	if !strings.Contains(body, "office") || !strings.Contains(body, "172.16.100.22/24") {
@@ -496,12 +496,12 @@ func TestProbesTmpl_ProbeParallelSectionRendersScopeCounts(t *testing.T) {
 		ProbeHostNames: []string{"probe-big", "probe-small"},
 		probeManagementData: probeManagementData{
 			NodeProbeHosts: []NodeConfig{
-				{Name: "probe-big", Addr: "192.168.0.42:9444"},
-				{Name: "probe-small", Addr: "192.168.0.43:9444"},
+				{Name: "probe-big", Addr: "192.0.2.42:9444"},
+				{Name: "probe-small", Addr: "192.0.2.43:9444"},
 			},
 			ProbeParallelRows: []probeParallelRow{
-				{Name: "probe-big", Addr: "192.168.0.42:9444", Reachable: true, Enabled: false, ScopeCount: 40},
-				{Name: "probe-small", Addr: "192.168.0.43:9444", Reachable: true, Enabled: true, ScopeCount: 5},
+				{Name: "probe-big", Addr: "192.0.2.42:9444", Reachable: true, Enabled: false, ScopeCount: 40},
+				{Name: "probe-small", Addr: "192.0.2.43:9444", Reachable: true, Enabled: true, ScopeCount: 5},
 			},
 			ProbeHostDisplayNames: map[string]string{},
 		},
@@ -523,8 +523,8 @@ func TestProbesTmpl_ProbeParallelWordingSingularForOneHost(t *testing.T) {
 	one := probesPageData{
 		ProbeHostNames: []string{"probe-42"},
 		probeManagementData: probeManagementData{
-			NodeProbeHosts:        []NodeConfig{{Name: "probe-42", Addr: "192.168.0.42:9444"}},
-			ProbeParallelRows:     []probeParallelRow{{Name: "probe-42", Addr: "192.168.0.42:9444", Reachable: true, ScopeCount: 40}},
+			NodeProbeHosts:        []NodeConfig{{Name: "probe-42", Addr: "192.0.2.42:9444"}},
+			ProbeParallelRows:     []probeParallelRow{{Name: "probe-42", Addr: "192.0.2.42:9444", Reachable: true, ScopeCount: 40}},
 			ProbeHostDisplayNames: map[string]string{},
 		},
 	}
@@ -547,11 +547,11 @@ func TestProbesTmpl_ProbeParallelWordingSingularForOneHost(t *testing.T) {
 		ProbeHostNames: []string{"probe-a", "probe-b"},
 		probeManagementData: probeManagementData{
 			NodeProbeHosts: []NodeConfig{
-				{Name: "probe-a", Addr: "192.168.0.42:9444"}, {Name: "probe-b", Addr: "192.168.0.43:9444"},
+				{Name: "probe-a", Addr: "192.0.2.42:9444"}, {Name: "probe-b", Addr: "192.0.2.43:9444"},
 			},
 			ProbeParallelRows: []probeParallelRow{
-				{Name: "probe-a", Addr: "192.168.0.42:9444", Reachable: true, ScopeCount: 40},
-				{Name: "probe-b", Addr: "192.168.0.43:9444", Reachable: true, ScopeCount: 5},
+				{Name: "probe-a", Addr: "192.0.2.42:9444", Reachable: true, ScopeCount: 40},
+				{Name: "probe-b", Addr: "192.0.2.43:9444", Reachable: true, ScopeCount: 5},
 			},
 			ProbeHostDisplayNames: map[string]string{},
 		},
@@ -567,11 +567,11 @@ func TestProbesTmpl_ProbeParallelWordingSingularForOneHost(t *testing.T) {
 }
 
 func TestDeriveNodeIP_UsesThisNodesOwnLastOctet(t *testing.T) {
-	got := deriveNodeIP("192.168.0.22:9443", "172.16.66.254/24")
+	got := deriveNodeIP("192.0.2.22:9443", "172.16.66.254/24")
 	if got != "172.16.66.22/24" {
 		t.Errorf("deriveNodeIP = %q, want 172.16.66.22/24", got)
 	}
-	got = deriveNodeIP("192.168.0.23:9443", "172.16.66.254/24")
+	got = deriveNodeIP("192.0.2.23:9443", "172.16.66.254/24")
 	if got != "172.16.66.23/24" {
 		t.Errorf("deriveNodeIP = %q, want 172.16.66.23/24", got)
 	}
@@ -581,7 +581,7 @@ func TestDeriveNodeIP_InvalidInputsReturnEmpty(t *testing.T) {
 	if got := deriveNodeIP("not-an-addr", "172.16.66.254/24"); got != "" {
 		t.Errorf("deriveNodeIP with bad node addr = %q, want empty", got)
 	}
-	if got := deriveNodeIP("192.168.0.22:9443", "not-a-cidr"); got != "" {
+	if got := deriveNodeIP("192.0.2.22:9443", "not-a-cidr"); got != "" {
 		t.Errorf("deriveNodeIP with bad VIP = %q, want empty", got)
 	}
 }
@@ -591,7 +591,7 @@ func TestPayloadForNode_AlwaysDerivesAddressFallback(t *testing.T) {
 		"new-scope":      {VIP: "172.16.66.254/24"},
 		"existing-scope": {VIP: "172.16.67.254/24", NodeIP: "172.16.67.99/24"},
 	}}
-	out := payloadForNode(p, NodeConfig{Name: "core-1", Addr: "192.168.0.22:9443"})
+	out := payloadForNode(p, NodeConfig{Name: "core-1", Addr: "192.0.2.22:9443"})
 
 	if got := out.Scopes["new-scope"].NodeIP; got != "172.16.66.22/24" {
 		t.Errorf("new-scope NodeIP = %q, want derived 172.16.66.22/24", got)
@@ -608,8 +608,8 @@ func TestPayloadForNode_ExplicitSuffixAlwaysWinsEvenOverExistingNodeIP(t *testin
 		},
 		ScopeDefaults: &config.ScopeDefaults{NodeIPSuffixes: map[string]string{"core-1": "22", "core-2": "23"}},
 	}
-	a := payloadForNode(p, NodeConfig{Name: "core-1", Addr: "192.168.0.22:9443"})
-	b := payloadForNode(p, NodeConfig{Name: "core-2", Addr: "192.168.0.23:9443"})
+	a := payloadForNode(p, NodeConfig{Name: "core-1", Addr: "192.0.2.22:9443"})
+	b := payloadForNode(p, NodeConfig{Name: "core-2", Addr: "192.0.2.23:9443"})
 	if got := a.Scopes["test2"].NodeIP; got != "192.168.10.22/23" {
 		t.Errorf("worker-a NodeIP = %q, want 192.168.10.22/23", got)
 	}
@@ -622,7 +622,7 @@ func TestPayloadForNode_ArbiterGetsDerivedNodeIPToo(t *testing.T) {
 	p := configPushPayload{Scopes: map[string]config.ScopeConfig{
 		"new-scope": {VIP: "172.16.66.254/24"},
 	}}
-	out := payloadForNode(p, NodeConfig{Name: "core-3", Addr: "192.168.0.24:9443"})
+	out := payloadForNode(p, NodeConfig{Name: "core-3", Addr: "192.0.2.24:9443"})
 	if got := out.Scopes["new-scope"].NodeIP; got != "172.16.66.24/24" {
 		t.Errorf("arbiter's derived NodeIP = %q, want 172.16.66.24/24 (address-derived fallback)", got)
 	}
@@ -632,9 +632,9 @@ func TestPayloadForNode_DifferentNodesGetDifferentValues(t *testing.T) {
 	p := configPushPayload{Scopes: map[string]config.ScopeConfig{
 		"new-scope": {VIP: "172.16.66.254/24"},
 	}}
-	a := payloadForNode(p, NodeConfig{Name: "core-1", Addr: "192.168.0.22:9443"})
-	b := payloadForNode(p, NodeConfig{Name: "core-2", Addr: "192.168.0.23:9443"})
-	arb := payloadForNode(p, NodeConfig{Name: "core-3", Addr: "192.168.0.24:9443"})
+	a := payloadForNode(p, NodeConfig{Name: "core-1", Addr: "192.0.2.22:9443"})
+	b := payloadForNode(p, NodeConfig{Name: "core-2", Addr: "192.0.2.23:9443"})
+	arb := payloadForNode(p, NodeConfig{Name: "core-3", Addr: "192.0.2.24:9443"})
 	if a.Scopes["new-scope"].NodeIP == b.Scopes["new-scope"].NodeIP {
 		t.Errorf("worker-a and worker-b got the SAME node_ip (%q) — duplicate-IP risk", a.Scopes["new-scope"].NodeIP)
 	}
@@ -657,7 +657,7 @@ func TestPayloadForNode_ExplicitSuffixWinsOverDerived(t *testing.T) {
 	}
 	// worker-a's own real address would derive .22, but the explicit
 	// suffix (99) must win.
-	out := payloadForNode(p, NodeConfig{Name: "core-1", Addr: "192.168.0.22:9443"})
+	out := payloadForNode(p, NodeConfig{Name: "core-1", Addr: "192.0.2.22:9443"})
 	if got := out.Scopes["new-scope"].NodeIP; got != "172.16.66.99/24" {
 		t.Errorf("NodeIP = %q, want explicit suffix 172.16.66.99/24 (not the derived .22)", got)
 	}
@@ -670,7 +670,7 @@ func TestPayloadForNode_FallsBackToDerivedWhenNoExplicitEntry(t *testing.T) {
 	}
 	// worker-a has no entry in the map — must fall back to its own
 	// address-derived value (.22), not go blank.
-	out := payloadForNode(p, NodeConfig{Name: "core-1", Addr: "192.168.0.22:9443"})
+	out := payloadForNode(p, NodeConfig{Name: "core-1", Addr: "192.0.2.22:9443"})
 	if got := out.Scopes["new-scope"].NodeIP; got != "172.16.66.22/24" {
 		t.Errorf("NodeIP = %q, want derived fallback 172.16.66.22/24", got)
 	}
@@ -685,7 +685,7 @@ func TestPayloadForNode_OverrideWinsOverExistingValue(t *testing.T) {
 			},
 		},
 	}
-	out := payloadForNode(p, NodeConfig{Name: "core-1", Addr: "192.168.0.22:9443"})
+	out := payloadForNode(p, NodeConfig{Name: "core-1", Addr: "192.0.2.22:9443"})
 	if got := out.Scopes["office"].NodeIP; got != "172.16.67.5/24" {
 		t.Errorf("NodeIP = %q, want the explicit override 172.16.67.5/24", got)
 	}
@@ -703,7 +703,7 @@ func TestPayloadForNode_OverrideOnlyAppliesToItsOwnWorker(t *testing.T) {
 			},
 		},
 	}
-	out := payloadForNode(p, NodeConfig{Name: "core-2", Addr: "192.168.0.23:9443"})
+	out := payloadForNode(p, NodeConfig{Name: "core-2", Addr: "192.0.2.23:9443"})
 	if got := out.Scopes["office"].NodeIP; got != "172.16.67.23/24" {
 		t.Errorf("worker-b NodeIP = %q, want its own derived 172.16.67.23/24 (override was worker-a's only; falling back to the stale 172.16.67.99/24 would risk colliding with a third node)", got)
 	}
@@ -711,9 +711,9 @@ func TestPayloadForNode_OverrideOnlyAppliesToItsOwnWorker(t *testing.T) {
 
 func TestCheckNodeIPCollisions_ExistingSharedValueNoLongerCollides(t *testing.T) {
 	nodes := []NodeConfig{
-		{Name: "core-1", Addr: "192.168.0.22:9443"},
-		{Name: "core-2", Addr: "192.168.0.23:9443"},
-		{Name: "core-3", Addr: "192.168.0.24:9443"},
+		{Name: "core-1", Addr: "192.0.2.22:9443"},
+		{Name: "core-2", Addr: "192.0.2.23:9443"},
+		{Name: "core-3", Addr: "192.0.2.24:9443"},
 	}
 	payload := configPushPayload{
 		Scopes: map[string]config.ScopeConfig{
@@ -727,8 +727,8 @@ func TestCheckNodeIPCollisions_ExistingSharedValueNoLongerCollides(t *testing.T)
 
 func TestCheckNodeIPCollisions_CatchesSameExplicitSuffixOnTwoNodes(t *testing.T) {
 	nodes := []NodeConfig{
-		{Name: "core-1", Addr: "192.168.0.22:9443"},
-		{Name: "core-2", Addr: "192.168.0.23:9443"},
+		{Name: "core-1", Addr: "192.0.2.22:9443"},
+		{Name: "core-2", Addr: "192.0.2.23:9443"},
 	}
 	payload := configPushPayload{
 		Scopes: map[string]config.ScopeConfig{
@@ -750,8 +750,8 @@ func TestCheckNodeIPCollisions_CatchesSameExplicitSuffixOnTwoNodes(t *testing.T)
 // never blocked.
 func TestCheckNodeIPCollisions_AllowsDistinctPerWorkerOverrides(t *testing.T) {
 	nodes := []NodeConfig{
-		{Name: "core-1", Addr: "192.168.0.22:9443"},
-		{Name: "core-2", Addr: "192.168.0.23:9443"},
+		{Name: "core-1", Addr: "192.0.2.22:9443"},
+		{Name: "core-2", Addr: "192.0.2.23:9443"},
 	}
 	payload := configPushPayload{
 		Scopes: map[string]config.ScopeConfig{
@@ -768,8 +768,8 @@ func TestCheckNodeIPCollisions_AllowsDistinctPerWorkerOverrides(t *testing.T) {
 
 func TestCheckNodeIPCollisions_AllowsExistingScopeWithClusterWideSuffixes(t *testing.T) {
 	nodes := []NodeConfig{
-		{Name: "core-1", Addr: "192.168.0.22:9443"},
-		{Name: "core-2", Addr: "192.168.0.23:9443"},
+		{Name: "core-1", Addr: "192.0.2.22:9443"},
+		{Name: "core-2", Addr: "192.0.2.23:9443"},
 	}
 	payload := configPushPayload{
 		Scopes: map[string]config.ScopeConfig{
@@ -784,9 +784,9 @@ func TestCheckNodeIPCollisions_AllowsExistingScopeWithClusterWideSuffixes(t *tes
 
 func TestCheckNodeIPCollisions_CatchesArbiterCollidingWithWorker(t *testing.T) {
 	nodes := []NodeConfig{
-		{Name: "core-1", Addr: "192.168.0.22:9443"},
-		{Name: "core-2", Addr: "192.168.0.23:9443"},
-		{Name: "core-3", Addr: "192.168.0.24:9443"},
+		{Name: "core-1", Addr: "192.0.2.22:9443"},
+		{Name: "core-2", Addr: "192.0.2.23:9443"},
+		{Name: "core-3", Addr: "192.0.2.24:9443"},
 	}
 	payload := configPushPayload{
 		Scopes: map[string]config.ScopeConfig{
@@ -854,9 +854,9 @@ func TestBuildClusterFormData_NodeIPSuffixesSuggestFromMgmtAddress(t *testing.T)
 		},
 	}
 	nodes := []NodeConfig{
-		{Name: "core-1", Addr: "192.168.0.22:9443"},
-		{Name: "core-2", Addr: "192.168.0.23:9443"},
-		{Name: "core-3", Addr: "192.168.0.24:9443"},
+		{Name: "core-1", Addr: "192.0.2.22:9443"},
+		{Name: "core-2", Addr: "192.0.2.23:9443"},
+		{Name: "core-3", Addr: "192.0.2.24:9443"},
 	}
 	data := buildClusterFormData(c, NodeConfig{Name: "core-1"}, nodes)
 

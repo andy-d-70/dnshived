@@ -14,7 +14,7 @@ import (
 
 func TestSameOriginGuard(t *testing.T) {
 	ok := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
-	h := sameOriginGuard(func() []string { return []string{"192.168.0.254"} }, ok)
+	h := sameOriginGuard(func() []string { return []string{"192.0.2.254"} }, ok)
 	cases := []struct {
 		name    string
 		method  string
@@ -26,7 +26,7 @@ func TestSameOriginGuard(t *testing.T) {
 		{"POST cross-site fetch", http.MethodPost, map[string]string{"Sec-Fetch-Site": "cross-site"}, 403},
 		{"POST same-site other host", http.MethodPost, map[string]string{"Sec-Fetch-Site": "same-site"}, 403},
 		{"POST matching Origin", http.MethodPost, map[string]string{"Origin": "https://node1:8443"}, 200},
-		{"POST Origin is the VIP", http.MethodPost, map[string]string{"Origin": "https://192.168.0.254:8443"}, 200},
+		{"POST Origin is the VIP", http.MethodPost, map[string]string{"Origin": "https://192.0.2.254:8443"}, 200},
 		{"POST foreign Origin", http.MethodPost, map[string]string{"Origin": "https://evil.example"}, 403},
 		{"POST null Origin", http.MethodPost, map[string]string{"Origin": "null"}, 403},
 		{"POST foreign Referer", http.MethodPost, map[string]string{"Referer": "https://evil.example/x"}, 403},

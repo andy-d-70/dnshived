@@ -167,10 +167,10 @@ func TestScopeSubnetCIDR(t *testing.T) {
 func TestResolveDisplayedNodeIP_SuffixWinsOverStaleOnDiskValue(t *testing.T) {
 	sc := config.ScopeConfig{VIP: "192.168.10.254/23", NodeIP: "192.168.10.22/23"}
 	suffixes := map[string]string{"core-1": "22", "core-2": "23"}
-	if got := resolveDisplayedNodeIP(sc, "core-1", "192.168.0.22:9443", suffixes, "192.168.10.22/23"); got != "192.168.10.22/23" {
+	if got := resolveDisplayedNodeIP(sc, "core-1", "192.0.2.22:9443", suffixes, "192.168.10.22/23"); got != "192.168.10.22/23" {
 		t.Errorf("worker-a = %q, want 192.168.10.22/23", got)
 	}
-	if got := resolveDisplayedNodeIP(sc, "core-2", "192.168.0.23:9443", suffixes, "192.168.10.22/23"); got != "192.168.10.23/23" {
+	if got := resolveDisplayedNodeIP(sc, "core-2", "192.0.2.23:9443", suffixes, "192.168.10.22/23"); got != "192.168.10.23/23" {
 		t.Errorf("worker-b = %q, want the suffix-derived 192.168.10.23/23, NOT the stale shared on-disk value", got)
 	}
 }
@@ -181,7 +181,7 @@ func TestResolveDisplayedNodeIP_PerScopeOverrideWinsOverSuffix(t *testing.T) {
 		NodeIPOverrides: map[string]string{"core-1": "192.168.10.5/23"},
 	}
 	suffixes := map[string]string{"core-1": "22"}
-	if got := resolveDisplayedNodeIP(sc, "core-1", "192.168.0.22:9443", suffixes, ""); got != "192.168.10.5/23" {
+	if got := resolveDisplayedNodeIP(sc, "core-1", "192.0.2.22:9443", suffixes, ""); got != "192.168.10.5/23" {
 		t.Errorf("got = %q, want the per-scope override 192.168.10.5/23", got)
 	}
 }
@@ -190,10 +190,10 @@ func TestResolveDisplayedNodeIP_PerScopeOverrideWinsOverSuffix(t *testing.T) {
 // with no configured suffix at all.
 func TestResolveDisplayedNodeIP_FallsBackToOnDiskThenDerived(t *testing.T) {
 	sc := config.ScopeConfig{VIP: "192.168.10.254/23"}
-	if got := resolveDisplayedNodeIP(sc, "core-1", "192.168.0.22:9443", nil, "192.168.10.77/23"); got != "192.168.10.77/23" {
+	if got := resolveDisplayedNodeIP(sc, "core-1", "192.0.2.22:9443", nil, "192.168.10.77/23"); got != "192.168.10.77/23" {
 		t.Errorf("got = %q, want the preserved custom on-disk value 192.168.10.77/23", got)
 	}
-	if got := resolveDisplayedNodeIP(sc, "core-1", "192.168.0.22:9443", nil, ""); got != "192.168.10.22/23" {
+	if got := resolveDisplayedNodeIP(sc, "core-1", "192.0.2.22:9443", nil, ""); got != "192.168.10.22/23" {
 		t.Errorf("got = %q, want the address-derived fallback 192.168.10.22/23", got)
 	}
 }

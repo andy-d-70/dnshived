@@ -189,11 +189,11 @@ func TestObserver_Probe_NoPSKSkipsVerification(t *testing.T) {
 func TestHandlePing_DeniesUntrustedSource(t *testing.T) {
 	self := identity.Identity{ClusterID: "test-cluster", NodeID: "self", Role: "core-1"}
 	o := NewObserver(self, "self-addr", nil, "")
-	o.SetTrustedHosts([]string{"192.168.0.22", "192.168.0.23"})
+	o.SetTrustedHosts([]string{"192.0.2.22", "192.0.2.23"})
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ping", strings.NewReader(`{}`))
-	req.RemoteAddr = "192.168.0.43:12345"
+	req.RemoteAddr = "192.0.2.43:12345"
 	o.HandlePing(rr, req)
 
 	if rr.Code != http.StatusForbidden {
@@ -209,11 +209,11 @@ func TestHandlePing_DeniesUntrustedSource(t *testing.T) {
 func TestHandlePing_AllowsTrustedSource(t *testing.T) {
 	self := identity.Identity{ClusterID: "test-cluster", NodeID: "self", Role: "core-1"}
 	o := NewObserver(self, "self-addr", nil, "")
-	o.SetTrustedHosts([]string{"192.168.0.22"})
+	o.SetTrustedHosts([]string{"192.0.2.22"})
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ping", strings.NewReader(`{}`))
-	req.RemoteAddr = "192.168.0.22:12345"
+	req.RemoteAddr = "192.0.2.22:12345"
 	o.HandlePing(rr, req)
 
 	if rr.Code != http.StatusOK {

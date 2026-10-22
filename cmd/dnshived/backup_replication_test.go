@@ -297,7 +297,7 @@ func TestIsBackupCoordinator_NoMgmtVIPFallsBackToCore3Only(t *testing.T) {
 }
 
 func TestIsBackupCoordinator_WithMgmtVIPFollowsVIPHolderNotRole(t *testing.T) {
-	vip := &config.MgmtVIPConfig{VIP: "192.168.0.230/24", VRRPID: 60}
+	vip := &config.MgmtVIPConfig{VIP: "192.0.2.230/24", VRRPID: 60}
 
 	if isBackupCoordinator(config.RoleCore3, vip, "BACKUP") {
 		t.Error("isBackupCoordinator(core-3, vip, BACKUP) = true, want false — core-3 no longer holds the VIP")

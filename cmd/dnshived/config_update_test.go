@@ -433,7 +433,7 @@ func TestClusterIdentityFieldsChanged_GracefulFields(t *testing.T) {
 		{"trusted_hosts", &config.Cluster{TrustedHosts: []string{"10.0.0.1"}}, configUpdate{TrustedHosts: []string{"10.0.0.2"}}},
 		{"helper_socket", &config.Cluster{HelperSocket: "/run/old.sock"}, configUpdate{HelperSocket: "/run/new.sock"}},
 		{"probe_interval_ms", &config.Cluster{ProbeIntervalMS: 1000}, configUpdate{ProbeIntervalMS: 2000}},
-		{"mgmt_vip", &config.Cluster{}, configUpdate{MgmtVIP: &config.MgmtVIPConfig{VIP: "192.168.0.230/24", VRRPID: 60}}},
+		{"mgmt_vip", &config.Cluster{}, configUpdate{MgmtVIP: &config.MgmtVIPConfig{VIP: "192.0.2.230/24", VRRPID: 60}}},
 		{"default_dns_checks", &config.Cluster{}, configUpdate{DefaultDNSChecks: []config.DNSCheck{{Name: "x", Type: "A"}}}},
 		{"global_dns_records", &config.Cluster{}, configUpdate{GlobalDNSRecords: []config.DNSRecord{{Name: "a.test.", Type: "A", Value: "1.2.3.4"}}}},
 		{"local_domains", &config.Cluster{}, configUpdate{LocalDomains: []config.LocalDomain{{Name: "test.local"}}}},

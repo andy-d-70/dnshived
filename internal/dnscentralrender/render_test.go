@@ -13,7 +13,7 @@ import (
 func testCluster() config.Cluster {
 	return config.Cluster{
 		GlobalDNSRecords: []config.DNSRecord{
-			{Name: "cluster.lan", Type: "A", Value: "192.168.0.230"},
+			{Name: "cluster.lan", Type: "A", Value: "192.0.2.230"},
 		},
 		Scopes: map[string]config.ScopeConfig{
 			"office": {
@@ -118,7 +118,7 @@ func TestRender_GlobalRecordsIncludedExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	if got := strings.Count(out, "host-record=cluster.lan,192.168.0.230"); got != 1 {
+	if got := strings.Count(out, "host-record=cluster.lan,192.0.2.230"); got != 1 {
 		t.Errorf("GlobalDNSRecords entry appeared %d times (across 2 scopes), want exactly 1", got)
 	}
 }

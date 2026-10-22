@@ -132,7 +132,7 @@ func TestPortFromAddr(t *testing.T) {
 	}{
 		{":9443", 0, 9443},
 		{"0.0.0.0:9444", 0, 9444},
-		{"192.168.0.22:9443", 0, 9443},
+		{"192.0.2.22:9443", 0, 9443},
 		{"not-an-addr", 9443, 9443},
 		{"", 9444, 9444},
 	}
@@ -155,9 +155,10 @@ func TestBroadcastOnInterface_RealRoundTripOnLoopback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	go BroadcastOnInterface(ctx, "lo", "candidate-host")
+	port := freeUDPPort(t)
+	go broadcastOnInterfaceAt(ctx, "lo", "candidate-host", port)
 
-	probe, ok := ListenOnInterface(context.Background(), "lo", 2*time.Second)
+	probe, ok := listenOnInterfaceAt(context.Background(), "lo", 2*time.Second, port)
 	if !ok {
 		t.Fatal("ListenOnInterface = ok=false, want a real probe received on lo")
 	}
@@ -173,7 +174,7 @@ func TestBroadcastOnInterface_RealRoundTripOnLoopback(t *testing.T) {
 // timeout.
 func TestListenOnInterface_TimesOutWithNothingSent(t *testing.T) {
 	start := time.Now()
-	_, ok := ListenOnInterface(context.Background(), "lo", 500*time.Millisecond)
+	_, ok := listenOnInterfaceAt(context.Background(), "lo", 500*time.Millisecond, freeUDPPort(t))
 	elapsed := time.Since(start)
 	if ok {
 		t.Error("ListenOnInterface = ok=true, want false — nothing was ever sent")
@@ -188,6 +189,7 @@ func TestListenOnInterface_TimesOutWithNothingSent(t *testing.T) {
 func TestListenOnInterface_IgnoresWrongMagic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	port := freeUDPPort(t)
 	go func() {
 		lc := bindToDeviceUDP4("lo")
 		pc, err := lc.ListenPacket(ctx, "udp4", ":0")
@@ -196,7 +198,7 @@ func TestListenOnInterface_IgnoresWrongMagic(t *testing.T) {
 		}
 		defer pc.Close()
 		bogus, _ := json.Marshal(map[string]string{"magic": "SOMETHING-ELSE"})
-		dst := &net.UDPAddr{IP: net.IPv4bcast, Port: InterfaceProbePort}
+		dst := &net.UDPAddr{IP: net.IPv4bcast, Port: port}
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -209,8 +211,20 @@ func TestListenOnInterface_IgnoresWrongMagic(t *testing.T) {
 		}
 	}()
 
-	_, ok := ListenOnInterface(context.Background(), "lo", 1*time.Second)
+	_, ok := listenOnInterfaceAt(context.Background(), "lo", 1*time.Second, port)
 	if ok {
 		t.Error("ListenOnInterface accepted a packet with the wrong magic")
 	}
+}
+
+// freeUDPPort returns a UDP port nothing else holds right now, so these tests
+// never share the interface-probe port with other packages' test binaries.
+func freeUDPPort(t *testing.T) int {
+	t.Helper()
+	pc, err := net.ListenPacket("udp4", ":0")
+	if err != nil {
+		t.Fatalf("pick free port: %v", err)
+	}
+	defer pc.Close()
+	return pc.LocalAddr().(*net.UDPAddr).Port
 }

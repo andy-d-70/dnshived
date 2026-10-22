@@ -354,6 +354,38 @@ func (o *Observer) PeerTrunkHealth(role string) map[string]bool {
 	return nil
 }
 
+func (o *Observer) UpdateDesired(generation uint64, authoritative bool, hash string, owners map[string]string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.self.DesiredGeneration = generation
+	o.self.DesiredAuthoritative = authoritative
+	o.self.DesiredHash = hash
+	o.self.DesiredOwners = owners
+}
+
+type PeerDesired struct {
+	Role          string
+	Generation    uint64
+	Authoritative bool
+	Hash          string
+	Owners        map[string]string
+}
+
+func (o *Observer) PeerDesiredMaps() []PeerDesired {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	var out []PeerDesired
+	for _, ps := range o.peers {
+		id := ps.Identity
+		if !ps.Reachable || id == nil || id.Role == "" || id.DesiredHash == "" {
+			continue
+		}
+		out = append(out, PeerDesired{Role: id.Role, Generation: id.DesiredGeneration,
+			Authoritative: id.DesiredAuthoritative, Hash: id.DesiredHash, Owners: id.DesiredOwners})
+	}
+	return out
+}
+
 // PeerServing returns each reachable, identified peer's own announced
 // serving set, keyed by role.
 func (o *Observer) PeerServing() map[string][]string {

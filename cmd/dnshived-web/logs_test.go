@@ -92,7 +92,7 @@ func TestHandleLogs_ThreeCollapsibleSectionsWithDaemonLogsForEveryCoreRole(t *te
 }
 
 func TestHandleLogs_IncludesSelfInDaemonLogsSection(t *testing.T) {
-	local := newLocalConfigServer(t, "core-3", "192.168.0.22:9443")
+	local := newLocalConfigServer(t, "core-3", "192.0.2.22:9443")
 	port := localPort(t, local)
 
 	cfg := &WebConfig{Nodes: []NodeConfig{{Name: "core-1", Addr: "192.168.9.9:" + port, AdminToken: "shared-tok"}}}

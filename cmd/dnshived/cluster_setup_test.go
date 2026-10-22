@@ -24,10 +24,10 @@ import (
 // one.
 func TestBuilderState_AddNodeRejectsSelfAddress(t *testing.T) {
 	b := &builderState{}
-	if err := b.setSelfAddr("192.168.0.22:9443"); err != nil {
+	if err := b.setSelfAddr("192.0.2.22:9443"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := b.addNode("192.168.0.22:9443", config.RoleCore2, "CODE", ""); err == nil {
+	if err := b.addNode("192.0.2.22:9443", config.RoleCore2, "CODE", ""); err == nil {
 		t.Error("addNode with this node's own address returned nil error, want a rejection")
 	}
 }
@@ -36,10 +36,10 @@ func TestBuilderState_AddNodeRejectsSelfAddress(t *testing.T) {
 // operator could make.
 func TestBuilderState_AddNodeRejectsDuplicateAddress(t *testing.T) {
 	b := &builderState{}
-	if err := b.addNode("192.168.0.23:9443", config.RoleCore2, "CODE1", ""); err != nil {
+	if err := b.addNode("192.0.2.23:9443", config.RoleCore2, "CODE1", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := b.addNode("192.168.0.23:9443", config.RoleCore3, "CODE2", ""); err == nil {
+	if err := b.addNode("192.0.2.23:9443", config.RoleCore3, "CODE2", ""); err == nil {
 		t.Error("addNode with a duplicate address returned nil error, want a rejection")
 	}
 	if got := len(b.getNodes()); got != 1 {
@@ -51,10 +51,10 @@ func TestBuilderState_AddNodeRejectsDuplicateAddress(t *testing.T) {
 // mistake.
 func TestBuilderState_AddNodeRejectsDuplicateRole(t *testing.T) {
 	b := &builderState{}
-	if err := b.addNode("192.168.0.23:9443", config.RoleCore2, "CODE1", ""); err != nil {
+	if err := b.addNode("192.0.2.23:9443", config.RoleCore2, "CODE1", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := b.addNode("192.168.0.24:9443", config.RoleCore2, "CODE2", ""); err == nil {
+	if err := b.addNode("192.0.2.24:9443", config.RoleCore2, "CODE2", ""); err == nil {
 		t.Error("addNode with an already-claimed role returned nil error, want a rejection")
 	}
 }
@@ -64,7 +64,7 @@ func TestBuilderState_AddNodeRejectsSelfRole(t *testing.T) {
 	if err := b.setRole(config.RoleCore1); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := b.addNode("192.168.0.23:9443", config.RoleCore1, "CODE", ""); err == nil {
+	if err := b.addNode("192.0.2.23:9443", config.RoleCore1, "CODE", ""); err == nil {
 		t.Error("addNode claiming this node's own already-chosen role returned nil error, want a rejection")
 	}
 }
@@ -74,10 +74,10 @@ func TestAllNodes_IncludesSelfFirst(t *testing.T) {
 	if err := b.setRole(config.RoleCore1); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := b.setSelfAddr("192.168.0.22:9443"); err != nil {
+	if err := b.setSelfAddr("192.0.2.22:9443"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := b.addNode("192.168.0.23:9443", config.RoleCore2, "CODE", ""); err != nil {
+	if err := b.addNode("192.0.2.23:9443", config.RoleCore2, "CODE", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -85,8 +85,8 @@ func TestAllNodes_IncludesSelfFirst(t *testing.T) {
 	if len(nodes) != 2 {
 		t.Fatalf("allNodes() has %d entries, want 2", len(nodes))
 	}
-	if !nodes[0].Self || nodes[0].Addr != "192.168.0.22:9443" {
-		t.Errorf("nodes[0] = %+v, want self at 192.168.0.22:9443", nodes[0])
+	if !nodes[0].Self || nodes[0].Addr != "192.0.2.22:9443" {
+		t.Errorf("nodes[0] = %+v, want self at 192.0.2.22:9443", nodes[0])
 	}
 }
 
@@ -125,9 +125,9 @@ func TestBuildClusterConfig_PassesRealValidation(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	nodes := []clusterNode{
-		{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true},
-		{Addr: "192.168.0.23:9443", Role: config.RoleCore2},
-		{Addr: "192.168.0.24:9443", Role: config.RoleCore3},
+		{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.23:9443", Role: config.RoleCore2},
+		{Addr: "192.0.2.24:9443", Role: config.RoleCore3},
 	}
 
 	cc, err := buildClusterConfig(secrets, nodes[0], nodes, mgmtSetup{})
@@ -147,9 +147,9 @@ func TestBuildClusterConfig_ProbeAdminTokenHasDistinctRole(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	nodes := []clusterNode{
-		{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true},
-		{Addr: "192.168.0.23:9443", Role: config.RoleCore2},
-		{Addr: "192.168.0.24:9443", Role: config.RoleCore3},
+		{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.23:9443", Role: config.RoleCore2},
+		{Addr: "192.0.2.24:9443", Role: config.RoleCore3},
 	}
 
 	cc, err := buildClusterConfig(secrets, nodes[0], nodes, mgmtSetup{})
@@ -187,9 +187,9 @@ func TestBuildClusterConfig_PeersExcludesSelf(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	nodes := []clusterNode{
-		{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true},
-		{Addr: "192.168.0.23:9443", Role: config.RoleCore2},
-		{Addr: "192.168.0.24:9443", Role: config.RoleCore3},
+		{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.23:9443", Role: config.RoleCore2},
+		{Addr: "192.0.2.24:9443", Role: config.RoleCore3},
 	}
 
 	cc, err := buildClusterConfig(secrets, nodes[0], nodes, mgmtSetup{})
@@ -201,7 +201,7 @@ func TestBuildClusterConfig_PeersExcludesSelf(t *testing.T) {
 		t.Fatalf("Peers = %v, want exactly 2 entries", cc.Peers)
 	}
 	for _, p := range cc.Peers {
-		if p == "192.168.0.22:9443" {
+		if p == "192.0.2.22:9443" {
 			t.Error("Peers includes this node's own address — must never happen")
 		}
 	}
@@ -213,10 +213,10 @@ func TestBuildClusterConfig_PopulatesNodeIPSuffixesForEveryCoreNode(t *testing.T
 		t.Fatalf("unexpected error: %v", err)
 	}
 	nodes := []clusterNode{
-		{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true},
-		{Addr: "192.168.0.23:9443", Role: config.RoleCore2},
-		{Addr: "192.168.0.24:9443", Role: config.RoleCore3},
-		{Addr: "192.168.0.42:9443", Role: "probe"},
+		{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.23:9443", Role: config.RoleCore2},
+		{Addr: "192.0.2.24:9443", Role: config.RoleCore3},
+		{Addr: "192.0.2.42:9443", Role: "probe"},
 	}
 
 	cc, err := buildClusterConfig(secrets, nodes[0], nodes, mgmtSetup{})
@@ -246,7 +246,7 @@ func TestBuildClusterConfig_SingleNodeStillPopulatesOwnSuffix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	self := clusterNode{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true}
+	self := clusterNode{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true}
 	nodes := []clusterNode{self}
 
 	cc, err := buildClusterConfig(secrets, self, nodes, mgmtSetup{})
@@ -264,9 +264,9 @@ func TestBuildClusterConfig_TrustedHostsIncludesAllThreeIncludingSelf(t *testing
 		t.Fatalf("unexpected error: %v", err)
 	}
 	nodes := []clusterNode{
-		{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true},
-		{Addr: "192.168.0.23:9443", Role: config.RoleCore2},
-		{Addr: "192.168.0.24:9443", Role: config.RoleCore3},
+		{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.23:9443", Role: config.RoleCore2},
+		{Addr: "192.0.2.24:9443", Role: config.RoleCore3},
 	}
 
 	cc, err := buildClusterConfig(secrets, nodes[0], nodes, mgmtSetup{})
@@ -274,7 +274,7 @@ func TestBuildClusterConfig_TrustedHostsIncludesAllThreeIncludingSelf(t *testing
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	want := map[string]bool{"192.168.0.22": true, "192.168.0.23": true, "192.168.0.24": true}
+	want := map[string]bool{"192.0.2.22": true, "192.0.2.23": true, "192.0.2.24": true}
 	if len(cc.TrustedHosts) != 3 {
 		t.Fatalf("TrustedHosts = %v, want exactly 3 entries", cc.TrustedHosts)
 	}
@@ -289,13 +289,13 @@ func TestBuildClusterConfig_TrustedHostsIncludesAllThreeIncludingSelf(t *testing
 	}
 
 	nodesWithProbe := append(append([]clusterNode{}, nodes...),
-		clusterNode{Addr: "192.168.0.42:9443", Role: "probe"})
+		clusterNode{Addr: "192.0.2.42:9443", Role: "probe"})
 	ccWithProbe, err := buildClusterConfig(secrets, nodesWithProbe[0], nodesWithProbe, mgmtSetup{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for _, h := range ccWithProbe.TrustedHosts {
-		if h == "192.168.0.42" {
+		if h == "192.0.2.42" {
 			t.Error("TrustedHosts must not include a probe-role node's address")
 		}
 	}
@@ -307,8 +307,8 @@ func TestBuildClusterConfig_SharedSecretsIdenticalAcrossNodes(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	nodes := []clusterNode{
-		{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true},
-		{Addr: "192.168.0.23:9443", Role: config.RoleCore2},
+		{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.23:9443", Role: config.RoleCore2},
 	}
 
 	a, err := buildClusterConfig(secrets, nodes[0], nodes, mgmtSetup{})
@@ -336,7 +336,7 @@ func TestBuildClusterConfig_ServesAndSeedsUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	nodes := []clusterNode{{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true}}
+	nodes := []clusterNode{{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true}}
 
 	cc, err := buildClusterConfig(secrets, nodes[0], nodes, mgmtSetup{})
 	if err != nil {
@@ -418,9 +418,9 @@ func TestBootstrapAdoptHandler_ValidConfigWrittenExactly(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	nodes := []clusterNode{
-		{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true},
-		{Addr: "192.168.0.23:9443", Role: config.RoleCore2},
-		{Addr: "192.168.0.24:9443", Role: config.RoleCore3},
+		{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.23:9443", Role: config.RoleCore2},
+		{Addr: "192.0.2.24:9443", Role: config.RoleCore3},
 	}
 	cc, err := buildClusterConfig(secrets, nodes[1], nodes, mgmtSetup{})
 	if err != nil {
@@ -492,9 +492,9 @@ func TestPushAdoptConfig_SendsCodeAndReceivesSuccess(t *testing.T) {
 
 func TestCoreBootstrapContactAddr_AlwaysForcesPort80(t *testing.T) {
 	cases := map[string]string{
-		"192.168.0.26:9443": "192.168.0.26:80",
-		"192.168.0.26:80":   "192.168.0.26:80",
-		"192.168.0.26":      "192.168.0.26:80",
+		"192.0.2.26:9443": "192.0.2.26:80",
+		"192.0.2.26:80":   "192.0.2.26:80",
+		"192.0.2.26":      "192.0.2.26:80",
 	}
 	for in, want := range cases {
 		if got := coreBootstrapContactAddr(in); got != want {
@@ -505,9 +505,9 @@ func TestCoreBootstrapContactAddr_AlwaysForcesPort80(t *testing.T) {
 
 func TestProbeAdoptTarget_AlwaysForcesTheProbeBootstrapPort(t *testing.T) {
 	cases := map[string]string{
-		"192.168.0.42:80":   "192.168.0.42:9444",
-		"192.168.0.42:9443": "192.168.0.42:9444",
-		"192.168.0.42:9444": "192.168.0.42:9444",
+		"192.0.2.42:80":   "192.0.2.42:9444",
+		"192.0.2.42:9443": "192.0.2.42:9444",
+		"192.0.2.42:9444": "192.0.2.42:9444",
 	}
 	for in, want := range cases {
 		got, err := probeAdoptTarget(in)
@@ -541,7 +541,7 @@ func TestBootstrapCommitHandler_RejectsZeroCoreNodes(t *testing.T) {
 	if err := state.setRole("probe"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := state.setSelfAddr("192.168.0.22:9443"); err != nil {
+	if err := state.setSelfAddr("192.0.2.22:9443"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// No core-1/core-2/core-3 recorded at all.
@@ -570,7 +570,7 @@ func TestBootstrapCommitHandler_SingleCoreNodeSucceeds(t *testing.T) {
 	if err := state.setRole(config.RoleCore1); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := state.setSelfAddr("192.168.0.22:9443"); err != nil {
+	if err := state.setSelfAddr("192.0.2.22:9443"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// No other nodes recorded at all — the single-node-from-scratch case.
@@ -605,7 +605,7 @@ func TestBootstrapCommitHandler_SingleCoreNodeSucceeds(t *testing.T) {
 	if len(selfCC.Peers) != 0 {
 		t.Errorf("Peers = %v, want empty — no other nodes were recorded", selfCC.Peers)
 	}
-	if len(selfCC.TrustedHosts) != 1 || selfCC.TrustedHosts[0] != "192.168.0.22" {
+	if len(selfCC.TrustedHosts) != 1 || selfCC.TrustedHosts[0] != "192.0.2.22" {
 		t.Errorf("TrustedHosts = %v, want exactly this node's own address", selfCC.TrustedHosts)
 	}
 
@@ -662,7 +662,7 @@ func TestBootstrapCommitHandler_FullSuccessWritesLocalAndPushesRemote(t *testing
 
 	cfgPath := filepath.Join(t.TempDir(), "cluster.json")
 	state := &builderState{}
-	selfAddr := "192.168.0.22:9443"
+	selfAddr := "192.0.2.22:9443"
 	if err := state.setRole(config.RoleCore1); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -740,7 +740,7 @@ func TestBootstrapCommitHandler_RemoteFailureReportedNotHidden(t *testing.T) {
 	if err := state.setRole(config.RoleCore1); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := state.setSelfAddr("192.168.0.22:9443"); err != nil {
+	if err := state.setSelfAddr("192.0.2.22:9443"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if err := state.addNode(workerB.Listener.Addr().String(), config.RoleCore2, "WRONG-CODE-ON-PURPOSE", ""); err != nil {
@@ -779,10 +779,10 @@ func TestBuildClusterConfig_MgmtOverridesOnlyForDifferingNames(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	nodes := []clusterNode{
-		{Addr: "192.168.0.51:9443", Role: config.RoleCore1, Self: true},
-		{Addr: "192.168.0.52:9443", Role: config.RoleCore2, Mgmt: "ens18"},
-		{Addr: "192.168.0.26:9443", Role: config.RoleCore3, Mgmt: "eth0"},
-		{Addr: "192.168.0.54:9444", Role: "probe", Mgmt: "enp1s0"},
+		{Addr: "192.0.2.51:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.52:9443", Role: config.RoleCore2, Mgmt: "ens18"},
+		{Addr: "192.0.2.26:9443", Role: config.RoleCore3, Mgmt: "eth0"},
+		{Addr: "192.0.2.54:9444", Role: "probe", Mgmt: "enp1s0"},
 	}
 	mgmt := mgmtSetup{PlatformMgmt: "ens18", PlatformWorkers: []string{"ens19"}}
 

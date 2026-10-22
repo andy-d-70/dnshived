@@ -4,6 +4,7 @@
 package desired
 
 import (
+	"log"
 	"sync"
 	"time"
 
@@ -34,10 +35,29 @@ type Engine struct {
 	trunkGraceMin time.Duration
 	trunkGraceMax time.Duration
 
+	// ownerUnserved tracks, per scope, since when this engine's own last
+	// owner has been seen not serving it; past unservedGrace that owner is
+	// no longer kept, so every node falls back to the same deterministic
+	// choice instead of each holding on to its own memory.
+	ownerUnserved map[string]ownerUnservedState
+	unservedGrace time.Duration
+
 	// OnGenerationChange fires (async) when generation advances, so the
 	// observer's announced generation can be updated.
 	OnGenerationChange func(generation uint64)
 }
+
+type ownerUnservedState struct {
+	owner string
+	since time.Time
+	// disputed: a peer's map at the same generation names another owner,
+	// so the grace is skipped.
+	disputed bool
+}
+
+// DefaultUnservedGrace is how long a remembered owner may be seen not
+// serving its scope before the engine stops keeping it.
+const DefaultUnservedGrace = 30 * time.Second
 
 // New creates an engine starting at the given generation with an empty,
 // non-authoritative map.
@@ -62,7 +82,30 @@ func New(initialGen uint64, scopes []ScopeDefinition, rebalanceDelay, trunkGrace
 		rebalanceDelay:   rebalanceDelay,
 		trunkDownSince:   make(map[string]time.Time),
 		trunkGracePeriod: trunkGracePeriod,
+		ownerUnserved:    make(map[string]ownerUnservedState),
+		unservedGrace:    DefaultUnservedGrace,
 	}
+}
+
+// DisputeUnservedOwners marks scopes a peer's map disagrees on: an owner
+// this engine remembers but has already seen not serving is dropped on
+// the next pass instead of after the grace. Owners seen serving are
+// unaffected.
+func (e *Engine) DisputeUnservedOwners(scopes []string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, s := range scopes {
+		if st, ok := e.ownerUnserved[s]; ok {
+			st.disputed = true
+			e.ownerUnserved[s] = st
+		}
+	}
+}
+
+func (e *Engine) SetUnservedGrace(d time.Duration) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.unservedGrace = d
 }
 
 // Reconcile recomputes desired state from current FSM state and worker
@@ -140,9 +183,40 @@ func (e *Engine) Reconcile(state fsm.State, live WorkerLiveness, genFloor uint64
 	// Current owner per scope: what is observably serving, else this
 	// engine's own last answer.
 	currentServing := make(CurrentServing)
+	kept := make(map[string]bool, len(e.current.Assignments))
 	for _, a := range e.current.Assignments {
-		if a.Owner != "" {
+		if a.Owner == "" {
+			continue
+		}
+		kept[a.Scope] = true
+		if live.Observed[a.Scope] == a.Owner {
+			delete(e.ownerUnserved, a.Scope)
 			currentServing[a.Scope] = a.Owner
+			continue
+		}
+		st, tracked := e.ownerUnserved[a.Scope]
+		if !tracked || st.owner != a.Owner {
+			e.ownerUnserved[a.Scope] = ownerUnservedState{owner: a.Owner, since: now}
+			currentServing[a.Scope] = a.Owner
+			continue
+		}
+		if now.Sub(st.since) < e.unservedGrace && !st.disputed {
+			currentServing[a.Scope] = a.Owner
+			continue
+		}
+		if _, observedOther := live.Observed[a.Scope]; !observedOther {
+			why := ""
+			if st.disputed && now.Sub(st.since) < e.unservedGrace {
+				why = ", a peer's map at the same generation names another owner"
+			}
+			log.Printf("[DESIRED:STICKY] scope %s: last owner %s seen not serving for %s%s — no longer kept, owner recomputed",
+				a.Scope, a.Owner, now.Sub(st.since).Round(time.Second), why)
+		}
+		delete(e.ownerUnserved, a.Scope)
+	}
+	for scope := range e.ownerUnserved {
+		if !kept[scope] {
+			delete(e.ownerUnserved, scope)
 		}
 	}
 	for scope, owner := range live.Observed {
@@ -170,6 +244,7 @@ func (e *Engine) Reconcile(state fsm.State, live WorkerLiveness, genFloor uint64
 	// Determine whether ownership actually changed vs. what we last held.
 	ownershipChanged := !Equal(e.current.Assignments, assignments)
 	firstAuthoritative := !e.current.Authoritative
+	previous := e.current.Assignments
 	e.current.Assignments = assignments
 	e.current.Authoritative = true
 
@@ -183,6 +258,10 @@ func (e *Engine) Reconcile(state fsm.State, live WorkerLiveness, genFloor uint64
 	case ownershipChanged || firstAuthoritative:
 		e.current.Generation++
 		moved = true
+	}
+
+	if ownershipChanged || firstAuthoritative {
+		logOwnerChanges(previous, assignments, firstAuthoritative, e.current.Generation)
 	}
 
 	if moved {
@@ -273,4 +352,28 @@ func (e *Engine) OwnedScopes(role string) (scopes []string, generation uint64) {
 		}
 	}
 	return scopes, e.current.Generation
+}
+
+func ownerLabel(owner string) string {
+	if owner == OwnerNone {
+		return "none"
+	}
+	return owner
+}
+
+func logOwnerChanges(previous, current []Assignment, first bool, generation uint64) {
+	before := make(map[string]string, len(previous))
+	for _, a := range previous {
+		before[a.Scope] = a.Owner
+	}
+	for _, a := range current {
+		old, had := before[a.Scope]
+		if !first && had && old == a.Owner {
+			continue
+		}
+		if first {
+			old = OwnerNone
+		}
+		log.Printf("[DESIRED:OWNER] scope %s: %s -> %s (generation %d)", a.Scope, ownerLabel(old), ownerLabel(a.Owner), generation)
+	}
 }

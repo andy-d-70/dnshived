@@ -22,7 +22,7 @@ const baseProbeConfigJSON = `{
 	"listen_addr": ":9444",
 	"trunk_parent": "ens19",
 	"cluster_token": "tok",
-	"cluster_nodes": [{"name": "core-1", "addr": "192.168.0.22:9443"}]
+	"cluster_nodes": [{"name": "core-1", "addr": "192.0.2.22:9443"}]
 }`
 
 func TestLoadProbeConfig_LocalOctetZeroSkipsVLANValidation(t *testing.T) {
@@ -41,7 +41,7 @@ func TestLoadProbeConfig_LocalOctetRequiresHelperSocket(t *testing.T) {
 		"listen_addr": ":9444",
 		"trunk_parent": "ens19",
 		"cluster_token": "tok",
-		"cluster_nodes": [{"name": "core-1", "addr": "192.168.0.22:9443"}],
+		"cluster_nodes": [{"name": "core-1", "addr": "192.0.2.22:9443"}],
 		"local_octet": 42,
 		"known_vlans_path": "/var/lib/probe/known-vlans.json"
 	}`)
@@ -55,7 +55,7 @@ func TestLoadProbeConfig_LocalOctetRequiresKnownVLANsPath(t *testing.T) {
 		"listen_addr": ":9444",
 		"trunk_parent": "ens19",
 		"cluster_token": "tok",
-		"cluster_nodes": [{"name": "core-1", "addr": "192.168.0.22:9443"}],
+		"cluster_nodes": [{"name": "core-1", "addr": "192.0.2.22:9443"}],
 		"local_octet": 42,
 		"probe_helper_socket": "/run/dnshived/probe-helper.sock"
 	}`)
@@ -69,7 +69,7 @@ func TestLoadProbeConfig_LocalOctetOutOfRangeRejected(t *testing.T) {
 		"listen_addr": ":9444",
 		"trunk_parent": "ens19",
 		"cluster_token": "tok",
-		"cluster_nodes": [{"name": "core-1", "addr": "192.168.0.22:9443"}],
+		"cluster_nodes": [{"name": "core-1", "addr": "192.0.2.22:9443"}],
 		"local_octet": 300,
 		"probe_helper_socket": "/run/dnshived/probe-helper.sock",
 		"known_vlans_path": "/var/lib/probe/known-vlans.json"
@@ -84,7 +84,7 @@ func TestLoadProbeConfig_LocalOctetValidCombinationAccepted(t *testing.T) {
 		"listen_addr": ":9444",
 		"trunk_parent": "ens19",
 		"cluster_token": "tok",
-		"cluster_nodes": [{"name": "core-1", "addr": "192.168.0.22:9443"}],
+		"cluster_nodes": [{"name": "core-1", "addr": "192.0.2.22:9443"}],
 		"local_octet": 42,
 		"trunk_parents": ["ens19", "ens20"],
 		"probe_helper_socket": "/run/dnshived/probe-helper.sock",
@@ -145,7 +145,7 @@ func TestLoadProbeConfig_ParallelProbingExplicitTrueParses(t *testing.T) {
 		"listen_addr": ":9444",
 		"trunk_parent": "ens19",
 		"cluster_token": "tok",
-		"cluster_nodes": [{"name": "core-1", "addr": "192.168.0.22:9443"}],
+		"cluster_nodes": [{"name": "core-1", "addr": "192.0.2.22:9443"}],
 		"parallel_probing": true
 	}`)
 	cfg, err := loadProbeConfig(path)

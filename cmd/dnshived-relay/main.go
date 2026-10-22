@@ -107,9 +107,10 @@ func logStatusPeriodically(r *dhcprelay.Relay, interval time.Duration, stop <-ch
 			return
 		case <-ticker.C:
 			s := r.Snapshot()
-			log.Printf("[RELAY] requests: seen=%d forwarded=%d dropped=%d  replies: seen=%d forwarded=%d dropped=%d  pending=%d",
+			log.Printf("[RELAY] requests: seen=%d forwarded=%d dropped=%d  replies: seen=%d forwarded=%d dropped=%d  pending=%d  client_limited=%d pending_full=%d",
 				s.RequestsSeen, s.RequestsForwarded, s.RequestsDropped,
-				s.RepliesSeen, s.RepliesForwarded, s.RepliesDropped, s.Pending)
+				s.RepliesSeen, s.RepliesForwarded, s.RepliesDropped, s.Pending,
+				s.RequestsClientLimit, s.RequestsPendingFull)
 		}
 	}
 }

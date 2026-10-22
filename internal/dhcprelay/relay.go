@@ -35,6 +35,8 @@ type clientInterface struct {
 	rateLimit atomic.Int32
 	rateBurst atomic.Int32
 	limiter   *tokenBucket
+	clients   *clientLimiter
+	pending   atomic.Int64
 
 	removing atomic.Bool
 	wg       sync.WaitGroup
@@ -45,6 +47,8 @@ type metrics struct {
 	requestsForwarded   atomic.Int64
 	requestsDropped     atomic.Int64
 	requestsRateLimited atomic.Int64
+	requestsClientLimit atomic.Int64
+	requestsPendingFull atomic.Int64
 	repliesSeen         atomic.Int64
 	repliesForwarded    atomic.Int64
 	repliesDropped      atomic.Int64
@@ -57,6 +61,8 @@ type Metrics struct {
 	RequestsForwarded   int64
 	RequestsDropped     int64
 	RequestsRateLimited int64
+	RequestsClientLimit int64
+	RequestsPendingFull int64
 	RepliesSeen         int64
 	RepliesForwarded    int64
 	RepliesDropped      int64
@@ -66,7 +72,7 @@ type Metrics struct {
 type Relay struct {
 	cfg Config
 
-	serverConn udpConn // write-only: forwards a client request upstream. Never read from.
+	serverConn atomic.Pointer[serverSocket] // write-only: forwards a client request upstream. Never read from.
 	serverAddr *net.UDPAddr
 
 	// cifMu guards clientIfaces itself (the slice, add/remove).
@@ -79,12 +85,32 @@ type Relay struct {
 	pending *pendingTable
 	metrics metrics
 
+	pendingPerVLAN  atomic.Int32
+	clientRateLimit atomic.Int32
+	clientRateBurst atomic.Int32
+	clientTracked   atomic.Int64
+
 	closing atomic.Bool
 	wg      sync.WaitGroup
 	stop    chan struct{}
 
 	throttleMu   sync.Mutex
-	throttleSeen map[string]time.Time
+	throttleSeen map[throttleKey]time.Time
+}
+
+type serverSocket struct{ udpConn }
+
+type throttleKey struct {
+	kind  string
+	iface string
+}
+
+func (r *Relay) setServerConn(c udpConn) udpConn {
+	old := r.serverConn.Swap(&serverSocket{c})
+	if old == nil {
+		return nil
+	}
+	return old.udpConn
 }
 
 const logThrottleWindow = 30 * time.Second
@@ -146,26 +172,49 @@ func New(cfg Config) (*Relay, error) {
 		serverAddr:   serverAddr,
 		pending:      newPendingTable(),
 		stop:         make(chan struct{}),
-		throttleSeen: make(map[string]time.Time),
+		throttleSeen: make(map[throttleKey]time.Time),
 	}
 
+	r.applyOptionalLimits(cfg)
+
 	for _, ci := range cfg.ClientInterfaces {
-		giaddr := net.ParseIP(ci.GIAddr).To4()
-		cifServerAddr, err := resolveServerAddr(ci.ServerAddr, cfg.ServerAddr)
+		newCif, err := newClientInterface(ci, cfg, &r.clientTracked)
 		if err != nil {
-			return nil, fmt.Errorf("client interface %q: %w", ci.Name, err)
+			return nil, err
 		}
-		rate := resolveRateLimit(ci.RateLimit, cfg.RateLimit)
-		burst := resolveRateBurst(ci.RateBurst, cfg.RateBurst, rate)
-		newCif := &clientInterface{name: ci.Name, giaddr: giaddr, serverAddr: cifServerAddr, limiter: newTokenBucket(burst)}
-		newCif.rateLimit.Store(int32(rate))
-		newCif.rateBurst.Store(int32(burst))
-		sid := resolveServerIdentifier(ci.ServerIdentifier, giaddr)
-		newCif.serverIdentifier.Store(&sid)
 		r.clientIfaces = append(r.clientIfaces, newCif)
 	}
 
 	return r, nil
+}
+
+func (r *Relay) applyOptionalLimits(cfg Config) {
+	r.pendingPerVLAN.Store(int32(resolveOptionalLimit(cfg.PendingPerVLAN, defaultPendingPerVLAN)))
+	rate := resolveOptionalLimit(cfg.ClientRateLimit, defaultClientRateLimit)
+	burst := resolveOptionalLimit(cfg.ClientRateBurst, defaultClientRateBurst)
+	if rate > 0 && burst == 0 {
+		burst = rate * 2
+	}
+	r.clientRateLimit.Store(int32(rate))
+	r.clientRateBurst.Store(int32(burst))
+}
+
+// newClientInterface resolves ci against cfg's cluster-wide defaults; no
+// sockets are opened.
+func newClientInterface(ci ClientInterfaceConfig, cfg Config, tracked *atomic.Int64) (*clientInterface, error) {
+	giaddr := net.ParseIP(ci.GIAddr).To4()
+	serverAddr, err := resolveServerAddr(ci.ServerAddr, cfg.ServerAddr)
+	if err != nil {
+		return nil, fmt.Errorf("client interface %q: %w", ci.Name, err)
+	}
+	rate := resolveRateLimit(ci.RateLimit, cfg.RateLimit)
+	burst := resolveRateBurst(ci.RateBurst, cfg.RateBurst, rate)
+	cif := &clientInterface{name: ci.Name, giaddr: giaddr, serverAddr: serverAddr, limiter: newTokenBucket(burst), clients: newClientLimiter(tracked)}
+	cif.rateLimit.Store(int32(rate))
+	cif.rateBurst.Store(int32(burst))
+	sid := resolveServerIdentifier(ci.ServerIdentifier, giaddr)
+	cif.serverIdentifier.Store(&sid)
+	return cif, nil
 }
 
 func (r *Relay) Start() error {
@@ -173,7 +222,7 @@ func (r *Relay) Start() error {
 	if err != nil {
 		return fmt.Errorf("bind server-facing socket: %w", err)
 	}
-	r.serverConn = serverConn
+	r.setServerConn(serverConn)
 
 	for _, cif := range r.clientIfaces {
 		conn, err := bindClientUDPPort(cif.name, dhcpServerPort)
@@ -275,8 +324,7 @@ func (r *Relay) Reconfigure(newCfg Config) error {
 		if err != nil {
 			return fmt.Errorf("bind new server-facing socket: %w", err)
 		}
-		oldServerConn := r.serverConn
-		r.serverConn = newServerConn
+		oldServerConn := r.setServerConn(newServerConn)
 		r.serverAddr = newServerAddr
 		if oldServerConn != nil {
 			oldServerConn.Close()
@@ -298,7 +346,7 @@ func (r *Relay) Reconfigure(newCfg Config) error {
 	}
 	addedOK := 0
 	for _, ci := range toAdd {
-		if err := r.addClientInterface(ci, newCfg.ServerAddr); err != nil {
+		if err := r.addClientInterface(ci, newCfg); err != nil {
 			log.Printf("[RELAY] reconfigure: add client interface %s: %v (continuing with the rest)", ci.Name, err)
 			continue
 		}
@@ -327,7 +375,7 @@ func (r *Relay) Reconfigure(newCfg Config) error {
 			log.Printf("[RELAY] reconfigure: %s ifindex changed (%d -> %d) — interface was replaced since this socket was bound, rebinding",
 				cif.name, cif.ifIndex, live)
 			r.removeClientInterface(cif)
-			if err := r.addClientInterface(newCi, newCfg.ServerAddr); err != nil {
+			if err := r.addClientInterface(newCi, newCfg); err != nil {
 				log.Printf("[RELAY] reconfigure: rebind %s: %v", newCi.Name, err)
 			} else {
 				rebound++
@@ -350,6 +398,7 @@ func (r *Relay) Reconfigure(newCfg Config) error {
 		}
 	}
 
+	r.applyOptionalLimits(newCfg)
 	r.cfg = newCfg
 	if rebound > 0 {
 		log.Printf("[RELAY] reconfigure: %d interface(s) rebound due to stale ifindex", rebound)
@@ -382,29 +431,21 @@ func (r *Relay) removeClientInterface(cif *clientInterface) {
 
 // addClientInterface binds a fresh socket pair for one new client
 // interface and launches its own two read-loop goroutines.
-func (r *Relay) addClientInterface(ci ClientInterfaceConfig, defaultServerAddr string) error {
-	giaddr := net.ParseIP(ci.GIAddr).To4()
-	serverAddr, err := resolveServerAddr(ci.ServerAddr, defaultServerAddr)
+func (r *Relay) addClientInterface(ci ClientInterfaceConfig, cfg Config) error {
+	cif, err := newClientInterface(ci, cfg, &r.clientTracked)
 	if err != nil {
-		return fmt.Errorf("client interface %q: %w", ci.Name, err)
+		return err
 	}
 	conn, err := bindClientUDPPort(ci.Name, dhcpServerPort)
 	if err != nil {
 		return fmt.Errorf("bind client-facing socket on %s: %w", ci.Name, err)
 	}
-	reply, err := bindReplyUDPPort(ci.Name, giaddr, dhcpServerPort)
+	reply, err := bindReplyUDPPort(ci.Name, cif.giaddr, dhcpServerPort)
 	if err != nil {
 		conn.Close()
-		return fmt.Errorf("bind reply socket for %s (giaddr %s): %w", ci.Name, giaddr, err)
+		return fmt.Errorf("bind reply socket for %s (giaddr %s): %w", ci.Name, cif.giaddr, err)
 	}
-
-	rate := resolveRateLimit(ci.RateLimit, r.cfg.RateLimit)
-	burst := resolveRateBurst(ci.RateBurst, r.cfg.RateBurst, rate)
-	cif := &clientInterface{name: ci.Name, giaddr: giaddr, serverAddr: serverAddr, conn: conn, reply: reply, limiter: newTokenBucket(burst), ifIndex: currentIfIndex(ci.Name)}
-	cif.rateLimit.Store(int32(rate))
-	cif.rateBurst.Store(int32(burst))
-	sid := resolveServerIdentifier(ci.ServerIdentifier, giaddr)
-	cif.serverIdentifier.Store(&sid)
+	cif.conn, cif.reply, cif.ifIndex = conn, reply, currentIfIndex(ci.Name)
 
 	r.cifMu.Lock()
 	r.clientIfaces = append(r.clientIfaces, cif)
@@ -423,7 +464,7 @@ func (r *Relay) addClientInterface(ci ClientInterfaceConfig, defaultServerAddr s
 		r.handleServerReplies(cif)
 	}()
 
-	log.Printf("[RELAY] reconfigure: added client interface %s (giaddr %s, server %s)", ci.Name, giaddr, serverAddr)
+	log.Printf("[RELAY] reconfigure: added client interface %s (giaddr %s, server %s)", ci.Name, cif.giaddr, cif.serverAddr)
 	return nil
 }
 
@@ -441,8 +482,8 @@ func (r *Relay) Stop() {
 }
 
 func (r *Relay) closeAll() {
-	if r.serverConn != nil {
-		r.serverConn.Close()
+	if sc := r.serverConn.Load(); sc != nil {
+		sc.Close()
 	}
 	r.cifMu.Lock()
 	defer r.cifMu.Unlock()
@@ -463,6 +504,8 @@ func (r *Relay) Snapshot() Metrics {
 		RequestsForwarded:   r.metrics.requestsForwarded.Load(),
 		RequestsDropped:     r.metrics.requestsDropped.Load(),
 		RequestsRateLimited: r.metrics.requestsRateLimited.Load(),
+		RequestsClientLimit: r.metrics.requestsClientLimit.Load(),
+		RequestsPendingFull: r.metrics.requestsPendingFull.Load(),
 		RepliesSeen:         r.metrics.repliesSeen.Load(),
 		RepliesForwarded:    r.metrics.repliesForwarded.Load(),
 		RepliesDropped:      r.metrics.repliesDropped.Load(),
@@ -479,15 +522,20 @@ func (r *Relay) isValidServerSource(from *net.UDPAddr, ci *clientInterface) bool
 // logThrottled logs at most once per logThrottleWindow per distinct key,
 // matching internal/agent's own established rate-limited-logging
 // convention.
-func (r *Relay) logThrottled(key, format string, args ...any) {
+func (r *Relay) logThrottled(key throttleKey, format string, args ...any) {
+	if r.shouldLog(time.Now(), key) {
+		log.Printf("[RELAY] "+format, args...)
+	}
+}
+
+// shouldLog is logThrottled's check alone, for hot paths that must not
+// build the log arguments while the key is throttled.
+func (r *Relay) shouldLog(now time.Time, key throttleKey) bool {
 	r.throttleMu.Lock()
-	last, seen := r.throttleSeen[key]
-	now := time.Now()
-	if seen && now.Sub(last) < logThrottleWindow {
-		r.throttleMu.Unlock()
-		return
+	defer r.throttleMu.Unlock()
+	if last, seen := r.throttleSeen[key]; seen && now.Sub(last) < logThrottleWindow {
+		return false
 	}
 	r.throttleSeen[key] = now
-	r.throttleMu.Unlock()
-	log.Printf("[RELAY] "+format, args...)
+	return true
 }

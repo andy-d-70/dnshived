@@ -234,7 +234,7 @@ func fakeWizardNode(t *testing.T, pushedBody *string) *WebConfig {
 				ControlAddr:        "10.0.0.1:9443",
 				Platform:           &config.Platform{Mgmt: "eth0", Workers: []string{"ens19", "ens20"}},
 				DefaultDHCPOptions: []string{"6,8.8.8.8"},
-				GlobalDNSRecords:   []config.DNSRecord{{Type: "A", Name: "ntp.lan", Value: "192.168.0.10"}},
+				GlobalDNSRecords:   []config.DNSRecord{{Type: "A", Name: "ntp.lan", Value: "192.0.2.10"}},
 				Scopes: map[string]config.ScopeConfig{
 					"office": {VLANID: 100, VRRPID: 51, Parent: "ens19", PreferredWorker: "core-1",
 						VIP: "172.16.100.1/24", Gateway: "172.16.100.1"},

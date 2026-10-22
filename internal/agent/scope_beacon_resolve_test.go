@@ -14,7 +14,7 @@ import (
 func TestResolveScopePeerAddr_ObserverDerivedWhenNoOverrideOrSuffix(t *testing.T) {
 	self := identity.Identity{ClusterID: "c", NodeID: "self", Role: config.RoleCore1}
 	o := cluster.NewObserver(self, "self-addr", nil, "")
-	setPeer(o, "192.168.0.23:9443", config.RoleCore2, true)
+	setPeer(o, "192.0.2.23:9443", config.RoleCore2, true)
 
 	a := New(config.RoleCore1, "self", 1, "psk", "/tmp", nil, o)
 	sc := testScopes("office")["office"]
@@ -31,7 +31,7 @@ func TestResolveScopePeerAddr_ObserverDerivedWhenNoOverrideOrSuffix(t *testing.T
 func TestResolveScopePeerAddr_ExplicitOverrideWinsOverObserver(t *testing.T) {
 	self := identity.Identity{ClusterID: "c", NodeID: "self", Role: config.RoleCore1}
 	o := cluster.NewObserver(self, "self-addr", nil, "")
-	setPeer(o, "192.168.0.23:9443", config.RoleCore2, true)
+	setPeer(o, "192.0.2.23:9443", config.RoleCore2, true)
 
 	a := New(config.RoleCore1, "self", 1, "psk", "/tmp", nil, o)
 	sc := testScopes("office")["office"]
@@ -46,7 +46,7 @@ func TestResolveScopePeerAddr_ExplicitOverrideWinsOverObserver(t *testing.T) {
 func TestResolveScopePeerAddr_ObserverWinsOverStaticSuffix(t *testing.T) {
 	self := identity.Identity{ClusterID: "c", NodeID: "self", Role: config.RoleCore1}
 	o := cluster.NewObserver(self, "self-addr", nil, "")
-	setPeer(o, "192.168.0.23:9443", config.RoleCore2, true)
+	setPeer(o, "192.0.2.23:9443", config.RoleCore2, true)
 
 	a := New(config.RoleCore1, "self", 1, "psk", "/tmp", nil, o)
 	a.SetNodeIPSuffixes(map[string]string{config.RoleCore2: "99"})
@@ -114,7 +114,7 @@ func TestScopeBeaconLocalAddrs_ExcludesNotYetConstructedScope(t *testing.T) {
 func TestScopeBeaconTargets_ExcludesNotYetConstructedScope(t *testing.T) {
 	self := identity.Identity{ClusterID: "c", NodeID: "self", Role: config.RoleCore1}
 	o := cluster.NewObserver(self, "self-addr", nil, "")
-	setPeer(o, "192.168.0.23:9443", config.RoleCore2, true)
+	setPeer(o, "192.0.2.23:9443", config.RoleCore2, true)
 
 	a := New(config.RoleCore1, "self", 1, "psk", "/tmp", nil, o)
 	scopes := map[string]config.ScopeConfig{

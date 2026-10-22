@@ -663,7 +663,7 @@ type ScopeDefaults struct {
 
 // MgmtVIPConfig defines the management-plane VIP.
 type MgmtVIPConfig struct {
-	VIP    string `json:"vip"`     // virtual IP with prefix (e.g. "192.168.0.100/24")
+	VIP    string `json:"vip"`     // virtual IP with prefix (e.g. "192.0.2.100/24")
 	VRRPID int    `json:"vrrp_id"` // VRRP virtual router ID — must not collide with any scope's vrrp_id
 }
 

@@ -15,7 +15,7 @@ import (
 
 func TestCollectExistingDNSRecords_GlobalAndPerScope(t *testing.T) {
 	c := config.Cluster{
-		GlobalDNSRecords: []config.DNSRecord{{Name: "ntp.lan", Type: "A", Value: "192.168.0.10"}},
+		GlobalDNSRecords: []config.DNSRecord{{Name: "ntp.lan", Type: "A", Value: "192.0.2.10"}},
 		Scopes: map[string]config.ScopeConfig{
 			"office": {DNSRecords: []config.DNSRecord{{Name: "printer.lan", Type: "A", Value: "192.168.100.50"}}},
 		},

@@ -27,8 +27,8 @@ func TestStatusTmpl_RendersProbeHostRows(t *testing.T) {
 		ClusterState: "STABLE",
 		ClusterClass: "ok",
 		ProbeHostRows: []probeHostOverviewRow{
-			{Name: "probe-a", Addr: "192.168.0.42:9444", Icon: "✔", Class: "ok", Info: "0 scope(s)", Version: "0.9.7-dev+1155c7e", SysStr: "load 0.05  mem 24%"},
-			{Name: "probe-b", Addr: "192.168.0.43:9444", Icon: "DOWN", Class: "crit", Info: "dial tcp: timeout"},
+			{Name: "probe-a", Addr: "192.0.2.42:9444", Icon: "✔", Class: "ok", Info: "0 scope(s)", Version: "0.9.7-dev+1155c7e", SysStr: "load 0.05  mem 24%"},
+			{Name: "probe-b", Addr: "192.0.2.43:9444", Icon: "DOWN", Class: "crit", Info: "dial tcp: timeout"},
 		},
 	}
 	var buf bytes.Buffer
@@ -58,8 +58,8 @@ func TestStatusTmpl_ProbeHostRowShowsRunningStatusWord(t *testing.T) {
 		ClusterState: "STABLE",
 		ClusterClass: "ok",
 		ProbeHostRows: []probeHostOverviewRow{
-			{Name: "probe-a", Addr: "192.168.0.42:9444", Icon: "✔", Class: "ok", State: "RUNNING", Info: "0 scope(s)"},
-			{Name: "probe-b", Addr: "192.168.0.43:9444", Icon: "✖", Class: "crit", State: "DOWN", Info: "dial tcp: timeout"},
+			{Name: "probe-a", Addr: "192.0.2.42:9444", Icon: "✔", Class: "ok", State: "RUNNING", Info: "0 scope(s)"},
+			{Name: "probe-b", Addr: "192.0.2.43:9444", Icon: "✖", Class: "crit", State: "DOWN", Info: "dial tcp: timeout"},
 		},
 	}
 	var buf bytes.Buffer
@@ -125,7 +125,7 @@ func TestStatusTmpl_RendersHostnameAndNicknameColumns(t *testing.T) {
 		ClusterClass: "ok",
 		Rows: []statusRow{
 			{
-				Node:     NodeConfig{Name: "core-1", Addr: "192.168.0.25:9443", DisplayName: "the fast one"},
+				Node:     NodeConfig{Name: "core-1", Addr: "192.0.2.25:9443", DisplayName: "the fast one"},
 				Status:   nodeStatus{Role: "core-1", Hostname: "node-a", State: "STABLE"},
 				Nickname: "the fast one",
 				Class:    "ok",
@@ -146,7 +146,7 @@ func TestStatusTmpl_RendersHostnameAndNicknameColumns(t *testing.T) {
 	if !strings.Contains(out, "node-a") {
 		t.Error("expected the row's real OS hostname to render in the Host column")
 	}
-	if !strings.Contains(out, "192.168.0.25:9443") {
+	if !strings.Contains(out, "192.0.2.25:9443") {
 		t.Error("expected the Addr column to still render the real IP alongside hostname")
 	}
 }
@@ -692,8 +692,8 @@ func TestCheckCoherence_ClockSkew_StillCaughtRelativeToFetchedAt(t *testing.T) {
 
 func TestCheckCoherence_Partition(t *testing.T) {
 	rows := []statusRow{
-		{Node: NodeConfig{Name: "core-1", Addr: "192.168.0.22:9443"}, Status: nodeStatus{Role: "core-1", NodeID: "n1", PeersUnreachable: []string{"192.168.0.23:9443"}}},
-		{Node: NodeConfig{Name: "core-2", Addr: "192.168.0.23:9443"}, Status: nodeStatus{Role: "core-2", NodeID: "n2"}},
+		{Node: NodeConfig{Name: "core-1", Addr: "192.0.2.22:9443"}, Status: nodeStatus{Role: "core-1", NodeID: "n1", PeersUnreachable: []string{"192.0.2.23:9443"}}},
+		{Node: NodeConfig{Name: "core-2", Addr: "192.0.2.23:9443"}, Status: nodeStatus{Role: "core-2", NodeID: "n2"}},
 	}
 	warnings := checkCoherence(rows, map[string]tokenInfo{})
 	found := false
@@ -870,10 +870,10 @@ func TestInterfaceHealthStatus_DifferentPeersMgmtDownNotMerged(t *testing.T) {
 func TestUnreachableNodeNames_NamesGenuinelyUnreachableRows(t *testing.T) {
 	rows := []statusRow{
 		{Node: NodeConfig{Name: "core-1"}, Status: nodeStatus{Role: "core-1"}},
-		{Node: NodeConfig{Name: "core-2", Addr: "192.168.0.22:9443"}, FetchError: "connection refused"},
-		{Node: NodeConfig{Name: "core-3", Addr: "192.168.0.24:9443"}, FetchError: "timeout"},
+		{Node: NodeConfig{Name: "core-2", Addr: "192.0.2.22:9443"}, FetchError: "connection refused"},
+		{Node: NodeConfig{Name: "core-3", Addr: "192.0.2.24:9443"}, FetchError: "timeout"},
 	}
-	mgmtOnly := map[string]bool{"192.168.0.22:9443": true}
+	mgmtOnly := map[string]bool{"192.0.2.22:9443": true}
 	got := unreachableNodeNames(rows, mgmtOnly)
 	if len(got) != 1 || got[0] != "core-3" {
 		t.Errorf("unreachableNodeNames() = %v, want [\"core-3\"] — core-1 is fine, core-2 is mgmt-only-down (not genuinely unreachable)", got)
@@ -882,15 +882,15 @@ func TestUnreachableNodeNames_NamesGenuinelyUnreachableRows(t *testing.T) {
 
 func TestUnreachableNodeNames_FallsBackToAddrWhenNameEmpty(t *testing.T) {
 	rows := []statusRow{
-		{Node: NodeConfig{Addr: "192.168.0.99:9443"}, FetchError: "timeout"},
+		{Node: NodeConfig{Addr: "192.0.2.99:9443"}, FetchError: "timeout"},
 	}
 	got := unreachableNodeNames(rows, map[string]bool{})
-	if len(got) != 1 || got[0] != "192.168.0.99:9443" {
+	if len(got) != 1 || got[0] != "192.0.2.99:9443" {
 		t.Errorf("unreachableNodeNames() = %v, want the addr as a fallback name", got)
 	}
 }
 
-const peerMgmtDownWarning = "scope core-2: peer_mgmt_down core-2 (192.168.0.22:9443) is unreachable via its mgmt/control address, but confirmed alive via its own scope-VLAN address (10.200.18.23:9443)"
+const peerMgmtDownWarning = "scope core-2: peer_mgmt_down core-2 (192.0.2.22:9443) is unreachable via its mgmt/control address, but confirmed alive via its own scope-VLAN address (10.200.18.23:9443)"
 
 func TestConfigSaneStatus_InterfaceWarningsBelongToInterfacesRowOnly(t *testing.T) {
 	rows := []statusRow{
@@ -922,15 +922,15 @@ func TestConfigSaneStatus_RealFindingStillShownAlongsideInterfaceOne(t *testing.
 
 func TestMgmtOnlyDownAddrs_ReportedByReachablePeerOnly(t *testing.T) {
 	rows := []statusRow{
-		{Node: NodeConfig{Addr: "192.168.0.23:9443"}, Status: nodeStatus{Role: "core-1", PlaneWarnings: []string{peerMgmtDownWarning}}},
-		{Node: NodeConfig{Addr: "192.168.0.22:9443"}, FetchError: "node offline"},
+		{Node: NodeConfig{Addr: "192.0.2.23:9443"}, Status: nodeStatus{Role: "core-1", PlaneWarnings: []string{peerMgmtDownWarning}}},
+		{Node: NodeConfig{Addr: "192.0.2.22:9443"}, FetchError: "node offline"},
 		// A stale warning on an unreachable row must never count.
-		{Node: NodeConfig{Addr: "192.168.0.24:9443"}, FetchError: "timeout", Status: nodeStatus{PlaneWarnings: []string{
-			"scope core-1: peer_mgmt_down core-1 (192.168.0.23:9443) is unreachable via its mgmt/control address"}}},
+		{Node: NodeConfig{Addr: "192.0.2.24:9443"}, FetchError: "timeout", Status: nodeStatus{PlaneWarnings: []string{
+			"scope core-1: peer_mgmt_down core-1 (192.0.2.23:9443) is unreachable via its mgmt/control address"}}},
 	}
 	got := mgmtOnlyDownAddrs(rows)
-	if !got["192.168.0.22:9443"] {
-		t.Errorf("mgmtOnlyDownAddrs() = %v, want 192.168.0.22:9443 (core-2, confirmed alive via fallback)", got)
+	if !got["192.0.2.22:9443"] {
+		t.Errorf("mgmtOnlyDownAddrs() = %v, want 192.0.2.22:9443 (core-2, confirmed alive via fallback)", got)
 	}
 	if len(got) != 1 {
 		t.Errorf("mgmtOnlyDownAddrs() = %v, want exactly one entry — a stale warning from an unreachable row must be ignored", got)

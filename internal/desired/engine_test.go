@@ -324,3 +324,73 @@ func TestEngine_Reconcile_ContinuousGrace_LowScoreHandsOffFasterThanFlat(t *test
 		t.Fatalf("owner = %q, want core-2 (low-score trunk hands off fast, not waiting out the flat 5s)", m.Assignments[0].Owner)
 	}
 }
+
+func TestEngine_Reconcile_RestartedOwnerDoesNotSplitTheMap(t *testing.T) {
+	scopes := []ScopeDefinition{{Name: "office", PreferredWorker: config.RoleCore1}}
+	allAlive := WorkerLiveness{Core1Alive: true, Core2Alive: true, Core3Alive: true}
+
+	peer := New(0, scopes, time.Millisecond, 0)
+	peer.SetUnservedGrace(20 * time.Millisecond)
+	servedByCore3 := allAlive
+	servedByCore3.Observed = CurrentServing{"office": config.RoleCore3}
+	peer.Reconcile(fsm.StateStable, servedByCore3, 0)
+	time.Sleep(5 * time.Millisecond)
+	if m := peer.Reconcile(fsm.StateStable, servedByCore3, 0); m.Assignments[0].Owner != config.RoleCore3 {
+		t.Fatalf("while core-3 serves: owner = %q, want core-3 (kept, rebalance not approved)", m.Assignments[0].Owner)
+	}
+
+	if m := peer.Reconcile(fsm.StateStable, allAlive, 0); m.Assignments[0].Owner != config.RoleCore3 {
+		t.Fatalf("core-3 just stopped serving: owner = %q, want core-3 still kept within the grace", m.Assignments[0].Owner)
+	}
+
+	restarted := New(0, scopes, time.Millisecond, 0)
+	restartedOwner := restarted.Reconcile(fsm.StateStable, allAlive, 0).Assignments[0].Owner
+
+	time.Sleep(30 * time.Millisecond)
+	peerOwner := peer.Reconcile(fsm.StateStable, allAlive, 0).Assignments[0].Owner
+	if peerOwner != restartedOwner {
+		t.Fatalf("maps split: peer says %q, restarted core-3 says %q", peerOwner, restartedOwner)
+	}
+	if peerOwner != config.RoleCore1 {
+		t.Fatalf("owner = %q, want the preferred core-1 once nobody serves", peerOwner)
+	}
+}
+
+func TestEngine_Reconcile_ServingOwnerIsKeptPastTheGrace(t *testing.T) {
+	scopes := []ScopeDefinition{{Name: "office", PreferredWorker: config.RoleCore1}}
+	live := WorkerLiveness{Core1Alive: true, Core2Alive: true, Core3Alive: true,
+		Observed: CurrentServing{"office": config.RoleCore3}}
+	e := New(0, scopes, time.Millisecond, 0)
+	e.SetUnservedGrace(5 * time.Millisecond)
+	e.Reconcile(fsm.StateStable, live, 0)
+	time.Sleep(20 * time.Millisecond)
+	if m := e.Reconcile(fsm.StateStable, live, 0); m.Assignments[0].Owner != config.RoleCore3 {
+		t.Fatalf("owner = %q, want core-3 (observed serving, no approved rebalance)", m.Assignments[0].Owner)
+	}
+}
+
+func TestEngine_DisputedUnservedOwnerIsDroppedBeforeTheGrace(t *testing.T) {
+	scopes := []ScopeDefinition{{Name: "office", PreferredWorker: config.RoleCore1}}
+	allAlive := WorkerLiveness{Core1Alive: true, Core2Alive: true, Core3Alive: true}
+	servedByCore3 := allAlive
+	servedByCore3.Observed = CurrentServing{"office": config.RoleCore3}
+
+	e := New(0, scopes, time.Millisecond, 0)
+	e.SetUnservedGrace(time.Hour)
+	e.Reconcile(fsm.StateStable, servedByCore3, 0)
+	time.Sleep(5 * time.Millisecond)
+	e.Reconcile(fsm.StateStable, servedByCore3, 0)
+
+	e.DisputeUnservedOwners([]string{"office"})
+	if m := e.Reconcile(fsm.StateStable, servedByCore3, 0); m.Assignments[0].Owner != config.RoleCore3 {
+		t.Fatalf("a dispute must not move a scope its owner is serving: owner = %q", m.Assignments[0].Owner)
+	}
+
+	if m := e.Reconcile(fsm.StateStable, allAlive, 0); m.Assignments[0].Owner != config.RoleCore3 {
+		t.Fatalf("first pass without core-3 serving: owner = %q, want core-3 (grace running)", m.Assignments[0].Owner)
+	}
+	e.DisputeUnservedOwners([]string{"office"})
+	if m := e.Reconcile(fsm.StateStable, allAlive, 0); m.Assignments[0].Owner != config.RoleCore1 {
+		t.Fatalf("disputed and not serving: owner = %q, want core-1 without waiting for the 1h grace", m.Assignments[0].Owner)
+	}
+}

@@ -359,7 +359,7 @@ func TestIsDnsmasqScopeUnit(t *testing.T) {
 // TestHandleDaemonRestartConfirm_RendersWarningForRestartableUnit confirms
 // the GET confirm page.
 func TestHandleDaemonRestartConfirm_RendersWarningForRestartableUnit(t *testing.T) {
-	cfg := &WebConfig{Nodes: []NodeConfig{{Name: "core-1", Addr: "192.168.0.22:9443"}}}
+	cfg := &WebConfig{Nodes: []NodeConfig{{Name: "core-1", Addr: "192.0.2.22:9443"}}}
 	req := httptest.NewRequest("GET", "/daemons/core-1/dnshived.service/restart/confirm", nil)
 	req.SetPathValue("node", "core-1")
 	req.SetPathValue("unit", "dnshived.service")
@@ -480,7 +480,7 @@ func TestHandleDaemonRestart_ProbeHostUsesItsOwnEndpoint(t *testing.T) {
 }
 
 func TestFindNode_FallsBackToSelfWhenNameMatchesNeitherList(t *testing.T) {
-	local := newLocalConfigServer(t, "core-3", "192.168.0.22:9443")
+	local := newLocalConfigServer(t, "core-3", "192.0.2.22:9443")
 	port := localPort(t, local)
 	cfg := &WebConfig{Nodes: []NodeConfig{{Name: "core-1", Addr: "192.168.9.9:" + port}}}
 
@@ -491,7 +491,7 @@ func TestFindNode_FallsBackToSelfWhenNameMatchesNeitherList(t *testing.T) {
 	if isProbeHost {
 		t.Error("expected self-resolved arbiter to never be treated as a probe host")
 	}
-	if node.Name != "core-3" || node.Addr != "192.168.0.22:9443" {
+	if node.Name != "core-3" || node.Addr != "192.0.2.22:9443" {
 		t.Errorf("node = %+v, want the real self-probed arbiter identity", node)
 	}
 }

@@ -63,7 +63,7 @@ func TestRefreshMgmtVIPStateCache_ClearsStaleValueOnError(t *testing.T) {
 
 func TestRenderMgmtVIPConfig_NoopWithoutPlatform(t *testing.T) {
 	dir := t.TempDir()
-	vip := &config.MgmtVIPConfig{VIP: "192.168.0.100/24", VRRPID: 200}
+	vip := &config.MgmtVIPConfig{VIP: "192.0.2.100/24", VRRPID: 200}
 	a := &Agent{dataDir: dir, role: config.RoleCore1}
 
 	if err := a.RenderMgmtVIPConfig(vip, nil); err != nil {
@@ -78,7 +78,7 @@ func TestRenderMgmtVIPConfig_NoopWithoutPlatform(t *testing.T) {
 // the preferred mgmt VIP priority.
 func TestRenderMgmtVIPConfig_Core3GetsPreferredPriority(t *testing.T) {
 	dir := t.TempDir()
-	vip := &config.MgmtVIPConfig{VIP: "192.168.0.100/24", VRRPID: 200}
+	vip := &config.MgmtVIPConfig{VIP: "192.0.2.100/24", VRRPID: 200}
 	platform := &config.Platform{Mgmt: "eth0"}
 	a := &Agent{dataDir: dir, role: config.RoleCore3}
 
@@ -96,7 +96,7 @@ func TestRenderMgmtVIPConfig_Core3GetsPreferredPriority(t *testing.T) {
 
 func TestRenderMgmtVIPConfig_Core1GetsMiddlePriority(t *testing.T) {
 	dir := t.TempDir()
-	vip := &config.MgmtVIPConfig{VIP: "192.168.0.100/24", VRRPID: 200}
+	vip := &config.MgmtVIPConfig{VIP: "192.0.2.100/24", VRRPID: 200}
 	platform := &config.Platform{Mgmt: "eth0"}
 	a := &Agent{dataDir: dir, role: config.RoleCore1}
 
@@ -127,7 +127,7 @@ func TestRenderMgmtVIPConfig_Core1GetsMiddlePriority(t *testing.T) {
 
 func TestRenderMgmtVIPConfig_Core2GetsLowestPriority(t *testing.T) {
 	dir := t.TempDir()
-	vip := &config.MgmtVIPConfig{VIP: "192.168.0.100/24", VRRPID: 200}
+	vip := &config.MgmtVIPConfig{VIP: "192.0.2.100/24", VRRPID: 200}
 	platform := &config.Platform{Mgmt: "eth0"}
 	a := &Agent{dataDir: dir, role: config.RoleCore2}
 
@@ -145,7 +145,7 @@ func TestRenderMgmtVIPConfig_Core2GetsLowestPriority(t *testing.T) {
 
 func TestRenderMgmtVIPConfig_RemovalDecommissionsStaleFile(t *testing.T) {
 	dir := t.TempDir()
-	vip := &config.MgmtVIPConfig{VIP: "192.168.0.100/24", VRRPID: 200}
+	vip := &config.MgmtVIPConfig{VIP: "192.0.2.100/24", VRRPID: 200}
 	platform := &config.Platform{Mgmt: "eth0"}
 	a := &Agent{dataDir: dir, role: config.RoleCore1}
 

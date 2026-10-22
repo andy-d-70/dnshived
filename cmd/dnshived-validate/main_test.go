@@ -57,13 +57,13 @@ func TestDHCPDualActive_NoFindingsIsOK(t *testing.T) {
 
 func TestDHCPDualActive_FindingIsAViolation(t *testing.T) {
 	d := &DHCPDualActive{lastBad: map[string]string{
-		"office@192.168.0.22:9443": "servers=[192.168.100.22 192.168.100.23]",
+		"office@192.0.2.22:9443": "servers=[192.168.100.22 192.168.100.23]",
 	}}
 	err := d.Evaluate(ClusterSnapshot{})
 	if err == nil {
 		t.Fatal("Evaluate() = nil, want a violation for a real dual-active finding")
 	}
-	if !strings.Contains(err.Error(), "office@192.168.0.22:9443") {
+	if !strings.Contains(err.Error(), "office@192.0.2.22:9443") {
 		t.Errorf("error %q doesn't identify which scope/worker", err.Error())
 	}
 }
@@ -77,8 +77,8 @@ func TestDHCPDualActive_Name(t *testing.T) {
 
 func TestCheckScopeIPCoherence_DistinctAddressesInSubnetIsOK(t *testing.T) {
 	byAddr := map[string]probeConfigScope{
-		"192.168.0.22:9443": {VIP: "192.168.100.1/24", NodeIP: "192.168.100.22/24"},
-		"192.168.0.23:9443": {VIP: "192.168.100.1/24", NodeIP: "192.168.100.23/24"},
+		"192.0.2.22:9443": {VIP: "192.168.100.1/24", NodeIP: "192.168.100.22/24"},
+		"192.0.2.23:9443": {VIP: "192.168.100.1/24", NodeIP: "192.168.100.23/24"},
 	}
 	if got := checkScopeIPCoherence(byAddr); got != "" {
 		t.Errorf("checkScopeIPCoherence() = %q, want \"\" for distinct in-subnet addresses", got)
@@ -87,8 +87,8 @@ func TestCheckScopeIPCoherence_DistinctAddressesInSubnetIsOK(t *testing.T) {
 
 func TestCheckScopeIPCoherence_DuplicateWorkerAddressIsAViolation(t *testing.T) {
 	byAddr := map[string]probeConfigScope{
-		"192.168.0.22:9443": {VIP: "192.168.100.1/24", NodeIP: "192.168.100.22/24"},
-		"192.168.0.23:9443": {VIP: "192.168.100.1/24", NodeIP: "192.168.100.22/24"}, // same as worker-a's
+		"192.0.2.22:9443": {VIP: "192.168.100.1/24", NodeIP: "192.168.100.22/24"},
+		"192.0.2.23:9443": {VIP: "192.168.100.1/24", NodeIP: "192.168.100.22/24"}, // same as worker-a's
 	}
 	got := checkScopeIPCoherence(byAddr)
 	if got == "" {
@@ -101,7 +101,7 @@ func TestCheckScopeIPCoherence_DuplicateWorkerAddressIsAViolation(t *testing.T) 
 
 func TestCheckScopeIPCoherence_NodeIPEqualsVIPIsAViolation(t *testing.T) {
 	byAddr := map[string]probeConfigScope{
-		"192.168.0.22:9443": {VIP: "192.168.100.1/24", NodeIP: "192.168.100.1/24"}, // collides with the VIP
+		"192.0.2.22:9443": {VIP: "192.168.100.1/24", NodeIP: "192.168.100.1/24"}, // collides with the VIP
 	}
 	got := checkScopeIPCoherence(byAddr)
 	if got == "" {
@@ -111,7 +111,7 @@ func TestCheckScopeIPCoherence_NodeIPEqualsVIPIsAViolation(t *testing.T) {
 
 func TestCheckScopeIPCoherence_NodeIPOutsideSubnetIsAViolation(t *testing.T) {
 	byAddr := map[string]probeConfigScope{
-		"192.168.0.22:9443": {VIP: "192.168.100.1/24", NodeIP: "10.0.0.22/24"}, // wrong subnet entirely
+		"192.0.2.22:9443": {VIP: "192.168.100.1/24", NodeIP: "10.0.0.22/24"}, // wrong subnet entirely
 	}
 	got := checkScopeIPCoherence(byAddr)
 	if got == "" {
@@ -127,7 +127,7 @@ func TestCheckScopeIPCoherence_NodeIPOutsideSubnetIsAViolation(t *testing.T) {
 // being silently skipped.
 func TestCheckScopeIPCoherence_UnparsableAddressIsAViolation(t *testing.T) {
 	byAddr := map[string]probeConfigScope{
-		"192.168.0.22:9443": {VIP: "192.168.100.1/24", NodeIP: "not-an-ip"},
+		"192.0.2.22:9443": {VIP: "192.168.100.1/24", NodeIP: "not-an-ip"},
 	}
 	if got := checkScopeIPCoherence(byAddr); got == "" {
 		t.Error("checkScopeIPCoherence() = \"\", want a violation for an unparsable node_ip")
@@ -151,7 +151,7 @@ func TestNodeIPCoherence_NoFindingsIsOK(t *testing.T) {
 
 func TestNodeIPCoherence_FindingIsAViolation(t *testing.T) {
 	n := &NodeIPCoherence{lastBad: map[string]string{
-		"office": "duplicate address 192.168.100.22 used by both 192.168.0.22:9443 and 192.168.0.23:9443",
+		"office": "duplicate address 192.168.100.22 used by both 192.0.2.22:9443 and 192.0.2.23:9443",
 	}}
 	err := n.Evaluate(ClusterSnapshot{})
 	if err == nil {
@@ -284,14 +284,14 @@ func TestHeartbeatLine_SortsViolatedNamesForDeterministicOutput(t *testing.T) {
 
 func TestProbeTargets_FlagThenWebConfig(t *testing.T) {
 	web := filepath.Join(t.TempDir(), "web.json")
-	os.WriteFile(web, []byte(`{"probe_hosts":[{"addr":"192.168.0.54:9444"},{"addr":"10.0.0.9:9444","tls":true},{"addr":""}]}`), 0o600)
+	os.WriteFile(web, []byte(`{"probe_hosts":[{"addr":"192.0.2.54:9444"},{"addr":"10.0.0.9:9444","tls":true},{"addr":""}]}`), 0o600)
 
-	got := probeTargets(" 192.168.0.54:9444, https://p2:9444/ ", web)
-	if strings.Join(got, " ") != "http://192.168.0.54:9444 https://p2:9444" {
+	got := probeTargets(" 192.0.2.54:9444, https://p2:9444/ ", web)
+	if strings.Join(got, " ") != "http://192.0.2.54:9444 https://p2:9444" {
 		t.Errorf("flag targets = %v", got)
 	}
 	got = probeTargets("", web)
-	if strings.Join(got, " ") != "http://192.168.0.54:9444 https://10.0.0.9:9444" {
+	if strings.Join(got, " ") != "http://192.0.2.54:9444 https://10.0.0.9:9444" {
 		t.Errorf("web.json targets = %v", got)
 	}
 	if got := probeTargets("", filepath.Join(t.TempDir(), "missing.json")); got != nil {

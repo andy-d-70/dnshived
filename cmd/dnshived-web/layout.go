@@ -11,6 +11,7 @@ import (
 
 // navHTML is the shared, two-line nav bar for every page.
 const comboboxScriptHTML = `<script>
+var comboMax=200;
 function dnshivedInitCombos(){
   document.querySelectorAll('select.js-combo').forEach(function(sel){
     if(sel.dataset.comboReady) return;
@@ -56,11 +57,16 @@ function dnshivedInitCombos(){
     }
     function open(query){
       var q=(query||'').toLowerCase();
-      var matches=[];
-      for(var i=0;i<sel.options.length && matches.length<200;i++){
+      var exact=[],prefix=[],rest=[];
+      for(var i=0;i<sel.options.length;i++){
         var o=sel.options[i];
-        if(o.textContent.toLowerCase().indexOf(q)!==-1) matches.push(o);
+        var t=o.textContent.toLowerCase();
+        if(t===q || o.value.toLowerCase()===q) exact.push(o);
+        else if(t.indexOf(q)===0) prefix.push(o);
+        else if(t.indexOf(q)!==-1) rest.push(o);
       }
+      var all=exact.concat(prefix,rest);
+      var matches=all.slice(0,comboMax);
       list.innerHTML='';
       if(matches.length===0){
         var e=document.createElement('div');
@@ -79,13 +85,26 @@ function dnshivedInitCombos(){
         item.addEventListener('mousedown',function(ev){ ev.preventDefault(); choose(o); });
         list.appendChild(item);
       });
+      if(all.length>matches.length){
+        var more=document.createElement('div');
+        more.className='combo-more';
+        more.textContent=(all.length-matches.length)+' more — type to narrow';
+        more.addEventListener('mousedown',function(ev){ ev.preventDefault(); });
+        list.appendChild(more);
+      }
       active=0;
       highlight();
       list.hidden=false;
       input.setAttribute('aria-expanded','true');
     }
+    var keepSelection=false;
     input.addEventListener('focus',function(){
       open(input.value===selectedLabel()?'':input.value);
+      input.select();
+      keepSelection=true;
+    });
+    input.addEventListener('mouseup',function(ev){
+      if(keepSelection){ ev.preventDefault(); keepSelection=false; }
     });
     input.addEventListener('input',function(){ open(input.value); });
     input.addEventListener('keydown',function(ev){
@@ -110,6 +129,7 @@ function dnshivedInitCombos(){
       }
     });
     input.addEventListener('blur',function(){
+      keepSelection=false;
       setTimeout(function(){
         if(input.value.toLowerCase()!==selectedLabel().toLowerCase()){
           var found=null;
@@ -354,7 +374,8 @@ max-height:14rem;overflow-y:auto;background:var(--panel);border:1px solid var(--
 border-radius:6px;box-shadow:0 4px 10px rgba(0,0,0,.15)}
 .combo-item{padding:.3rem .5rem;font-size:.92rem;cursor:pointer}
 .combo-item:hover,.combo-item-active{background:var(--accent);color:#fff}
-.combo-empty{padding:.3rem .5rem;font-size:.85rem;color:var(--muted)}
+.combo-empty,.combo-more{padding:.3rem .5rem;font-size:.85rem;color:var(--muted)}
+.combo-more{border-top:1px solid var(--border);cursor:default}
 /* log-modal: a small window over the page; dialog::backdrop and showModal() do the rest. */
 dialog#log-modal{background:var(--panel);color:var(--text);border:1px solid var(--border);
 border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.25);padding:1rem 1.2rem;

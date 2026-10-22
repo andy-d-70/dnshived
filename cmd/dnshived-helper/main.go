@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -264,15 +265,13 @@ func main() {
 	}
 	log.Printf("[HELPER:INIT] nftables gate ready (table=%s chain=%s)", nftgate.Table, nftgate.Chain)
 
-	// Ensure socket directory exists.
-	socketDir := filepath.Dir(*socketPath)
-	os.MkdirAll(socketDir, 0o755)
+	if err := prepareSocket(*socketPath); err != nil {
+		log.Fatalf("[HELPER:INIT] %v", err)
+	}
 
-	// Remove stale socket.
-	os.Remove(*socketPath)
-
-	// Listen.
+	oldUmask := syscall.Umask(0o117)
 	ln, err := net.Listen("unix", *socketPath)
+	syscall.Umask(oldUmask)
 	if err != nil {
 		log.Fatalf("listen: %v", err)
 	}
@@ -284,6 +283,7 @@ func main() {
 
 	log.Printf("[HELPER:INIT] listening on %s", *socketPath)
 
+	sem := make(chan struct{}, helperMaxConns)
 	go func() {
 		for {
 			conn, err := ln.Accept()
@@ -294,9 +294,11 @@ func main() {
 				log.Printf("[HELPER:ERROR] accept: %v", err)
 				continue
 			}
+			sem <- struct{}{}
 			connWG.Add(1)
 			go func() {
 				defer connWG.Done()
+				defer func() { <-sem }()
 				handleConn(conn)
 			}()
 		}
@@ -307,7 +309,16 @@ func main() {
 	<-sigCh
 	log.Printf("[HELPER] shutting down, draining in-flight requests")
 	ln.Close()
-	connWG.Wait()
+	drained := make(chan struct{})
+	go func() {
+		connWG.Wait()
+		close(drained)
+	}()
+	select {
+	case <-drained:
+	case <-time.After(helperDrainTimeout):
+		log.Printf("[HELPER:WARN] %v drain timeout reached, exiting with requests still in flight", helperDrainTimeout)
+	}
 	os.Remove(*socketPath)
 	log.Printf("[HELPER] shutdown complete")
 	os.Exit(0)
@@ -318,13 +329,67 @@ func main() {
 // process exits.
 var connWG sync.WaitGroup
 
+var (
+	helperConnDeadline   = 60 * time.Second
+	helperDrainTimeout   = 45 * time.Second
+	helperMaxConns       = 64
+	helperMaxRequestSize = int64(64 << 10)
+)
+
+// prepareSocket removes only a stale socket, never another file at the path.
+func prepareSocket(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("socket directory: %w", err)
+	}
+	fi, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stat socket %s: %w", path, err)
+	}
+	if fi.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("%s exists and is not a socket, refusing to remove it", path)
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("remove stale socket %s: %w", path, err)
+	}
+	return nil
+}
+
+// peerCred is for the log only; the socket's group still gates access.
+func peerCred(conn net.Conn) string {
+	uc, ok := conn.(*net.UnixConn)
+	if !ok {
+		return "unknown"
+	}
+	raw, err := uc.SyscallConn()
+	if err != nil {
+		return "unknown"
+	}
+	var cred *syscall.Ucred
+	var credErr error
+	if err := raw.Control(func(fd uintptr) {
+		cred, credErr = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
+	}); err != nil || credErr != nil {
+		return "unknown"
+	}
+	return fmt.Sprintf("uid=%d pid=%d", cred.Uid, cred.Pid)
+}
+
 func handleConn(conn net.Conn) {
 	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(helperConnDeadline))
+	caller := peerCred(conn)
 
 	var req Request
-	if err := json.NewDecoder(conn).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(conn, helperMaxRequestSize)).Decode(&req); err != nil {
+		log.Printf("[HELPER:DENY] %s: invalid request: %v", caller, err)
 		respond(conn, Response{OK: false, Error: "invalid request: " + err.Error()})
 		return
+	}
+	if req.Command == "restart-helper" || req.Command == "finish-decommission" {
+		log.Printf("[HELPER:PEER] %s requested %s", caller, req.Command)
 	}
 
 	// Validate scope — only for commands that take one.
@@ -333,7 +398,7 @@ func handleConn(conn net.Conn) {
 		ok := allowedScopes[req.Scope]
 		allowedScopesMu.RUnlock()
 		if !ok {
-			log.Printf("[HELPER:DENY] scope %q not in allowlist", req.Scope)
+			log.Printf("[HELPER:DENY] %s: scope %q not in allowlist", caller, req.Scope)
 			respond(conn, Response{OK: false, Error: "scope not allowed: " + req.Scope})
 			return
 		}
@@ -449,7 +514,7 @@ func handleConn(conn net.Conn) {
 	case "reset-scope-state":
 		err = resetScopeState()
 	default:
-		log.Printf("[HELPER:DENY] unknown command %q", req.Command)
+		log.Printf("[HELPER:DENY] %s: unknown command %q", caller, req.Command)
 		respond(conn, Response{OK: false, Error: "unknown command: " + req.Command})
 		return
 	}
@@ -997,6 +1062,14 @@ func reloadDNSRelay() (throttled bool, err error) {
 		log.Printf("[HELPER:RATE_LIMIT] reload-dnsrelay suppressed (< 1s since last reload)")
 		return true, nil
 	}
+	if unitRunsReplacedBinary("dnshived-dnsrelay.service") {
+		log.Printf("[HELPER:RELAY] dnshived-dnsrelay runs a replaced binary — restarting instead of reloading")
+		throttled, err := restartDNSRelay()
+		if err == nil && !throttled {
+			lastDNSRelayReloadAt = time.Now()
+		}
+		return throttled, err
+	}
 	if err := run("systemctl", "reload", "dnshived-dnsrelay.service"); err != nil {
 		return false, fmt.Errorf("reload dnshived-dnsrelay.service: %w", err)
 	}
@@ -1065,6 +1138,29 @@ func stopDNSRelay() error {
 	return nil
 }
 
+// unitRunsReplacedBinary reports whether unit's main process still runs
+// a binary that has since been replaced or removed on disk (an upgrade
+// that only reloaded it), so a reload would keep the old code running.
+func unitRunsReplacedBinary(unit string) bool {
+	out, err := exec.Command("systemctl", "show", "-p", "MainPID", "--value", unit).Output()
+	if err != nil {
+		return false
+	}
+	pid := strings.TrimSpace(string(out))
+	if pid == "" || pid == "0" {
+		return false
+	}
+	target, err := os.Readlink("/proc/" + pid + "/exe")
+	if err != nil {
+		return false
+	}
+	return exeReplaced(target)
+}
+
+func exeReplaced(readlinkTarget string) bool {
+	return strings.HasSuffix(readlinkTarget, " (deleted)")
+}
+
 // relayReloadMu/lastRelayReloadAt rate-limit reloadRelay to at most once
 // per second.
 var (
@@ -1080,6 +1176,14 @@ func reloadRelay() (throttled bool, err error) {
 	if time.Since(lastRelayReloadAt) < time.Second {
 		log.Printf("[HELPER:RATE_LIMIT] reload-relay suppressed (< 1s since last reload)")
 		return true, nil
+	}
+	if unitRunsReplacedBinary("dnshived-relay.service") {
+		log.Printf("[HELPER:RELAY] dnshived-relay runs a replaced binary — restarting instead of reloading")
+		throttled, err := restartRelay()
+		if err == nil && !throttled {
+			lastRelayReloadAt = time.Now()
+		}
+		return throttled, err
 	}
 	if err := run("systemctl", "reload", "dnshived-relay.service"); err != nil {
 		return false, fmt.Errorf("reload dnshived-relay.service: %w", err)

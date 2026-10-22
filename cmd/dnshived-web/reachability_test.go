@@ -256,22 +256,22 @@ func TestCountsAsDead(t *testing.T) {
 
 func TestObservePeerReport_RecordsAndClearsFallbackRoute(t *testing.T) {
 	r := &nodeReachability{dead: map[string]time.Time{}, fallback: map[string]string{}}
-	r.observePeerReport(nil, []string{"192.168.0.22:9443"}, map[string]string{"192.168.0.22:9443": "10.200.18.23:9443"})
-	if got := r.fallbackFor("192.168.0.22:9443"); got != "10.200.18.23:9443" {
+	r.observePeerReport(nil, []string{"192.0.2.22:9443"}, map[string]string{"192.0.2.22:9443": "10.200.18.23:9443"})
+	if got := r.fallbackFor("192.0.2.22:9443"); got != "10.200.18.23:9443" {
 		t.Fatalf("fallbackFor() = %q, want the reported fallback", got)
 	}
-	if !r.viaFallback("192.168.0.22:9443") {
+	if !r.viaFallback("192.0.2.22:9443") {
 		t.Error("viaFallback() = false, want true (dead over mgmt with a known route)")
 	}
 	// The reporter stops confirming the route: dropped.
-	r.observePeerReport(nil, []string{"192.168.0.22:9443"}, nil)
-	if r.fallbackFor("192.168.0.22:9443") != "" {
+	r.observePeerReport(nil, []string{"192.0.2.22:9443"}, nil)
+	if r.fallbackFor("192.0.2.22:9443") != "" {
 		t.Error("route still present after the reporter stopped confirming it")
 	}
 	// Recovery: reported visible again clears mark AND route.
-	r.observePeerReport(nil, []string{"192.168.0.22:9443"}, map[string]string{"192.168.0.22:9443": "10.200.18.23:9443"})
-	r.observePeerReport([]string{"192.168.0.22:9443"}, nil, nil)
-	if r.isDead("192.168.0.22:9443") || r.fallbackFor("192.168.0.22:9443") != "" {
+	r.observePeerReport(nil, []string{"192.0.2.22:9443"}, map[string]string{"192.0.2.22:9443": "10.200.18.23:9443"})
+	r.observePeerReport([]string{"192.0.2.22:9443"}, nil, nil)
+	if r.isDead("192.0.2.22:9443") || r.fallbackFor("192.0.2.22:9443") != "" {
 		t.Error("node reported visible again must clear both the dead mark and the fallback route")
 	}
 }

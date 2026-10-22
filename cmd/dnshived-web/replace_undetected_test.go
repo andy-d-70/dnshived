@@ -24,7 +24,7 @@ func TestExecuteReplaceNode_UndetectedTrunkRefusalIsExplained(t *testing.T) {
 	defer survivor.Close()
 	ref := newConfigRef(&WebConfig{ListenAddr: "127.0.0.1:0", Nodes: []NodeConfig{{Name: "core-1", Addr: strings.TrimPrefix(survivor.URL, "http://"), AdminToken: "tok"}}})
 
-	_, err := executeReplaceNode(filepath.Join(t.TempDir(), "web.json"), ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-3", Addr: "192.168.0.26", JoinCode: "J"}, false)
+	_, err := executeReplaceNode(filepath.Join(t.TempDir(), "web.json"), ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-3", Addr: "192.0.2.26", JoinCode: "J"}, false)
 	if err == nil {
 		t.Fatal("refused replace returned no error")
 	}
@@ -56,7 +56,7 @@ func TestExecuteReplaceNode_ForwardsOnboardAnyway(t *testing.T) {
 	defer survivor.Close()
 	ref := newConfigRef(&WebConfig{ListenAddr: "127.0.0.1:0", Nodes: []NodeConfig{{Name: "core-1", Addr: strings.TrimPrefix(survivor.URL, "http://"), AdminToken: "tok"}}})
 
-	if _, err := executeReplaceNode(filepath.Join(t.TempDir(), "web.json"), ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-3", Addr: "192.168.0.26", JoinCode: "J"}, true); err != nil {
+	if _, err := executeReplaceNode(filepath.Join(t.TempDir(), "web.json"), ref, "tester", pendingNodeOp{Kind: nodeOpReplace, Role: "core-3", Addr: "192.0.2.26", JoinCode: "J"}, true); err != nil {
 		t.Fatalf("executeReplaceNode: %v", err)
 	}
 	if gotAllow != true {

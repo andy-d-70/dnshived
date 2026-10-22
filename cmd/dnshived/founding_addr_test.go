@@ -15,12 +15,12 @@ import (
 
 func TestNormalizeNodeAddr(t *testing.T) {
 	cases := []struct{ addr, role, want string }{
-		{"192.168.0.52", config.RoleCore2, "192.168.0.52:9443"},
-		{" 192.168.0.52 ", config.RoleCore2, "192.168.0.52:9443"},
-		{"192.168.0.52:9443", config.RoleCore2, "192.168.0.52:9443"},
-		{"192.168.0.52:8000", config.RoleCore2, "192.168.0.52:8000"},
-		{"192.168.0.54", "probe", "192.168.0.54:9444"},
-		{"192.168.0.54:9444", "probe", "192.168.0.54:9444"},
+		{"192.0.2.52", config.RoleCore2, "192.0.2.52:9443"},
+		{" 192.0.2.52 ", config.RoleCore2, "192.0.2.52:9443"},
+		{"192.0.2.52:9443", config.RoleCore2, "192.0.2.52:9443"},
+		{"192.0.2.52:8000", config.RoleCore2, "192.0.2.52:8000"},
+		{"192.0.2.54", "probe", "192.0.2.54:9444"},
+		{"192.0.2.54:9444", "probe", "192.0.2.54:9444"},
 		{"fd00::52", config.RoleCore2, "[fd00::52]:9443"},
 		{"[fd00::52]:9443", config.RoleCore2, "[fd00::52]:9443"},
 		{"", config.RoleCore2, ""},
@@ -34,12 +34,12 @@ func TestNormalizeNodeAddr(t *testing.T) {
 
 func TestBootstrapAddNodeHandler_StoresAddressWithPort(t *testing.T) {
 	state := &builderState{}
-	state.setSelfAddr("192.168.0.51:9443")
+	state.setSelfAddr("192.0.2.51:9443")
 	state.setRole(config.RoleCore1)
 	handler := bootstrapAddNodeHandler("host", "9443", state)
 	for _, f := range []url.Values{
-		{"addr": {"192.168.0.52"}, "role": {config.RoleCore2}, "otp": {"CODE"}},
-		{"addr": {"192.168.0.54"}, "role": {"probe"}, "otp": {"CODE"}, "trunk_parent": {"ens19"}},
+		{"addr": {"192.0.2.52"}, "role": {config.RoleCore2}, "otp": {"CODE"}},
+		{"addr": {"192.0.2.54"}, "role": {"probe"}, "otp": {"CODE"}, "trunk_parent": {"ens19"}},
 	} {
 		req := httptest.NewRequest(http.MethodPost, "/setup/nodes", strings.NewReader(f.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -53,7 +53,7 @@ func TestBootstrapAddNodeHandler_StoresAddressWithPort(t *testing.T) {
 	for _, n := range state.getNodes() {
 		got[n.Role] = n.Addr
 	}
-	if got[config.RoleCore2] != "192.168.0.52:9443" || got["probe"] != "192.168.0.54:9444" {
+	if got[config.RoleCore2] != "192.0.2.52:9443" || got["probe"] != "192.0.2.54:9444" {
 		t.Errorf("stored addresses %v, want core-2 with :9443 and probe with :9444", got)
 	}
 }
@@ -61,9 +61,9 @@ func TestBootstrapAddNodeHandler_StoresAddressWithPort(t *testing.T) {
 func TestBootstrapSetupTmpl_ShowsDetectedInterfaces(t *testing.T) {
 	state := &builderState{}
 	state.setRole(config.RoleCore1)
-	state.setSelfAddr("192.168.0.51:9443")
+	state.setSelfAddr("192.0.2.51:9443")
 	state.setPlatform("ens18", []string{"ens19", "ens20"})
-	if err := state.addNodeDetected("192.168.0.26:9443", config.RoleCore3, "CODE", "", map[string]string{"ens19": "eth1"},
+	if err := state.addNodeDetected("192.0.2.26:9443", config.RoleCore3, "CODE", "", map[string]string{"ens19": "eth1"},
 		[]trunkDetection{{Canonical: "ens19", Local: "eth1"}, {Canonical: "ens20"}}, "eth0"); err != nil {
 		t.Fatal(err)
 	}

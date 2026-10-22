@@ -31,22 +31,22 @@ func TestFindTokenByRole_ReturnsMatchingTokenOrError(t *testing.T) {
 }
 
 func TestLiveCoreNodes_IncludesSelfAndReachablePeersOnly(t *testing.T) {
-	cfg := &config.Cluster{Role: "core-1", ControlAddr: "192.168.0.22:9443"}
+	cfg := &config.Cluster{Role: "core-1", ControlAddr: "192.0.2.22:9443"}
 	snapshot := []cluster.PeerState{
-		{Addr: "192.168.0.23:9443", Reachable: true, Identity: &identity.Identity{Role: "core-2"}},
-		{Addr: "192.168.0.24:9443", Reachable: false, Identity: &identity.Identity{Role: "core-3"}}, // unreachable — must be omitted
-		{Addr: "192.168.0.99:9443", Reachable: true, Identity: nil},                                 // no identity handshake yet — must be omitted
+		{Addr: "192.0.2.23:9443", Reachable: true, Identity: &identity.Identity{Role: "core-2"}},
+		{Addr: "192.0.2.24:9443", Reachable: false, Identity: &identity.Identity{Role: "core-3"}}, // unreachable — must be omitted
+		{Addr: "192.0.2.99:9443", Reachable: true, Identity: nil},                                 // no identity handshake yet — must be omitted
 	}
 
 	got := liveCoreNodes(cfg, snapshot)
 	if len(got) != 2 {
 		t.Fatalf("liveCoreNodes = %v, want exactly 2 entries (self + the one reachable-with-identity peer)", got)
 	}
-	if got[0].Name != "core-1" || got[0].Addr != "192.168.0.22:9443" {
-		t.Errorf("got[0] = %+v, want self (worker-a, 192.168.0.22:9443)", got[0])
+	if got[0].Name != "core-1" || got[0].Addr != "192.0.2.22:9443" {
+		t.Errorf("got[0] = %+v, want self (worker-a, 192.0.2.22:9443)", got[0])
 	}
-	if got[1].Name != "core-2" || got[1].Addr != "192.168.0.23:9443" {
-		t.Errorf("got[1] = %+v, want worker-b, 192.168.0.23:9443", got[1])
+	if got[1].Name != "core-2" || got[1].Addr != "192.0.2.23:9443" {
+		t.Errorf("got[1] = %+v, want worker-b, 192.0.2.23:9443", got[1])
 	}
 }
 
@@ -55,7 +55,7 @@ func TestAddProbeHandler_PushesRealProbeConfigWithBothTokens(t *testing.T) {
 	t.Cleanup(func() { currentConfig.Store(origCfg) })
 	currentConfig.Store(&config.Cluster{
 		Role:        "core-1",
-		ControlAddr: "192.168.0.22:9443",
+		ControlAddr: "192.0.2.22:9443",
 		Platform:    &config.Platform{Workers: []string{"ens19", "ens20"}},
 		APITokens: []config.APIToken{
 			{Name: "bootstrap-admin", Token: "admin-tok", Role: "admin"},
@@ -88,7 +88,7 @@ func TestAddProbeHandler_PushesRealProbeConfigWithBothTokens(t *testing.T) {
 	defer srv.Close()
 
 	self := identity.Identity{Role: "core-1"}
-	observer := cluster.NewObserver(self, "192.168.0.22:9443", nil, "")
+	observer := cluster.NewObserver(self, "192.0.2.22:9443", nil, "")
 	handler := addProbeHandler(observer)
 
 	body, _ := json.Marshal(addProbeRequest{Addr: "127.0.0.1:80", OTP: "JOIN-CODE"})
@@ -134,7 +134,7 @@ func TestAddProbeHandler_PopulatesVLANConstructionFields(t *testing.T) {
 	t.Cleanup(func() { currentConfig.Store(origCfg) })
 	currentConfig.Store(&config.Cluster{
 		Role:        "core-1",
-		ControlAddr: "192.168.0.22:9443",
+		ControlAddr: "192.0.2.22:9443",
 		Platform:    &config.Platform{Workers: []string{"ens19"}},
 		APITokens: []config.APIToken{
 			{Name: "bootstrap-probe", Token: "probe-tok", Role: "probe"},
@@ -161,7 +161,7 @@ func TestAddProbeHandler_PopulatesVLANConstructionFields(t *testing.T) {
 	defer srv.Close()
 
 	self := identity.Identity{Role: "core-1"}
-	observer := cluster.NewObserver(self, "192.168.0.22:9443", nil, "")
+	observer := cluster.NewObserver(self, "192.0.2.22:9443", nil, "")
 	handler := addProbeHandler(observer)
 
 	body, _ := json.Marshal(addProbeRequest{Addr: "127.0.0.1:80", OTP: "JOIN-CODE"})
@@ -188,7 +188,7 @@ func TestAddProbeHandler_PopulatesVLANConstructionFields(t *testing.T) {
 // a network push.
 func TestAddProbeHandler_RejectsMissingFields(t *testing.T) {
 	self := identity.Identity{Role: "core-1"}
-	observer := cluster.NewObserver(self, "192.168.0.22:9443", nil, "")
+	observer := cluster.NewObserver(self, "192.0.2.22:9443", nil, "")
 	handler := addProbeHandler(observer)
 
 	for _, req := range []addProbeRequest{
@@ -208,10 +208,10 @@ func TestAddProbeHandler_RejectsMissingFields(t *testing.T) {
 func TestAddProbeHandler_RejectsWhenNoWorkerTrunksConfigured(t *testing.T) {
 	origCfg := currentConfig.Load()
 	t.Cleanup(func() { currentConfig.Store(origCfg) })
-	currentConfig.Store(&config.Cluster{Role: "core-1", ControlAddr: "192.168.0.22:9443"})
+	currentConfig.Store(&config.Cluster{Role: "core-1", ControlAddr: "192.0.2.22:9443"})
 
 	self := identity.Identity{Role: "core-1"}
-	observer := cluster.NewObserver(self, "192.168.0.22:9443", nil, "")
+	observer := cluster.NewObserver(self, "192.0.2.22:9443", nil, "")
 	handler := addProbeHandler(observer)
 
 	body, _ := json.Marshal(addProbeRequest{Addr: "1.2.3.4:9444", OTP: "x"})
@@ -242,12 +242,12 @@ func TestCorrectedWebConfigJSON_RebuildsNodesFromScratch(t *testing.T) {
 		"listen_addr": "0.0.0.0:8443",
 		"users_file": "/etc/dnshived/webui-users.json",
 		"templates_file": "/etc/dnshived/web-templates.json",
-		"vip_host": "192.168.0.230",
-		"nodes": [{"name": "core-1", "addr": "192.168.0.25:9443", "tls": true, "admin_token": "shared-tok"}],
-		"coordinator": {"name": "coordinator", "addr": "192.168.0.230:9443", "tls": true, "admin_token": "shared-tok"}
+		"vip_host": "192.0.2.230",
+		"nodes": [{"name": "core-1", "addr": "192.0.2.25:9443", "tls": true, "admin_token": "shared-tok"}],
+		"coordinator": {"name": "coordinator", "addr": "192.0.2.230:9443", "tls": true, "admin_token": "shared-tok"}
 	}`)
 
-	out := correctedWebConfigJSON(raw, "core-2", "192.168.0.23:9443", "core-3", "192.168.0.22:9443", "fallback-tok-unused", true)
+	out := correctedWebConfigJSON(raw, "core-2", "192.0.2.23:9443", "core-3", "192.0.2.22:9443", "fallback-tok-unused", true)
 
 	var doc map[string]interface{}
 	if err := json.Unmarshal(out, &doc); err != nil {
@@ -266,10 +266,10 @@ func TestCorrectedWebConfigJSON_RebuildsNodesFromScratch(t *testing.T) {
 	for _, n := range nodes {
 		byName[n.Name] = n
 	}
-	if n, ok := byName["core-2"]; !ok || n.Addr != "192.168.0.23:9443" {
+	if n, ok := byName["core-2"]; !ok || n.Addr != "192.0.2.23:9443" {
 		t.Errorf("missing/wrong worker-b entry (the requesting survivor's own identity — this is the exact real bug): %+v", byName)
 	}
-	if n, ok := byName["core-3"]; !ok || n.Addr != "192.168.0.22:9443" {
+	if n, ok := byName["core-3"]; !ok || n.Addr != "192.0.2.22:9443" {
 		t.Errorf("missing/wrong arbiter entry (the third node): %+v", byName)
 	}
 	for _, n := range nodes {
@@ -285,22 +285,22 @@ func TestCorrectedWebConfigJSON_RebuildsNodesFromScratch(t *testing.T) {
 	}
 
 	// Every other field must pass through untouched.
-	if doc["vip_host"] != "192.168.0.230" {
+	if doc["vip_host"] != "192.0.2.230" {
 		t.Errorf("vip_host = %v, want passed through unchanged", doc["vip_host"])
 	}
 	if doc["templates_file"] != "/etc/dnshived/web-templates.json" {
 		t.Errorf("templates_file = %v, want passed through unchanged", doc["templates_file"])
 	}
 	coord, _ := doc["coordinator"].(map[string]interface{})
-	if coord["addr"] != "192.168.0.230:9443" {
+	if coord["addr"] != "192.0.2.230:9443" {
 		t.Errorf("coordinator field was not passed through unchanged: %v", doc["coordinator"])
 	}
 }
 
 func TestCorrectedWebConfigJSON_HonorsTLSEnabledFalse(t *testing.T) {
-	raw := []byte(`{"nodes": [{"name": "core-1", "addr": "192.168.0.25:9443", "tls": true, "admin_token": "shared-tok"}]}`)
+	raw := []byte(`{"nodes": [{"name": "core-1", "addr": "192.0.2.25:9443", "tls": true, "admin_token": "shared-tok"}]}`)
 
-	out := correctedWebConfigJSON(raw, "core-2", "192.168.0.23:9443", "core-3", "192.168.0.22:9443", "fallback-tok-unused", false)
+	out := correctedWebConfigJSON(raw, "core-2", "192.0.2.23:9443", "core-3", "192.0.2.22:9443", "fallback-tok-unused", false)
 
 	var doc map[string]interface{}
 	if err := json.Unmarshal(out, &doc); err != nil {
@@ -322,9 +322,9 @@ func TestCorrectedWebConfigJSON_HonorsTLSEnabledFalse(t *testing.T) {
 }
 
 func TestCorrectedWebConfigJSON_EmptyThirdAddrOmitsThirdEntry(t *testing.T) {
-	raw := []byte(`{"nodes": [], "vip_host": "192.168.0.230"}`)
+	raw := []byte(`{"nodes": [], "vip_host": "192.0.2.230"}`)
 
-	out := correctedWebConfigJSON(raw, "core-2", "192.168.0.23:9443", "core-3", "", "real-admin-tok", true)
+	out := correctedWebConfigJSON(raw, "core-2", "192.0.2.23:9443", "core-3", "", "real-admin-tok", true)
 
 	var doc map[string]interface{}
 	if err := json.Unmarshal(out, &doc); err != nil {
@@ -338,7 +338,7 @@ func TestCorrectedWebConfigJSON_EmptyThirdAddrOmitsThirdEntry(t *testing.T) {
 	if len(nodes) != 1 {
 		t.Fatalf("nodes = %+v, want exactly 1 entry (no bogus empty-Addr third entry)", nodes)
 	}
-	if nodes[0].Name != "core-2" || nodes[0].Addr != "192.168.0.23:9443" {
+	if nodes[0].Name != "core-2" || nodes[0].Addr != "192.0.2.23:9443" {
 		t.Errorf("nodes[0] = %+v, want the requesting survivor's own identity", nodes[0])
 	}
 	if nodes[0].AdminToken != "real-admin-tok" {
@@ -347,9 +347,9 @@ func TestCorrectedWebConfigJSON_EmptyThirdAddrOmitsThirdEntry(t *testing.T) {
 }
 
 func TestCorrectedWebConfigJSON_FallbackTokenUsedWhenExistingNodesHaveNone(t *testing.T) {
-	raw := []byte(`{"nodes": [{"name": "core-1", "addr": "192.168.0.23:9443", "tls": true, "admin_token": ""}]}`)
+	raw := []byte(`{"nodes": [{"name": "core-1", "addr": "192.0.2.23:9443", "tls": true, "admin_token": ""}]}`)
 
-	out := correctedWebConfigJSON(raw, "core-2", "192.168.0.22:9443", "core-3", "192.168.0.43:9443", "real-admin-tok", true)
+	out := correctedWebConfigJSON(raw, "core-2", "192.0.2.22:9443", "core-3", "192.0.2.43:9443", "real-admin-tok", true)
 
 	var doc map[string]interface{}
 	if err := json.Unmarshal(out, &doc); err != nil {
@@ -371,9 +371,9 @@ func TestCorrectedWebConfigJSON_FallbackTokenUsedWhenExistingNodesHaveNone(t *te
 }
 
 func TestCorrectedWebConfigJSON_SetsSelfAdminTokenFromOlderFormatInput(t *testing.T) {
-	raw := []byte(`{"nodes": [{"name": "core-1", "addr": "192.168.0.23:9443", "tls": true, "admin_token": "sniffed-tok"}]}`)
+	raw := []byte(`{"nodes": [{"name": "core-1", "addr": "192.0.2.23:9443", "tls": true, "admin_token": "sniffed-tok"}]}`)
 
-	out := correctedWebConfigJSON(raw, "core-2", "192.168.0.22:9443", "core-3", "192.168.0.43:9443", "fallback-tok", true)
+	out := correctedWebConfigJSON(raw, "core-2", "192.0.2.22:9443", "core-3", "192.0.2.43:9443", "fallback-tok", true)
 
 	var doc map[string]interface{}
 	if err := json.Unmarshal(out, &doc); err != nil {
@@ -385,9 +385,9 @@ func TestCorrectedWebConfigJSON_SetsSelfAdminTokenFromOlderFormatInput(t *testin
 }
 
 func TestCorrectedWebConfigJSON_PreservesSelfAdminTokenAlreadyCorrect(t *testing.T) {
-	raw := []byte(`{"self_admin_token": "real-tok", "nodes": [{"name": "core-1", "addr": "192.168.0.23:9443", "tls": true, "admin_token": "real-tok"}]}`)
+	raw := []byte(`{"self_admin_token": "real-tok", "nodes": [{"name": "core-1", "addr": "192.0.2.23:9443", "tls": true, "admin_token": "real-tok"}]}`)
 
-	out := correctedWebConfigJSON(raw, "core-2", "192.168.0.22:9443", "core-3", "192.168.0.43:9443", "fallback-tok", true)
+	out := correctedWebConfigJSON(raw, "core-2", "192.0.2.22:9443", "core-3", "192.0.2.43:9443", "fallback-tok", true)
 
 	var doc map[string]interface{}
 	if err := json.Unmarshal(out, &doc); err != nil {

@@ -20,9 +20,9 @@ func TestDecodeSnapshotNode_HappyPath(t *testing.T) {
 		Events:  []byte(`[{"message":"hello"}]`),
 		Daemons: []byte(`{"node_id":"core-1","daemons":[{"unit":"dnshived.service"}]}`),
 	}
-	nd := decodeSnapshotNode("192.168.0.23:9443", sn)
+	nd := decodeSnapshotNode("192.0.2.23:9443", sn)
 
-	if nd.Addr != "192.168.0.23:9443" {
+	if nd.Addr != "192.0.2.23:9443" {
 		t.Errorf("Addr = %q, want the given address", nd.Addr)
 	}
 	if !nd.Reachable || nd.Error != "" {
@@ -43,7 +43,7 @@ func TestDecodeSnapshotNode_HappyPath(t *testing.T) {
 }
 
 func TestDecodeSnapshotNode_ErrorFieldShortCircuits(t *testing.T) {
-	nd := decodeSnapshotNode("192.168.0.43:9443", snapshotNode{Error: "connection refused"})
+	nd := decodeSnapshotNode("192.0.2.43:9443", snapshotNode{Error: "connection refused"})
 	if nd.Reachable {
 		t.Error("Reachable = true, want false when the server itself reported an error")
 	}
@@ -80,8 +80,8 @@ func TestCollectFromSnapshot_RealEndToEnd(t *testing.T) {
 		w.Write([]byte(`{
 			"self": {"status": {"role":"core-1","state":"STABLE"}},
 			"peers": {
-				"192.168.0.22:9443": {"status": {"role":"core-2","state":"STABLE"}},
-				"192.168.0.43:9443": {"error": "connection refused"}
+				"192.0.2.22:9443": {"status": {"role":"core-2","state":"STABLE"}},
+				"192.0.2.43:9443": {"error": "connection refused"}
 			},
 			"tokens": {}
 		}`))
@@ -107,11 +107,11 @@ func TestCollectFromSnapshot_RealEndToEnd(t *testing.T) {
 	if !ok || self.role() != "core-1" || !self.Reachable {
 		t.Errorf("self entry (addr=%q) = %+v, want reachable role=worker-a", addr, self)
 	}
-	peer, ok := byAddr["192.168.0.22:9443"]
+	peer, ok := byAddr["192.0.2.22:9443"]
 	if !ok || peer.role() != "core-2" || !peer.Reachable {
 		t.Errorf("healthy peer entry = %+v, want reachable role=worker-b", peer)
 	}
-	dead, ok := byAddr["192.168.0.43:9443"]
+	dead, ok := byAddr["192.0.2.43:9443"]
 	if !ok || dead.Reachable || dead.Error == "" {
 		t.Errorf("dead peer entry = %+v, want unreachable with its own captured error — an unreachable node's role can never be known, so it correctly can't be identified as \"arbiter\" here", dead)
 	}

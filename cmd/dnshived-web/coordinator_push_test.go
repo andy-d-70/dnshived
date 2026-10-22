@@ -15,7 +15,7 @@ import (
 )
 
 func TestPushConfigViaCoordinator_DocumentsIncludeSelf(t *testing.T) {
-	local := newLocalConfigServer(t, "core-3", "192.168.0.24:9443")
+	local := newLocalConfigServer(t, "core-3", "192.0.2.24:9443")
 	port := localPort(t, local)
 
 	var captured map[string]json.RawMessage
@@ -28,15 +28,15 @@ func TestPushConfigViaCoordinator_DocumentsIncludeSelf(t *testing.T) {
 		}
 		captured = req.Documents
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"coordinator":"192.168.0.24:9443","results":{"192.168.0.24:9443":{"applied":true}}}`)
+		fmt.Fprint(w, `{"coordinator":"192.0.2.24:9443","results":{"192.0.2.24:9443":{"applied":true}}}`)
 	}))
 	defer coordinator.Close()
 
 	coordAddr := coordinator.Listener.Addr().String()
 	cfg := &WebConfig{
 		Nodes: []NodeConfig{
-			{Name: "core-1", Addr: "192.168.0.22:" + port, AdminToken: "tok"},
-			{Name: "core-2", Addr: "192.168.0.23:" + port, AdminToken: "tok"},
+			{Name: "core-1", Addr: "192.0.2.22:" + port, AdminToken: "tok"},
+			{Name: "core-2", Addr: "192.0.2.23:" + port, AdminToken: "tok"},
 		},
 		CoordinatorNode: &NodeConfig{Name: "core-3", Addr: coordAddr, AdminToken: "tok"},
 	}
@@ -48,13 +48,13 @@ func TestPushConfigViaCoordinator_DocumentsIncludeSelf(t *testing.T) {
 	if captured == nil {
 		t.Fatal("coordinator never received a request")
 	}
-	if _, ok := captured["192.168.0.24:9443"]; !ok {
-		t.Errorf("documents map missing self's own address (192.168.0.24:9443) — got keys: %v", keysOf(captured))
+	if _, ok := captured["192.0.2.24:9443"]; !ok {
+		t.Errorf("documents map missing self's own address (192.0.2.24:9443) — got keys: %v", keysOf(captured))
 	}
-	if _, ok := captured["192.168.0.22:"+port]; !ok {
+	if _, ok := captured["192.0.2.22:"+port]; !ok {
 		t.Errorf("documents map missing worker-a's address")
 	}
-	if _, ok := captured["192.168.0.23:"+port]; !ok {
+	if _, ok := captured["192.0.2.23:"+port]; !ok {
 		t.Errorf("documents map missing worker-b's address")
 	}
 }

@@ -14,7 +14,7 @@ import (
 func TestComputeFallbackTargets_OneAddrPerOtherRolePerParent(t *testing.T) {
 	cfg := &config.Cluster{
 		Role:        config.RoleCore1,
-		ControlAddr: "192.168.0.22:9443",
+		ControlAddr: "192.0.2.22:9443",
 		Scopes: map[string]config.ScopeConfig{
 			"office": {
 				Parent: "ens19",
@@ -49,7 +49,7 @@ func TestComputeFallbackTargets_OneAddrPerOtherRolePerParent(t *testing.T) {
 func TestComputeFallbackTargets_MultipleParentsGetIndependentAddrs(t *testing.T) {
 	cfg := &config.Cluster{
 		Role:        config.RoleCore1,
-		ControlAddr: "192.168.0.22:9443",
+		ControlAddr: "192.0.2.22:9443",
 		Scopes: map[string]config.ScopeConfig{
 			"office": {
 				Parent:          "ens19",
@@ -76,7 +76,7 @@ func TestComputeFallbackTargets_MultipleParentsGetIndependentAddrs(t *testing.T)
 func TestComputeFallbackTargets_NoScopesReturnsNil(t *testing.T) {
 	cfg := &config.Cluster{
 		Role:        config.RoleCore1,
-		ControlAddr: "192.168.0.22:9443",
+		ControlAddr: "192.0.2.22:9443",
 	}
 	if got := computeFallbackTargets(cfg, nil); got != nil {
 		t.Errorf("computeFallbackTargets() = %v, want nil", got)
@@ -86,7 +86,7 @@ func TestComputeFallbackTargets_NoScopesReturnsNil(t *testing.T) {
 func TestComputeFallbackTargets_FirstScopeInSortedOrderWinsPerParent(t *testing.T) {
 	cfg := &config.Cluster{
 		Role:        config.RoleCore1,
-		ControlAddr: "192.168.0.22:9443",
+		ControlAddr: "192.0.2.22:9443",
 		Scopes: map[string]config.ScopeConfig{
 			"zzz-scope": {Parent: "ens19", NodeIPOverrides: map[string]string{config.RoleCore2: "192.168.99.23/24"}},
 			"aaa-scope": {Parent: "ens19", NodeIPOverrides: map[string]string{config.RoleCore2: "192.168.10.23/24"}},
@@ -118,7 +118,7 @@ func TestComputeFallbackTargets_MalformedControlAddrReturnsNil(t *testing.T) {
 func TestComputeFallbackTargets_DerivesFromNodeIPSuffixesWhenNoOverride(t *testing.T) {
 	cfg := &config.Cluster{
 		Role:        config.RoleCore1,
-		ControlAddr: "192.168.0.23:9443",
+		ControlAddr: "192.0.2.23:9443",
 		ScopeDefaults: &config.ScopeDefaults{
 			NodeIPSuffixes: map[string]string{
 				config.RoleCore1: "22",
@@ -149,15 +149,15 @@ func TestComputeFallbackTargets_DerivesFromNodeIPSuffixesWhenNoOverride(t *testi
 
 func TestFallbackAddrsTrustedHosts_AddsBareHostsFromFallbackMap(t *testing.T) {
 	got := fallbackAddrsTrustedHosts(
-		[]string{"192.168.0.22", "192.168.0.24"},
+		[]string{"192.0.2.22", "192.0.2.24"},
 		map[string]map[string]string{
 			"core-2": {"ens19": "10.200.18.23:9443"},
 			"core-3": {"ens19": "10.200.18.43:9443"},
 		},
 	)
 	want := map[string]bool{
-		"192.168.0.22": true,
-		"192.168.0.24": true,
+		"192.0.2.22":   true,
+		"192.0.2.24":   true,
 		"10.200.18.23": true,
 		"10.200.18.43": true,
 	}
@@ -203,7 +203,7 @@ func TestFallbackAddrsTrustedHosts_DedupesAgainstExisting(t *testing.T) {
 }
 
 func TestFallbackAddrsTrustedHosts_EmptyFallbackMapReturnsExistingUnchanged(t *testing.T) {
-	existing := []string{"192.168.0.22", "192.168.0.24"}
+	existing := []string{"192.0.2.22", "192.0.2.24"}
 	got := fallbackAddrsTrustedHosts(existing, nil)
 	if len(got) != len(existing) {
 		t.Errorf("fallbackAddrsTrustedHosts() = %v, want %v unchanged", got, existing)
@@ -213,7 +213,7 @@ func TestFallbackAddrsTrustedHosts_EmptyFallbackMapReturnsExistingUnchanged(t *t
 func TestComputeFallbackTargets_ExplicitOverrideWinsOverSuffixDerivation(t *testing.T) {
 	cfg := &config.Cluster{
 		Role:        config.RoleCore1,
-		ControlAddr: "192.168.0.23:9443",
+		ControlAddr: "192.0.2.23:9443",
 		ScopeDefaults: &config.ScopeDefaults{
 			NodeIPSuffixes: map[string]string{config.RoleCore2: "23"},
 		},
@@ -235,15 +235,15 @@ func TestComputeFallbackTargets_ExplicitOverrideWinsOverSuffixDerivation(t *test
 func TestComputeFallbackTargets_ObserverDerivedWhenNoSuffixConfigured(t *testing.T) {
 	cfg := &config.Cluster{
 		Role:        config.RoleCore1,
-		ControlAddr: "192.168.0.22:9443",
+		ControlAddr: "192.0.2.22:9443",
 		Scopes: map[string]config.ScopeConfig{
 			"office": {Parent: "ens19", VIP: "10.200.18.254/24"},
 		},
 	}
 	self := identity.Identity{ClusterID: "c", NodeID: "self", Role: config.RoleCore1}
 	observer := cluster.NewObserver(self, cfg.ControlAddr, nil, "")
-	observer.SetPeerForTest("192.168.0.23:9443", &cluster.PeerState{
-		Addr: "192.168.0.23:9443", Reachable: true,
+	observer.SetPeerForTest("192.0.2.23:9443", &cluster.PeerState{
+		Addr: "192.0.2.23:9443", Reachable: true,
 		Identity: &identity.Identity{Role: config.RoleCore2},
 	})
 
@@ -257,7 +257,7 @@ func TestComputeFallbackTargets_ObserverDerivedWhenNoSuffixConfigured(t *testing
 func TestComputeFallbackTargets_ObserverDerivedWinsOverStaticSuffix(t *testing.T) {
 	cfg := &config.Cluster{
 		Role:        config.RoleCore1,
-		ControlAddr: "192.168.0.22:9443",
+		ControlAddr: "192.0.2.22:9443",
 		ScopeDefaults: &config.ScopeDefaults{
 			NodeIPSuffixes: map[string]string{config.RoleCore2: "99"},
 		},
@@ -267,8 +267,8 @@ func TestComputeFallbackTargets_ObserverDerivedWinsOverStaticSuffix(t *testing.T
 	}
 	self := identity.Identity{ClusterID: "c", NodeID: "self", Role: config.RoleCore1}
 	observer := cluster.NewObserver(self, cfg.ControlAddr, nil, "")
-	observer.SetPeerForTest("192.168.0.23:9443", &cluster.PeerState{
-		Addr: "192.168.0.23:9443", Reachable: true,
+	observer.SetPeerForTest("192.0.2.23:9443", &cluster.PeerState{
+		Addr: "192.0.2.23:9443", Reachable: true,
 		Identity: &identity.Identity{Role: config.RoleCore2},
 	})
 
@@ -282,7 +282,7 @@ func TestComputeFallbackTargets_ObserverDerivedWinsOverStaticSuffix(t *testing.T
 func TestComputeFallbackTargets_FallsBackToSuffixWhenObserverHasNotIdentifiedPeer(t *testing.T) {
 	cfg := &config.Cluster{
 		Role:        config.RoleCore1,
-		ControlAddr: "192.168.0.22:9443",
+		ControlAddr: "192.0.2.22:9443",
 		ScopeDefaults: &config.ScopeDefaults{
 			NodeIPSuffixes: map[string]string{config.RoleCore2: "23"},
 		},
@@ -303,7 +303,7 @@ func TestComputeFallbackTargets_FallsBackToSuffixWhenObserverHasNotIdentifiedPee
 func TestComputeFallbackTargets_NilObserverIsSafe(t *testing.T) {
 	cfg := &config.Cluster{
 		Role:        config.RoleCore1,
-		ControlAddr: "192.168.0.22:9443",
+		ControlAddr: "192.0.2.22:9443",
 		ScopeDefaults: &config.ScopeDefaults{
 			NodeIPSuffixes: map[string]string{config.RoleCore2: "23"},
 		},

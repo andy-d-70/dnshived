@@ -92,7 +92,7 @@ func TestProbeAdoptHandler_HelperFailureSurfacedAsServerError(t *testing.T) {
 	withMockProbeHelperWrite(t, errWriteFailed)
 	handler := probeAdoptHandler("REAL-CODE")
 
-	raw := []byte(`{"listen_addr":"0.0.0.0:9444","trunk_parent":"ens19","cluster_token":"tok","cluster_nodes":[{"name":"core-1","addr":"192.168.0.22:9443","tls":false}]}`)
+	raw := []byte(`{"listen_addr":"0.0.0.0:9444","trunk_parent":"ens19","cluster_token":"tok","cluster_nodes":[{"name":"core-1","addr":"192.0.2.22:9443","tls":false}]}`)
 	body, _ := json.Marshal(probeAdoptRequest{Code: "REAL-CODE", Config: raw})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/bootstrap/adopt", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -121,7 +121,7 @@ func TestProbeAdoptHandler_ValidConfigWrittenViaHelperAndReExecScheduled(t *test
 
 	handler := probeAdoptHandler("REAL-CODE")
 
-	raw := []byte(`{"listen_addr":"0.0.0.0:9444","trunk_parent":"ens19","cluster_token":"tok","cluster_nodes":[{"name":"core-1","addr":"192.168.0.22:9443","tls":false}]}`)
+	raw := []byte(`{"listen_addr":"0.0.0.0:9444","trunk_parent":"ens19","cluster_token":"tok","cluster_nodes":[{"name":"core-1","addr":"192.0.2.22:9443","tls":false}]}`)
 	body, _ := json.Marshal(probeAdoptRequest{Code: "REAL-CODE", Config: raw})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/bootstrap/adopt", bytes.NewReader(body))
 	rec := httptest.NewRecorder()

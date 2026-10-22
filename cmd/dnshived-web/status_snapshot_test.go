@@ -33,14 +33,14 @@ func TestFetchAllStatusViaSnapshot_Success(t *testing.T) {
 	srv := newSelfAndSnapshotServer(t, "core-1", `{
 		"self": {"status": {"role":"core-1","state":"STABLE","serving":["s1"]}},
 		"peers": {
-			"192.168.0.23:9443": {"status": {"role":"core-2","state":"STABLE","serving":["s2"]}}
+			"192.0.2.23:9443": {"status": {"role":"core-2","state":"STABLE","serving":["s2"]}}
 		}
 	}`)
 	selfAddr := srv.Listener.Addr().String()
 
 	cfg := &WebConfig{Nodes: []NodeConfig{
 		{Name: "core-1", Addr: selfAddr, AdminToken: "tok"},
-		{Name: "core-2", Addr: "192.168.0.23:9443", AdminToken: "tok"},
+		{Name: "core-2", Addr: "192.0.2.23:9443", AdminToken: "tok"},
 	}}
 
 	rows, ok := fetchAllStatusViaSnapshot(cfg, cfg.Nodes)
@@ -62,14 +62,14 @@ func TestFetchAllStatusViaSnapshot_PeerErrorEntry_SetsFetchError(t *testing.T) {
 	srv := newSelfAndSnapshotServer(t, "core-1", `{
 		"self": {"status": {"role":"core-1","state":"STABLE"}},
 		"peers": {
-			"192.168.0.24:9443": {"error": "dial tcp: connection refused"}
+			"192.0.2.24:9443": {"error": "dial tcp: connection refused"}
 		}
 	}`)
 	selfAddr := srv.Listener.Addr().String()
 
 	cfg := &WebConfig{Nodes: []NodeConfig{
 		{Name: "core-1", Addr: selfAddr, AdminToken: "tok"},
-		{Name: "core-3", Addr: "192.168.0.24:9443", AdminToken: "tok"},
+		{Name: "core-3", Addr: "192.0.2.24:9443", AdminToken: "tok"},
 	}}
 
 	rows, ok := fetchAllStatusViaSnapshot(cfg, cfg.Nodes)
@@ -165,12 +165,12 @@ func TestFetchAllDaemonsViaSnapshot_PerNodeIssueNeverFailsWholeBatch(t *testing.
 			"daemons": {"node_id":"n1","daemons":[{"unit":"dnshived.service","active_state":"active"}]}
 		},
 		"peers": {
-			"192.168.0.24:9443": {"error": "dial tcp: connection refused"}
+			"192.0.2.24:9443": {"error": "dial tcp: connection refused"}
 		}
 	}`)
 	cfg := &WebConfig{Nodes: []NodeConfig{
 		{Name: "core-1", Addr: srv.Listener.Addr().String(), AdminToken: "tok"},
-		{Name: "core-3", Addr: "192.168.0.24:9443", AdminToken: "tok"},
+		{Name: "core-3", Addr: "192.0.2.24:9443", AdminToken: "tok"},
 	}}
 
 	results, ok := fetchAllDaemonsViaSnapshot(cfg, cfg.Nodes)

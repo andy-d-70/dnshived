@@ -193,7 +193,7 @@ func TestPostConfig_UpdatesClusterNodesWithoutTouchingParallelProbing(t *testing
 		"trunk_parent": "ens19",
 		"cluster_token": "tok",
 		"parallel_probing": true,
-		"cluster_nodes": [{"name": "core-1", "addr": "192.168.0.23:9443", "tls": true}],
+		"cluster_nodes": [{"name": "core-1", "addr": "192.0.2.23:9443", "tls": true}],
 		"probe_helper_socket": "`+helper.socketPath+`"
 	}`), 0o644); err != nil {
 		t.Fatalf("write test config: %v", err)
@@ -209,9 +209,9 @@ func TestPostConfig_UpdatesClusterNodesWithoutTouchingParallelProbing(t *testing
 	defer srv.Close()
 
 	newNodes := []ClusterNode{
-		{Name: "core-1", Addr: "192.168.0.26:9443", TLS: true},
-		{Name: "core-3", Addr: "192.168.0.27:9443", TLS: true},
-		{Name: "core-2", Addr: "192.168.0.28:9443", TLS: true},
+		{Name: "core-1", Addr: "192.0.2.26:9443", TLS: true},
+		{Name: "core-3", Addr: "192.0.2.27:9443", TLS: true},
+		{Name: "core-2", Addr: "192.0.2.28:9443", TLS: true},
 	}
 	body, _ := json.Marshal(map[string]interface{}{"cluster_nodes": newNodes})
 	resp, err := http.Post(srv.URL+"/api/v1/config", "application/json", bytes.NewReader(body))
@@ -246,7 +246,7 @@ func TestPostConfig_UpdatesClusterNodesWithoutTouchingParallelProbing(t *testing
 	if !written.ParallelProbing {
 		t.Error("cluster_nodes-only patch clobbered ParallelProbing back to false — the exact partial-patch wipe bug this test guards against")
 	}
-	if len(written.ClusterNodes) != 3 || written.ClusterNodes[0].Addr != "192.168.0.26:9443" {
+	if len(written.ClusterNodes) != 3 || written.ClusterNodes[0].Addr != "192.0.2.26:9443" {
 		t.Errorf("written ClusterNodes = %+v, want the 3 new nodes", written.ClusterNodes)
 	}
 }

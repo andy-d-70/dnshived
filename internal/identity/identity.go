@@ -37,4 +37,12 @@ type Identity struct {
 	TrunkHealth map[string]bool `json:"trunk_health,omitempty"`
 
 	TrunkScore map[string]int `json:"trunk_score,omitempty"`
+
+	// Desired* describe this node's desired-state map so peers can detect
+	// two maps with the same generation but different owners. DesiredOwners
+	// is omitted for large maps; older versions announce none of these.
+	DesiredGeneration    uint64            `json:"desired_generation,omitempty"`
+	DesiredAuthoritative bool              `json:"desired_authoritative,omitempty"`
+	DesiredHash          string            `json:"desired_hash,omitempty"`
+	DesiredOwners        map[string]string `json:"desired_owners,omitempty"`
 }

@@ -112,14 +112,14 @@ func TestDesiredVLANs_MergesAcrossNodesAndFiltersByAllowedParent(t *testing.T) {
 func TestDesiredVLANs_IncludesUntaggedScopes(t *testing.T) {
 	byNodeID := map[string]probeConfigResponse{
 		"core-1": {Scopes: map[string]remoteScope{
-			"mgmt-like": {Parent: "ens19", VLANID: 0, VIP: "192.168.0.254/24"},
+			"mgmt-like": {Parent: "ens19", VLANID: 0, VIP: "192.0.2.254/24"},
 		}},
 	}
 	got := desiredVLANs(byNodeID, []string{"ens19"})
 	if len(got) != 1 {
 		t.Fatalf("desiredVLANs = %+v, want exactly 1 entry (the untagged scope)", got)
 	}
-	if got["ens19.0"] != (knownVLAN{Parent: "ens19", VLANID: 0, VIP: "192.168.0.254/24"}) {
+	if got["ens19.0"] != (knownVLAN{Parent: "ens19", VLANID: 0, VIP: "192.0.2.254/24"}) {
 		t.Errorf("ens19.0 = %+v", got["ens19.0"])
 	}
 }
@@ -402,7 +402,7 @@ func TestReconcileVLANInterfaces_HandlesUntaggedScope(t *testing.T) {
 	}
 	byNodeID := map[string]probeConfigResponse{
 		"core-1": {Scopes: map[string]remoteScope{
-			"mgmt-like": {Parent: "ens19", VLANID: 0, VIP: "192.168.0.254/24"},
+			"mgmt-like": {Parent: "ens19", VLANID: 0, VIP: "192.0.2.254/24"},
 		}},
 	}
 

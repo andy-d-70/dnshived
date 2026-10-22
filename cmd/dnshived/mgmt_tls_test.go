@@ -35,7 +35,7 @@ func withFakeInterfaceDetection(t *testing.T, ip, iface string) {
 
 func TestBuilderState_SetMgmtVIP_RequiresSelfAddrFirst(t *testing.T) {
 	b := &builderState{}
-	if err := b.setMgmtVIP("192.168.0.230/24", 60); err == nil {
+	if err := b.setMgmtVIP("192.0.2.230/24", 60); err == nil {
 		t.Fatal("expected an error setting a management VIP before this node's own address is known")
 	}
 }
@@ -45,10 +45,10 @@ func TestBuilderState_SetMgmtVIP_RequiresSelfAddrFirst(t *testing.T) {
 // runs against it.
 func TestBuilderState_SetMgmtVIP_RejectsInvalidCIDR(t *testing.T) {
 	b := &builderState{}
-	if err := b.setSelfAddr("192.168.0.22:9443"); err != nil {
+	if err := b.setSelfAddr("192.0.2.22:9443"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, bad := range []string{"not-an-ip", "192.168.0.230", "192.168.0.230/99"} {
+	for _, bad := range []string{"not-an-ip", "192.0.2.230", "192.0.2.230/99"} {
 		if err := b.setMgmtVIP(bad, 60); err == nil {
 			t.Errorf("setMgmtVIP(%q, 60) returned nil error, want a rejection", bad)
 		}
@@ -59,11 +59,11 @@ func TestBuilderState_SetMgmtVIP_RejectsInvalidCIDR(t *testing.T) {
 // keepalived constraint (virtual_router_id is a single byte, 1-255).
 func TestBuilderState_SetMgmtVIP_RejectsOutOfRangeVRRPID(t *testing.T) {
 	b := &builderState{}
-	if err := b.setSelfAddr("192.168.0.22:9443"); err != nil {
+	if err := b.setSelfAddr("192.0.2.22:9443"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	for _, id := range []int{0, -1, 256, 1000} {
-		if err := b.setMgmtVIP("192.168.0.230/24", id); err == nil {
+		if err := b.setMgmtVIP("192.0.2.230/24", id); err == nil {
 			t.Errorf("setMgmtVIP with VRRP ID %d returned nil error, want a rejection", id)
 		}
 	}
@@ -72,17 +72,17 @@ func TestBuilderState_SetMgmtVIP_RejectsOutOfRangeVRRPID(t *testing.T) {
 // TestBuilderState_SetMgmtVIP_DetectsInterfaceFromSelfAddr is the actual
 // golden path — the interface is derived, not operator-entered.
 func TestBuilderState_SetMgmtVIP_DetectsInterfaceFromSelfAddr(t *testing.T) {
-	withFakeInterfaceDetection(t, "192.168.0.22", "eth0")
+	withFakeInterfaceDetection(t, "192.0.2.22", "eth0")
 	b := &builderState{}
-	if err := b.setSelfAddr("192.168.0.22:9443"); err != nil {
+	if err := b.setSelfAddr("192.0.2.22:9443"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := b.setMgmtVIP("192.168.0.230/24", 60); err != nil {
+	if err := b.setMgmtVIP("192.0.2.230/24", 60); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	vip, vrrpID, iface := b.getMgmtVIP()
-	if vip != "192.168.0.230/24" || vrrpID != 60 || iface != "eth0" {
-		t.Errorf("getMgmtVIP() = (%q, %d, %q), want (192.168.0.230/24, 60, eth0)", vip, vrrpID, iface)
+	if vip != "192.0.2.230/24" || vrrpID != 60 || iface != "eth0" {
+		t.Errorf("getMgmtVIP() = (%q, %d, %q), want (192.0.2.230/24, 60, eth0)", vip, vrrpID, iface)
 	}
 }
 
@@ -90,10 +90,10 @@ func TestBuilderState_SetMgmtVIP_DetectsInterfaceFromSelfAddr(t *testing.T) {
 // out actually removes a previously-set VIP rather than leaving it
 // silently in place.
 func TestBuilderState_SetMgmtVIP_EmptyClears(t *testing.T) {
-	withFakeInterfaceDetection(t, "192.168.0.22", "eth0")
+	withFakeInterfaceDetection(t, "192.0.2.22", "eth0")
 	b := &builderState{}
-	b.setSelfAddr("192.168.0.22:9443")
-	b.setMgmtVIP("192.168.0.230/24", 60)
+	b.setSelfAddr("192.0.2.22:9443")
+	b.setMgmtVIP("192.0.2.230/24", 60)
 
 	if err := b.setMgmtVIP("", 0); err != nil {
 		t.Fatalf("unexpected error clearing: %v", err)
@@ -168,7 +168,7 @@ func TestBuilderState_SetTLS_ValidPairStoredAndClearable(t *testing.T) {
 }
 
 func TestGenSelfSignedCert_ProducesAValidPairCoveringEverySAN(t *testing.T) {
-	sans := []string{"192.168.0.22", "192.168.0.230", "localhost", "127.0.0.1"}
+	sans := []string{"192.0.2.22", "192.0.2.230", "localhost", "127.0.0.1"}
 	certPEM, keyPEM, err := genSelfSignedCert(sans)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -187,7 +187,7 @@ func TestGenSelfSignedCert_ProducesAValidPairCoveringEverySAN(t *testing.T) {
 		t.Fatalf("failed to parse generated certificate: %v", err)
 	}
 
-	wantIPs := []string{"192.168.0.22", "192.168.0.230", "127.0.0.1"}
+	wantIPs := []string{"192.0.2.22", "192.0.2.230", "127.0.0.1"}
 	for _, want := range wantIPs {
 		found := false
 		for _, ip := range cert.IPAddresses {
@@ -219,9 +219,9 @@ func TestBuildClusterConfig_NoMgmtSetupLeavesPlatformAndMgmtVIPNil(t *testing.T)
 		t.Fatalf("unexpected error: %v", err)
 	}
 	nodes := []clusterNode{
-		{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true},
-		{Addr: "192.168.0.23:9443", Role: config.RoleCore2},
-		{Addr: "192.168.0.24:9443", Role: config.RoleCore3},
+		{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.23:9443", Role: config.RoleCore2},
+		{Addr: "192.0.2.24:9443", Role: config.RoleCore3},
 	}
 	cc, err := buildClusterConfig(secrets, nodes[0], nodes, mgmtSetup{})
 	if err != nil {
@@ -243,11 +243,11 @@ func TestBuildClusterConfig_MgmtSetupWiresPlatformAndMgmtVIP(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	nodes := []clusterNode{
-		{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true},
-		{Addr: "192.168.0.23:9443", Role: config.RoleCore2},
-		{Addr: "192.168.0.24:9443", Role: config.RoleCore3},
+		{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.23:9443", Role: config.RoleCore2},
+		{Addr: "192.0.2.24:9443", Role: config.RoleCore3},
 	}
-	mgmt := mgmtSetup{VIP: "192.168.0.230/24", VRRPID: 60, Iface: "eth0"}
+	mgmt := mgmtSetup{VIP: "192.0.2.230/24", VRRPID: 60, Iface: "eth0"}
 	cc, err := buildClusterConfig(secrets, nodes[0], nodes, mgmt)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -255,8 +255,8 @@ func TestBuildClusterConfig_MgmtSetupWiresPlatformAndMgmtVIP(t *testing.T) {
 	if cc.Platform == nil || cc.Platform.Mgmt != "eth0" {
 		t.Errorf("Platform = %+v, want Mgmt=eth0", cc.Platform)
 	}
-	if cc.MgmtVIP == nil || cc.MgmtVIP.VIP != "192.168.0.230/24" || cc.MgmtVIP.VRRPID != 60 {
-		t.Errorf("MgmtVIP = %+v, want {192.168.0.230/24 60}", cc.MgmtVIP)
+	if cc.MgmtVIP == nil || cc.MgmtVIP.VIP != "192.0.2.230/24" || cc.MgmtVIP.VRRPID != 60 {
+		t.Errorf("MgmtVIP = %+v, want {192.0.2.230/24 60}", cc.MgmtVIP)
 	}
 }
 
@@ -265,7 +265,7 @@ func TestBuildClusterConfig_SetsCoreTLSCertAndKeyPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	nodes := []clusterNode{{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true}}
+	nodes := []clusterNode{{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true}}
 	cc, err := buildClusterConfig(secrets, nodes[0], nodes, mgmtSetup{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -281,12 +281,12 @@ func TestBuildClusterConfig_AssemblesWorkerOverridesFromRecordedNodes(t *testing
 		t.Fatalf("unexpected error: %v", err)
 	}
 	nodes := []clusterNode{
-		{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true},
 		{
-			Addr: "192.168.0.26:9443", Role: config.RoleCore2,
+			Addr: "192.0.2.26:9443", Role: config.RoleCore2,
 			WorkerOverride: map[string]string{"ens19": "eth1", "ens20": "eth2"},
 		},
-		{Addr: "192.168.0.27:9443", Role: config.RoleCore3}, // no override -- same naming as founder
+		{Addr: "192.0.2.27:9443", Role: config.RoleCore3}, // no override -- same naming as founder
 	}
 	mgmt := mgmtSetup{Iface: "eth0", PlatformMgmt: "eth0", PlatformWorkers: []string{"ens19", "ens20"}}
 	cc, err := buildClusterConfig(secrets, nodes[0], nodes, mgmt)
@@ -321,7 +321,7 @@ func TestWriteLocalClusterConfig_WritesCoreTLSMaterialToPathsNamedInConfig(t *te
 	certPath := filepath.Join(dir, "tls", "cert.pem")
 	keyPath := filepath.Join(dir, "tls", "key.pem")
 
-	cc := config.Cluster{Role: config.RoleCore1, ControlAddr: "192.168.0.22:9443", TLSCert: certPath, TLSKey: keyPath}
+	cc := config.Cluster{Role: config.RoleCore1, ControlAddr: "192.0.2.22:9443", TLSCert: certPath, TLSKey: keyPath}
 	raw, err := json.Marshal(cc)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -356,7 +356,7 @@ func TestWriteLocalClusterConfig_WritesCoreTLSMaterialToPathsNamedInConfig(t *te
 // TestBuildWebConfig_TLSDisabledIsPlainHTTPOnListenAddr checks
 // tlsEnabled=false serves plain HTTP on ListenAddr.
 func TestBuildWebConfig_TLSDisabledIsPlainHTTPOnListenAddr(t *testing.T) {
-	nodes := []clusterNode{{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true}}
+	nodes := []clusterNode{{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true}}
 	cfg := buildWebConfig(nodes, "tok", "probe-tok", "", false)
 	if cfg.ListenAddr != webUIListenAddr {
 		t.Errorf("ListenAddr = %q, want %q", cfg.ListenAddr, webUIListenAddr)
@@ -367,8 +367,8 @@ func TestBuildWebConfig_TLSDisabledIsPlainHTTPOnListenAddr(t *testing.T) {
 }
 
 func TestBuildWebConfig_TLSEnabledSwitchesToHTTPSWithRedirectListener(t *testing.T) {
-	nodes := []clusterNode{{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true}}
-	cfg := buildWebConfig(nodes, "tok", "probe-tok", "192.168.0.230", true)
+	nodes := []clusterNode{{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true}}
+	cfg := buildWebConfig(nodes, "tok", "probe-tok", "192.0.2.230", true)
 	if cfg.ListenAddr != webUITLSListenAddr {
 		t.Errorf("ListenAddr = %q, want %q", cfg.ListenAddr, webUITLSListenAddr)
 	}
@@ -378,8 +378,8 @@ func TestBuildWebConfig_TLSEnabledSwitchesToHTTPSWithRedirectListener(t *testing
 	if cfg.TLSCert != webUITLSCertFile || cfg.TLSKey != webUITLSKeyFile {
 		t.Errorf("TLSCert/TLSKey = %q/%q, want %q/%q", cfg.TLSCert, cfg.TLSKey, webUITLSCertFile, webUITLSKeyFile)
 	}
-	if cfg.VIPHost != "192.168.0.230" {
-		t.Errorf("VIPHost = %q, want 192.168.0.230", cfg.VIPHost)
+	if cfg.VIPHost != "192.0.2.230" {
+		t.Errorf("VIPHost = %q, want 192.0.2.230", cfg.VIPHost)
 	}
 	for _, n := range cfg.Nodes {
 		if !n.TLS {
@@ -389,7 +389,7 @@ func TestBuildWebConfig_TLSEnabledSwitchesToHTTPSWithRedirectListener(t *testing
 }
 
 func TestBuildWebConfig_SetsSelfAdminToken(t *testing.T) {
-	nodes := []clusterNode{{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true}}
+	nodes := []clusterNode{{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true}}
 	cfg := buildWebConfig(nodes, "tok", "probe-tok", "", true)
 	if cfg.SelfAdminToken != "tok" {
 		t.Errorf("SelfAdminToken = %q, want %q (the same shared admin token every Nodes[] entry carries)", cfg.SelfAdminToken, "tok")
@@ -398,24 +398,24 @@ func TestBuildWebConfig_SetsSelfAdminToken(t *testing.T) {
 
 func TestBuildWebConfig_ProbeHostsPopulatedFromRecordedProbeNode(t *testing.T) {
 	nodes := []clusterNode{
-		{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true},
-		{Addr: "192.168.0.23:9443", Role: config.RoleCore2},
-		{Addr: "192.168.0.24:9443", Role: config.RoleCore3},
-		{Addr: "192.168.0.42:9444", Role: "probe", TrunkParent: "ens19"},
+		{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.23:9443", Role: config.RoleCore2},
+		{Addr: "192.0.2.24:9443", Role: config.RoleCore3},
+		{Addr: "192.0.2.42:9444", Role: "probe", TrunkParent: "ens19"},
 	}
 	cfg := buildWebConfig(nodes, "tok", "probe-admin-tok", "", true)
 	if len(cfg.ProbeHosts) != 1 {
 		t.Fatalf("ProbeHosts = %v, want exactly 1 entry", cfg.ProbeHosts)
 	}
 	got := cfg.ProbeHosts[0]
-	if got.Addr != "192.168.0.42:9444" {
-		t.Errorf("ProbeHosts[0].Addr = %q, want 192.168.0.42:9444", got.Addr)
+	if got.Addr != "192.0.2.42:9444" {
+		t.Errorf("ProbeHosts[0].Addr = %q, want 192.0.2.42:9444", got.Addr)
 	}
 	if got.Name == "" {
 		t.Error("ProbeHosts[0].Name is empty — the web UI has nothing to label the row with")
 	}
 	for _, n := range cfg.Nodes {
-		if n.Addr == "192.168.0.42:9444" {
+		if n.Addr == "192.0.2.42:9444" {
 			t.Error("the probe's address leaked into the core Nodes list")
 		}
 	}
@@ -437,11 +437,11 @@ func TestBuildProbeConfig_EmbedsDedicatedProbeAdminTokenAsAPIToken(t *testing.T)
 		t.Fatalf("unexpected error: %v", err)
 	}
 	nodes := []clusterNode{
-		{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true},
-		{Addr: "192.168.0.23:9443", Role: config.RoleCore2},
-		{Addr: "192.168.0.24:9443", Role: config.RoleCore3},
+		{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.23:9443", Role: config.RoleCore2},
+		{Addr: "192.0.2.24:9443", Role: config.RoleCore3},
 	}
-	probeNode := clusterNode{Addr: "192.168.0.42:9444", Role: "probe", TrunkParent: "ens19"}
+	probeNode := clusterNode{Addr: "192.0.2.42:9444", Role: "probe", TrunkParent: "ens19"}
 
 	pc, err := buildProbeConfig(secrets, nodes, probeNode, mgmtSetup{})
 	if err != nil {
@@ -471,9 +471,9 @@ func TestBuildProbeConfig_PopulatesVLANConstructionFields(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	nodes := []clusterNode{
-		{Addr: "192.168.0.22:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.22:9443", Role: config.RoleCore1, Self: true},
 	}
-	probeNode := clusterNode{Addr: "192.168.0.42:9444", Role: "probe", TrunkParent: "ens19"}
+	probeNode := clusterNode{Addr: "192.0.2.42:9444", Role: "probe", TrunkParent: "ens19"}
 	mgmt := mgmtSetup{PlatformWorkers: []string{"ens19", "ens20"}}
 
 	pc, err := buildProbeConfig(secrets, nodes, probeNode, mgmt)
@@ -481,7 +481,7 @@ func TestBuildProbeConfig_PopulatesVLANConstructionFields(t *testing.T) {
 		t.Fatalf("buildProbeConfig: %v", err)
 	}
 	if pc.LocalOctet != 42 {
-		t.Errorf("LocalOctet = %d, want 42 (derived from the probe's own address 192.168.0.42:9444)", pc.LocalOctet)
+		t.Errorf("LocalOctet = %d, want 42 (derived from the probe's own address 192.0.2.42:9444)", pc.LocalOctet)
 	}
 	if pc.ProbeHelperSocket == "" {
 		t.Error("ProbeHelperSocket is empty — without it, the adopted probe can't reach its own privileged helper to build VLAN interfaces at all")
@@ -533,7 +533,7 @@ func TestBootstrapCommitHandler_GeneratesSelfSignedCertWhenNonePasted(t *testing
 	cfgPath := filepath.Join(t.TempDir(), "cluster.json")
 	state := &builderState{}
 	state.setRole(config.RoleCore1)
-	state.setSelfAddr("192.168.0.22:9443")
+	state.setSelfAddr("192.0.2.22:9443")
 	state.addNode("127.0.0.2:9443", config.RoleCore2, "OTP-B", "")
 	state.addNode("127.0.0.3:9443", config.RoleCore3, "OTP-ARB", "")
 
@@ -563,11 +563,11 @@ func TestBuildProbeConfig_TLSMatchesFoundedCoreAPI(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	nodes := []clusterNode{
-		{Addr: "192.168.0.51:9443", Role: config.RoleCore1, Self: true},
-		{Addr: "192.168.0.52:9443", Role: config.RoleCore2},
-		{Addr: "192.168.0.53:9443", Role: config.RoleCore3},
+		{Addr: "192.0.2.51:9443", Role: config.RoleCore1, Self: true},
+		{Addr: "192.0.2.52:9443", Role: config.RoleCore2},
+		{Addr: "192.0.2.53:9443", Role: config.RoleCore3},
 	}
-	probeNode := clusterNode{Addr: "192.168.0.54:9444", Role: "probe", TrunkParent: "ens19"}
+	probeNode := clusterNode{Addr: "192.0.2.54:9444", Role: "probe", TrunkParent: "ens19"}
 	mgmt := mgmtSetup{PlatformMgmt: "ens18", PlatformWorkers: []string{"ens19", "ens20"}}
 
 	coreCfg, err := buildClusterConfig(secrets, nodes[0], nodes, mgmt)
@@ -594,7 +594,7 @@ func TestBuildProbeConfig_TLSMatchesFoundedCoreAPI(t *testing.T) {
 
 func TestBuildProbeConfig_NoCoreNodeIsAnError(t *testing.T) {
 	secrets, _ := generateClusterSecrets()
-	probeNode := clusterNode{Addr: "192.168.0.54:9444", Role: "probe", TrunkParent: "ens19"}
+	probeNode := clusterNode{Addr: "192.0.2.54:9444", Role: "probe", TrunkParent: "ens19"}
 	if _, err := buildProbeConfig(secrets, []clusterNode{probeNode}, probeNode, mgmtSetup{}); err == nil {
 		t.Error("buildProbeConfig with no core node returned no error")
 	}

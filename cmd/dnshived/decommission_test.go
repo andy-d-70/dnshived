@@ -99,8 +99,8 @@ func TestSelfDecommission_NoConfigFileStillReExecs(t *testing.T) {
 }
 
 func TestComputeTrustedHosts_SortedThreeAddressSet(t *testing.T) {
-	got := computeTrustedHosts("192.168.0.23:9443", "192.168.0.24:9443", "192.168.0.43:9443")
-	want := []string{"192.168.0.23", "192.168.0.24", "192.168.0.43"}
+	got := computeTrustedHosts("192.0.2.23:9443", "192.0.2.24:9443", "192.0.2.43:9443")
+	want := []string{"192.0.2.23", "192.0.2.24", "192.0.2.43"}
 	if len(got) != 3 {
 		t.Fatalf("computeTrustedHosts = %v, want 3 entries", got)
 	}
@@ -112,16 +112,16 @@ func TestComputeTrustedHosts_SortedThreeAddressSet(t *testing.T) {
 }
 
 func TestComputeTrustedHosts_StripsPorts(t *testing.T) {
-	got := computeTrustedHosts("192.168.0.22:9443", "192.168.0.24:9443", "192.168.0.23:9443")
+	got := computeTrustedHosts("192.0.2.22:9443", "192.0.2.24:9443", "192.0.2.23:9443")
 	for _, h := range got {
-		if h != "192.168.0.22" && h != "192.168.0.23" && h != "192.168.0.24" {
+		if h != "192.0.2.22" && h != "192.0.2.23" && h != "192.0.2.24" {
 			t.Errorf("computeTrustedHosts entry %q still carries a port or is unexpected", h)
 		}
 	}
 }
 
 func TestComputeTrustedHosts_EmptyThirdAddrOmittedNotPolluted(t *testing.T) {
-	got := computeTrustedHosts("192.168.0.23:9443", "", "192.168.0.22:9443")
+	got := computeTrustedHosts("192.0.2.23:9443", "", "192.0.2.22:9443")
 	if len(got) != 2 {
 		t.Fatalf("computeTrustedHosts = %v, want exactly 2 entries (no bogus empty one)", got)
 	}
@@ -130,7 +130,7 @@ func TestComputeTrustedHosts_EmptyThirdAddrOmittedNotPolluted(t *testing.T) {
 			t.Errorf("computeTrustedHosts contains an empty entry: %v", got)
 		}
 	}
-	want := []string{"192.168.0.22", "192.168.0.23"}
+	want := []string{"192.0.2.22", "192.0.2.23"}
 	for i, w := range want {
 		if got[i] != w {
 			t.Errorf("computeTrustedHosts[%d] = %q, want %q (got %v)", i, got[i], w, got)
@@ -161,9 +161,9 @@ func TestNotifyPeersOfSelfRemoval_PushesSelfAddrRemovedFromEveryPeer(t *testing.
 	peer2Addr := peer2.URL[len("http://"):]
 
 	cfg := &config.Cluster{
-		ControlAddr:  "192.168.0.23:9443", // self — never actually dialed, just stripped from the pushed list
+		ControlAddr:  "192.0.2.23:9443", // self — never actually dialed, just stripped from the pushed list
 		Peers:        []string{peer1Addr, peer2Addr},
-		TrustedHosts: []string{"192.168.0.22", "192.168.0.23", "192.168.0.24"},
+		TrustedHosts: []string{"192.0.2.22", "192.0.2.23", "192.0.2.24"},
 		APITokens:    []config.APIToken{{Name: "admin", Role: "admin", Token: "tok"}},
 	}
 
@@ -174,7 +174,7 @@ func TestNotifyPeersOfSelfRemoval_PushesSelfAddrRemovedFromEveryPeer(t *testing.
 	}
 	for _, hosts := range received {
 		for _, h := range hosts {
-			if h == "192.168.0.23" {
+			if h == "192.0.2.23" {
 				t.Errorf("pushed trusted_hosts %v still contains the self address that's decommissioning — the exact bug this test guards against", hosts)
 			}
 		}
@@ -201,16 +201,16 @@ func TestNotifyPeersOfSelfRemoval_AlsoPushesPeerRemoval(t *testing.T) {
 	peerAddr := peer.URL[len("http://"):]
 
 	cfg := &config.Cluster{
-		ControlAddr:  "192.168.0.23:9443",
+		ControlAddr:  "192.0.2.23:9443",
 		Peers:        []string{peerAddr},
-		TrustedHosts: []string{"192.168.0.22", "192.168.0.23"},
+		TrustedHosts: []string{"192.0.2.22", "192.0.2.23"},
 		APITokens:    []config.APIToken{{Name: "admin", Role: "admin", Token: "tok"}},
 	}
 
 	notifyPeersOfSelfRemoval(cfg)
 
-	if len(removedAddrs) != 1 || removedAddrs[0] != "192.168.0.23:9443" {
-		t.Errorf("remove-peer received addr = %v, want exactly [%q] (this node's own ControlAddr)", removedAddrs, "192.168.0.23:9443")
+	if len(removedAddrs) != 1 || removedAddrs[0] != "192.0.2.23:9443" {
+		t.Errorf("remove-peer received addr = %v, want exactly [%q] (this node's own ControlAddr)", removedAddrs, "192.0.2.23:9443")
 	}
 }
 
@@ -219,8 +219,8 @@ func TestUpdateTrustedHostsInConfig_SavesAndReloads(t *testing.T) {
 	path := filepath.Join(dir, "cluster.json")
 	cc := &config.Cluster{
 		SchemaVersion: 2, ClusterID: "c", NodeID: "worker-a-x", Role: "core-1",
-		ControlAddr: "192.168.0.22:9443", DataDir: dir,
-		PSK: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd", TrustedHosts: []string{"192.168.0.22", "192.168.0.23", "192.168.0.24"},
+		ControlAddr: "192.0.2.22:9443", DataDir: dir,
+		PSK: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd", TrustedHosts: []string{"192.0.2.22", "192.0.2.23", "192.0.2.24"},
 		Scopes: map[string]config.ScopeConfig{},
 	}
 	raw, _ := json.MarshalIndent(cc, "", "  ")
@@ -228,7 +228,7 @@ func TestUpdateTrustedHostsInConfig_SavesAndReloads(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	newHosts := []string{"192.168.0.22", "192.168.0.24", "192.168.0.43"}
+	newHosts := []string{"192.0.2.22", "192.0.2.24", "192.0.2.43"}
 	if err := updateTrustedHostsInConfig(path, newHosts); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestUpdateTrustedHostsInConfig_SavesAndReloads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
-	if len(reloaded.TrustedHosts) != 3 || reloaded.TrustedHosts[2] != "192.168.0.43" {
+	if len(reloaded.TrustedHosts) != 3 || reloaded.TrustedHosts[2] != "192.0.2.43" {
 		t.Errorf("reloaded.TrustedHosts = %v, want %v", reloaded.TrustedHosts, newHosts)
 	}
 }

@@ -28,6 +28,13 @@ type Config struct {
 	// client interface accepts before dropping the rest.
 	RateLimit int `json:"rate_limit,omitempty"`
 	RateBurst int `json:"rate_burst,omitempty"`
+
+	// PendingPerVLAN caps unanswered requests per client interface;
+	// ClientRateLimit/ClientRateBurst limit each client MAC per interface.
+	// 0 means the default, -1 turns the limit off.
+	PendingPerVLAN  int `json:"pending_per_vlan,omitempty"`
+	ClientRateLimit int `json:"client_rate_limit,omitempty"`
+	ClientRateBurst int `json:"client_rate_burst,omitempty"`
 }
 
 type ClientInterfaceConfig struct {
@@ -82,6 +89,11 @@ func (c *Config) Validate() error {
 	}
 	if c.RateBurst < 0 {
 		return fmt.Errorf("rate_burst must not be negative")
+	}
+	for name, v := range map[string]int{"pending_per_vlan": c.PendingPerVLAN, "client_rate_limit": c.ClientRateLimit, "client_rate_burst": c.ClientRateBurst} {
+		if v < -1 {
+			return fmt.Errorf("%s must be -1 (off), 0 (default) or positive", name)
+		}
 	}
 
 	seenNames := make(map[string]bool, len(c.ClientInterfaces))
