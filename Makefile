@@ -12,10 +12,6 @@ FULL_VERSION=$(shell \
 		echo "$(VERSION)+$(GIT_HASH)"; \
 	fi)
 
-VM_IPS ?= 192.0.2.22 192.0.2.23 192.0.2.24
-SSH_USER = admin
-SSH_OPTS = -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR
-
 build:
 	mkdir -p builds
 	CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=$(FULL_VERSION)" -o builds/dnshived ./cmd/dnshived
@@ -72,33 +68,3 @@ rpm:
 
 rpm-check: rpm
 	rpmlint $(RPM_TOPDIR)/RPMS/*/dnshived-*.rpm || true
-
-# Copy the binaries to VM_IPS over SSH and restart the daemons.
-deploy: build
-	@for ip in $(VM_IPS); do \
-		echo "--- $$ip ---"; \
-		scp $(SSH_OPTS) builds/dnshived builds/dnshived-helper $(SSH_USER)@$$ip:/tmp/ ; \
-		ssh $(SSH_OPTS) $(SSH_USER)@$$ip "sudo mv /tmp/dnshived /tmp/dnshived-helper /usr/local/bin/ && sudo chmod 755 /usr/local/bin/dnshived /usr/local/bin/dnshived-helper && sudo systemctl restart dnshived-helper && sleep 1 && sudo systemctl restart dnshived" ; \
-		echo "  deployed + restarted"; \
-	done
-	@echo "=== Verifying ==="
-	@sleep 15
-	@for ip in $(VM_IPS); do \
-		ver=$$(curl -s --connect-timeout 3 http://$$ip:9443/api/v1/status 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || echo "UNREACHABLE") ; \
-		echo "  $$ip: $$ver"; \
-	done
-
-deploy-all: build
-	@for ip in $(VM_IPS); do \
-		echo "--- $$ip ---"; \
-		scp $(SSH_OPTS) builds/dnshived builds/dnshived-helper $(SSH_USER)@$$ip:/tmp/ ; \
-		ssh $(SSH_OPTS) $(SSH_USER)@$$ip "sudo mv /tmp/dnshived /tmp/dnshived-helper /usr/local/bin/ && sudo chmod 755 /usr/local/bin/dnshived /usr/local/bin/dnshived-helper && sudo systemctl restart dnshived-helper && sleep 1 && sudo systemctl restart dnshived" ; \
-		echo "  binary + helper deployed"; \
-	done
-	@echo "=== Verifying ==="
-	@sleep 15
-	@for ip in $(VM_IPS); do \
-		ver=$$(curl -s --connect-timeout 3 http://$$ip:9443/api/v1/status 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || echo "UNREACHABLE") ; \
-		echo "  $$ip: $$ver"; \
-	done
-

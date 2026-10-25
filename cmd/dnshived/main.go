@@ -17,6 +17,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/user"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -253,6 +254,10 @@ func main() {
 
 	if *emergencyCloseGates {
 		os.Exit(emergencyCloseAllGates(cfg))
+	}
+
+	if err := refuseRootStart(os.Geteuid(), user.Lookup); err != nil {
+		log.Fatalf("start: %v", err)
 	}
 
 	daemonLock, err = acquireInstanceLock(filepath.Join(dataDir(cfg), "daemon.lock"))

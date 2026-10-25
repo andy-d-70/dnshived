@@ -1,3 +1,10 @@
+dnshived (0.9.8.6~dev-15) unstable; urgency=medium
+
+  * A daemon start as root is refused when the dnshived service user exists, and
+    configuration files written as root are owned by dnshived:dnshived.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Sun, 25 Oct 2026 04:31:34 +0100
+
 dnshived (0.9.8.6~dev-14) unstable; urgency=medium
 
   * The serving-set change line in the log is renamed from the benchmark tag to a plain agent tag.

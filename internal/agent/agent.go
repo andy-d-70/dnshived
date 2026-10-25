@@ -3747,8 +3747,14 @@ func atomicRender(path string, tmpl *template.Template, data interface{}) error 
 // cleaning up the temp file on every failure path.
 func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 	tmp := path + ".tmp"
+	os.Remove(tmp)
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
+		return err
+	}
+	if err := chownToServiceUser(f, os.Geteuid()); err != nil {
+		f.Close()
+		os.Remove(tmp)
 		return err
 	}
 	if _, err := f.Write(data); err != nil {
@@ -3770,6 +3776,34 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	return nil
+}
+
+var serviceUserIDs = sync.OnceValues(func() ([2]int, error) {
+	u, err := user.Lookup("dnshived")
+	if err != nil {
+		return [2]int{}, err
+	}
+	uid, err := strconv.Atoi(u.Uid)
+	if err != nil {
+		return [2]int{}, err
+	}
+	gid, err := strconv.Atoi(u.Gid)
+	if err != nil {
+		return [2]int{}, err
+	}
+	return [2]int{uid, gid}, nil
+})
+
+// chownToServiceUser keeps files readable by dnsmasq (User=dnshived) when the agent runs as root.
+func chownToServiceUser(f *os.File, euid int) error {
+	if euid != 0 {
+		return nil
+	}
+	ids, err := serviceUserIDs()
+	if err != nil {
+		return nil
+	}
+	return f.Chown(ids[0], ids[1])
 }
 
 // --- helpers ---
