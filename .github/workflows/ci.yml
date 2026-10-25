@@ -29,12 +29,36 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Build (static, all shipped binaries)
+      - name: Build (static, all binaries)
         run: |
           mkdir -p builds
-          for b in dnshived dnshived-status dnshived-validate dnshived-top dnshived-helper dnshived-dhcp-probe dnshived-web; do
-            CGO_ENABLED=0 go build -ldflags "-s -w" -o builds/$b ./cmd/$b
+          for d in cmd/*/; do
+            b=$(basename "$d")
+            [ -f "$d/go.mod" ] && continue
+            CGO_ENABLED=0 go build -ldflags "-s -w" -o "builds/$b" "./cmd/$b"
           done
 
-      - name: Build with race detector (smoke)
-        run: go build -race ./...
+      - name: DNS relay module (separate go.mod, Go 1.25)
+        working-directory: cmd/dnshived-dnsrelay
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          go vet ./...
+          CGO_ENABLED=0 go build -ldflags "-s -w" -o ../../builds/dnshived-dnsrelay .
+          go test -count=1 ./...
+
+      # The tests write files the way a real install does, owned by the
+      # dnshived group, which needs root and that group.
+      - name: Create the dnshived service user
+        run: sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin dnshived
+
+      - name: Test
+        run: sudo env "PATH=$PATH" "GOCACHE=$(go env GOCACHE)" "GOMODCACHE=$(go env GOMODCACHE)" go test -count=1 ./...
+
+      - name: Test with race detector (coordination and safety packages)
+        run: |
+          sudo env "PATH=$PATH" "GOCACHE=$(go env GOCACHE)" "GOMODCACHE=$(go env GOMODCACHE)" go test -race -count=1 \
+            ./internal/agent ./internal/arbiter ./internal/cluster ./internal/coordplane \
+            ./internal/desired ./internal/fencing ./internal/fsm ./internal/leasesync \
+            ./internal/nftgate ./internal/dhcprelay ./internal/state ./internal/tlspin \
+            ./internal/bootstrap ./internal/quorum

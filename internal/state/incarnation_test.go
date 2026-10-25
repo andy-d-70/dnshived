@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestNextIncarnation_StartsAtOne(t *testing.T) {
@@ -51,18 +52,26 @@ func TestNextIncarnation_PersistsAcrossRestart(t *testing.T) {
 	}
 }
 
-func TestNextIncarnation_CorruptFileResetsForward(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "incarnation")
-	if err := os.WriteFile(path, []byte("not-a-number"), 0o640); err != nil {
-		t.Fatalf("write corrupt fixture: %v", err)
-	}
-	got, err := NextIncarnation(dir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got != 1 {
-		t.Errorf("got %d, want 1 (corrupt file treated as starting from 0)", got)
+func TestNextIncarnation_CorruptFileMovesAboveAnyCount(t *testing.T) {
+	for name, content := range map[string]string{"garbage": "not-a-number", "empty": ""} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "incarnation"), []byte(content), 0o640); err != nil {
+				t.Fatalf("write corrupt fixture: %v", err)
+			}
+			before := uint64(time.Now().Unix())
+			got, err := NextIncarnation(dir)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got < before {
+				t.Errorf("got %d, want >= %d: a corrupt file must not restart the count", got, before)
+			}
+			again, err := NextIncarnation(dir)
+			if err != nil || again != got+1 {
+				t.Errorf("next start = %d, %v; want %d", again, err, got+1)
+			}
+		})
 	}
 }
 

@@ -521,6 +521,7 @@ func TestAcquireFromInstance_AcceptsGrantAndRenewalFromRealArbiter(t *testing.T)
 		t.Skip("host clock not synchronised; the real arbiter refuses grants")
 	}
 	m := arbiter.New([]byte("psk"), func() bool { return true }, t.TempDir())
+	m.ResumeGrants()
 	mux := http.NewServeMux()
 	m.AddRoutes(mux)
 	srv := httptest.NewServer(mux)

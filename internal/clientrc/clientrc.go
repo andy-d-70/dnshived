@@ -13,6 +13,7 @@ type RC struct {
 	Addr          string
 	TLS           bool
 	TLSSkipVerify bool
+	TLSCert       string
 	Token         string
 	ProbeAddr     string
 	ProbeName     string
@@ -68,6 +69,8 @@ func Load() (*RC, error) {
 			rc.TLS = val == "true" || val == "1"
 		case "tls_skip_verify":
 			rc.TLSSkipVerify = val == "true" || val == "1"
+		case "tls_cert":
+			rc.TLSCert = val
 		case "token":
 			rc.Token = val
 		case "probe_addr":

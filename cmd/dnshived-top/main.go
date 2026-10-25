@@ -21,6 +21,7 @@ import (
 	"syscall"
 
 	"dnshived/internal/clientrc"
+	"dnshived/internal/tlspin"
 	"time"
 	"unicode/utf8"
 	"unsafe"
@@ -2287,6 +2288,7 @@ func main() {
 	probeName := flag.String("probe-name", rc.ProbeName, "friendly name(s) for external probe hosts, comma-separated, matching -probe-addr order (0.9.7, optional — falls back to address when unset)")
 	useTLS := flag.Bool("tls", rc.TLS, "use HTTPS")
 	tlsSkipVerify := flag.Bool("tls-skip-verify", rc.TLSSkipVerify, "skip TLS verification")
+	tlsCert := flag.String("tls-cert", rc.TLSCert, "verify the nodes against this cluster certificate (e.g. a copy of /etc/dnshived/tls/cert.pem); implies -tls and overrides -tls-skip-verify")
 	tokenFile := flag.String("token-file", "", "path to bearer token file")
 	showVersion := flag.Bool("version", false, "print version")
 	flag.Parse()
@@ -2296,7 +2298,16 @@ func main() {
 		os.Exit(0)
 	}
 
-	if *useTLS || *tlsSkipVerify {
+	switch {
+	case *tlsCert != "":
+		if _, err := os.ReadFile(*tlsCert); err != nil {
+			fmt.Fprintf(os.Stderr, "error reading cluster certificate: %v\n", err)
+			os.Exit(2)
+		}
+		scheme = "https"
+		tlspin.SetFile(*tlsCert)
+		client.Transport.(*http.Transport).TLSClientConfig = tlspin.Config()
+	case *useTLS || *tlsSkipVerify:
 		scheme = "https"
 		if *tlsSkipVerify {
 			client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}

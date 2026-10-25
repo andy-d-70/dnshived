@@ -20,7 +20,7 @@ Most HA systems prioritize availability over safety. For DNS/DHCP, that's
 backwards. A 15-second DHCP outage is invisible to clients. A 15-second
 dual-active window can corrupt an entire network.
 
-dnshived makes the dangerous failure mode structurally impossible.
+dnshived is built so that this failure mode cannot happen: a node serves DHCP for a scope only while it holds quorum, ownership, a valid lease, an unfenced epoch and an exclusive witness token, and every handover closes the old node's DHCP gate before the new one opens. The guarantee rests on those tokens expiring on time, so it assumes the nodes' clocks are synchronised (an arbiter whose clock is not synchronised refuses to grant tokens).
 
 ## How it works
 
@@ -88,8 +88,9 @@ A fresh install starts in bootstrap mode automatically — check
 a cluster or join an existing one. No manual config editing needed.
 
 ```sh
-# Watch the cluster (terminal), once founded
-dnshived-top -addr <node-ip>:9443 -tls -tls-skip-verify -token-file <path>
+# Watch the cluster (terminal), once founded; copy /etc/dnshived/tls/cert.pem
+# from a core node so the connection is verified against the cluster certificate
+dnshived-top -addr <node-ip>:9443 -tls-cert <copy-of-cert.pem> -token-file <path>
 ```
 
 ## Documentation

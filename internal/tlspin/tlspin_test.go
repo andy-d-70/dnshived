@@ -88,3 +88,30 @@ func TestConfig_PinsTheClusterCertificate(t *testing.T) {
 		t.Errorf("rotated certificate in the pinned file not picked up: %v", err)
 	}
 }
+
+func TestSetPEM_PinsWithoutAFile(t *testing.T) {
+	cluster := selfSignedServer(t)
+	stranger := selfSignedServer(t)
+	t.Cleanup(func() { SetFile("") })
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: Config(), DisableKeepAlives: true}}
+	get := func(url string) error {
+		resp, err := client.Get(url)
+		if err == nil {
+			resp.Body.Close()
+		}
+		return err
+	}
+
+	if err := SetPEM([]byte("not a certificate")); err == nil {
+		t.Fatal("SetPEM accepted data without a certificate")
+	}
+	if err := SetPEM(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cluster.TLS.Certificates[0].Certificate[0]})); err != nil {
+		t.Fatal(err)
+	}
+	if err := get(cluster.URL); err != nil {
+		t.Errorf("cluster certificate refused: %v", err)
+	}
+	if err := get(stranger.URL); err == nil {
+		t.Error("a different certificate was accepted with an inline pin")
+	}
+}

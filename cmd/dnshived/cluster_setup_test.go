@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"dnshived/internal/bootstrap"
 	"dnshived/internal/config"
 )
 
@@ -386,6 +388,46 @@ func TestBootstrapAdoptHandler_WrongCodeRejectedBeforeTouchingConfig(t *testing.
 	}
 }
 
+func sealedAdoptBody(t *testing.T, code, purpose string, req any) []byte {
+	t.Helper()
+	plain, _ := json.Marshal(req)
+	sealed, err := bootstrap.Seal(code, purpose, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(sealed)
+	return body
+}
+
+func TestBootstrapAdoptHandler_SealedRejects(t *testing.T) {
+	inner := bootstrapAdoptRequest{ClusterJSON: json.RawMessage(`{"role":"core-1"}`)}
+	cases := map[string][]byte{
+		"wrong code":    sealedAdoptBody(t, "WRONG-CODE", bootstrap.PurposeCoreAdopt, inner),
+		"probe purpose": sealedAdoptBody(t, "REAL-CODE", bootstrap.PurposeProbeAdopt, inner),
+	}
+	for name, body := range cases {
+		cfgPath := filepath.Join(t.TempDir(), "cluster.json")
+		rec := httptest.NewRecorder()
+		bootstrapAdoptHandler("REAL-CODE", cfgPath)(rec, httptest.NewRequest(http.MethodPost, "/api/v1/bootstrap/adopt", bytes.NewReader(body)))
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: status = %d, want 401", name, rec.Code)
+		}
+		if _, err := os.Stat(cfgPath); err == nil {
+			t.Errorf("%s: cluster.json written", name)
+		}
+	}
+}
+
+func TestBootstrapAdoptHandler_SealedRightCodeReachesValidation(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "cluster.json")
+	body := sealedAdoptBody(t, "REAL-CODE", bootstrap.PurposeCoreAdopt, bootstrapAdoptRequest{ClusterJSON: json.RawMessage(`{"role":"core-1"}`)})
+	rec := httptest.NewRecorder()
+	bootstrapAdoptHandler("REAL-CODE", cfgPath)(rec, httptest.NewRequest(http.MethodPost, "/api/v1/bootstrap/adopt", bytes.NewReader(body)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 from config validation after a successful open: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestBootstrapAdoptHandler_InvalidConfigRejectedNotWritten(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "cluster.json")
 	handler := bootstrapAdoptHandler("REAL-CODE", cfgPath)
@@ -454,39 +496,42 @@ func TestBootstrapAdoptHandler_ValidConfigWrittenExactly(t *testing.T) {
 	}
 }
 
-// TestPushAdoptConfig_SendsCodeAndReceivesSuccess exercises the actual
-// HTTP client against a real httptest.Server standing in for a remote
-// node's adopt endpoint.
-func TestPushAdoptConfig_SendsCodeAndReceivesSuccess(t *testing.T) {
-	var gotCode string
-	var gotBody []byte
+func TestPushAdoptConfig_SendsOnlySealedPayload(t *testing.T) {
+	var gotRaw, gotBody []byte
 	ln, err := net.Listen("tcp", "127.0.0.1:80")
 	if err != nil {
 		t.Skipf("port 80 unavailable in this test environment: %v", err)
 	}
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotRaw, _ = io.ReadAll(r.Body)
+		var sealed bootstrap.Sealed
+		json.Unmarshal(gotRaw, &sealed)
+		plain, err := bootstrap.Open("MY-CODE", bootstrap.PurposeCoreAdopt, sealed)
+		if err != nil {
+			http.Error(w, "wrong join code", http.StatusUnauthorized)
+			return
+		}
 		var req bootstrapAdoptRequest
-		json.NewDecoder(r.Body).Decode(&req)
-		gotCode = req.Code
+		json.Unmarshal(plain, &req)
 		gotBody = req.ClusterJSON
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 	}))
 	srv.Listener.Close()
 	srv.Listener = ln
 	srv.Start()
 	defer srv.Close()
 
-	addr := "127.0.0.1:9443"
-	payload := []byte(`{"role":"core-2"}`)
-	if err := pushAdoptConfig(addr, "MY-CODE", adoptPayload{ClusterJSON: payload}); err != nil {
+	payload := []byte(`{"role":"core-2","psk":"very-secret"}`)
+	if err := pushAdoptConfig("127.0.0.1:9443", "MY-CODE", adoptPayload{ClusterJSON: payload}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if gotCode != "MY-CODE" {
-		t.Errorf("server received code %q, want MY-CODE", gotCode)
-	}
 	if !bytes.Equal(gotBody, payload) {
-		t.Errorf("server received payload %s, want %s", gotBody, payload)
+		t.Errorf("server opened payload %s, want %s", gotBody, payload)
+	}
+	for _, leak := range []string{"MY-CODE", "very-secret", "core-2"} {
+		if bytes.Contains(gotRaw, []byte(leak)) {
+			t.Errorf("%q visible on the wire: %s", leak, gotRaw)
+		}
 	}
 }
 
@@ -629,8 +674,11 @@ func TestBootstrapCommitHandler_FullSuccessWritesLocalAndPushesRemote(t *testing
 		t.Skipf("port 80 unavailable in this test environment: %v", err)
 	}
 	workerB := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req bootstrapAdoptRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		req, ok := openTestAdopt(r, "WORKER-B-CODE")
+		if !ok {
+			http.Error(w, "wrong join code", http.StatusUnauthorized)
+			return
+		}
 		workerBGotCode = req.Code
 		var cc config.Cluster
 		json.Unmarshal(req.ClusterJSON, &cc)
@@ -649,8 +697,11 @@ func TestBootstrapCommitHandler_FullSuccessWritesLocalAndPushesRemote(t *testing
 		t.Skipf("port 80 unavailable in this test environment: %v", err)
 	}
 	arbiter := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req bootstrapAdoptRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		req, ok := openTestAdopt(r, "ARBITER-CODE")
+		if !ok {
+			http.Error(w, "wrong join code", http.StatusUnauthorized)
+			return
+		}
 		arbiterGotCode = req.Code
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
@@ -810,4 +861,40 @@ func TestBuildClusterConfig_MgmtOverridesOnlyForDifferingNames(t *testing.T) {
 	if cc.Platform.MgmtOverrides != nil {
 		t.Errorf("MgmtOverrides = %v, want nil when every name matches", cc.Platform.MgmtOverrides)
 	}
+}
+
+func TestPushAdoptConfig_RealHandlerOpensSealedPush(t *testing.T) {
+	srv := httptest.NewServer(bootstrapAdoptHandler("REAL-CODE", filepath.Join(t.TempDir(), "cluster.json")))
+	defer srv.Close()
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	orig := coreBootstrapPort
+	coreBootstrapPort = port
+	t.Cleanup(func() { coreBootstrapPort = orig })
+
+	err := pushAdoptConfig("127.0.0.1:9443", "REAL-CODE", adoptPayload{ClusterJSON: []byte(`{"role":"core-1"}`)})
+	if err == nil || !strings.Contains(err.Error(), "cluster config failed validation") {
+		t.Fatalf("err = %v, want the receiver's validation error (proves the push opened)", err)
+	}
+	err = pushAdoptConfig("127.0.0.1:9443", "OTHER-CODE", adoptPayload{ClusterJSON: []byte(`{"role":"core-1"}`)})
+	if err == nil || !strings.Contains(err.Error(), "wrong join code") || !strings.Contains(err.Error(), "upgrade it first") {
+		t.Fatalf("err = %v, want wrong join code with the upgrade hint", err)
+	}
+}
+
+// openTestAdopt plays a bootstrap node with join code code: it opens a sealed push and reports the code on success.
+func openTestAdopt(r *http.Request, code string) (bootstrapAdoptRequest, bool) {
+	var sealed bootstrap.Sealed
+	if err := json.NewDecoder(r.Body).Decode(&sealed); err != nil {
+		return bootstrapAdoptRequest{}, false
+	}
+	plain, err := bootstrap.Open(code, bootstrap.PurposeCoreAdopt, sealed)
+	if err != nil {
+		return bootstrapAdoptRequest{}, false
+	}
+	var req bootstrapAdoptRequest
+	if err := json.Unmarshal(plain, &req); err != nil {
+		return bootstrapAdoptRequest{}, false
+	}
+	req.Code = code
+	return req, true
 }

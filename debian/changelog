@@ -1,3 +1,18 @@
+dnshived (0.9.8.6~dev-17) unstable; urgency=medium
+
+  * Join and probe adopt pushes are encrypted with a key derived from the join
+    code; the bootstrap setup pages redirect to HTTPS; the probe pins the cores'
+    certificate; dnshived-top -tls-cert; CI runs the tests.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Sun, 25 Oct 2026 06:23:09 +0100
+
+dnshived (0.9.8.6~dev-16) unstable; urgency=medium
+
+  * A restarted arbiter grants no new witness tokens for one token lifetime, and
+    a corrupt incarnation file no longer restarts the count at 1.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Sun, 25 Oct 2026 05:47:56 +0100
+
 dnshived (0.9.8.6~dev-15) unstable; urgency=medium
 
   * A daemon start as root is refused when the dnshived service user exists, and

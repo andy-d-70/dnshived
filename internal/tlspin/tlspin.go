@@ -38,14 +38,44 @@ func SetFile(path string) {
 	}
 }
 
+// inlinePath marks a pin set from PEM data; there is no file to reload.
+const inlinePath = "<inline>"
+
+// SetPEM pins the certificate(s) in pemData, for a process that has no certificate file.
+func SetPEM(pemData []byte) error {
+	certs := parseCerts(pemData)
+	if len(certs) == 0 {
+		return errors.New("no certificate in PEM data")
+	}
+	pin.mu.Lock()
+	pin.path = inlinePath
+	pin.certs = certs
+	pin.mu.Unlock()
+	return nil
+}
+
 func reload() error {
 	pin.mu.RLock()
 	path := pin.path
 	pin.mu.RUnlock()
+	if path == inlinePath {
+		return errors.New("inline pin has no file to reload")
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
+	certs := parseCerts(data)
+	if len(certs) == 0 {
+		return errors.New("no certificate in file")
+	}
+	pin.mu.Lock()
+	pin.certs = certs
+	pin.mu.Unlock()
+	return nil
+}
+
+func parseCerts(data []byte) [][]byte {
 	var certs [][]byte
 	for {
 		var block *pem.Block
@@ -57,13 +87,7 @@ func reload() error {
 			certs = append(certs, block.Bytes)
 		}
 	}
-	if len(certs) == 0 {
-		return errors.New("no certificate in file")
-	}
-	pin.mu.Lock()
-	pin.certs = certs
-	pin.mu.Unlock()
-	return nil
+	return certs
 }
 
 func matches(leaf []byte) (matched, pinning bool) {
@@ -93,7 +117,7 @@ func verifyPeer(cs tls.ConnectionState) error {
 		pin.mu.Lock()
 		if !pin.warned {
 			pin.warned = true
-			loglevel.Infof("[TLS] no cluster certificate configured — connections to cluster peers are not verified")
+			loglevel.Warnf("[TLS] no cluster certificate configured — connections to cluster peers are not verified")
 		}
 		pin.mu.Unlock()
 		return nil

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"dnshived/internal/bootstrap"
 	"dnshived/internal/cluster"
 	"dnshived/internal/config"
 	"dnshived/internal/identity"
@@ -72,12 +73,18 @@ func TestAddProbeHandler_PushesRealProbeConfigWithBothTokens(t *testing.T) {
 		t.Skipf("port 9444 unavailable in this test environment: %v", err)
 	}
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var sealed bootstrap.Sealed
+		json.NewDecoder(r.Body).Decode(&sealed)
+		plain, err := bootstrap.Open("JOIN-CODE", bootstrap.PurposeProbeAdopt, sealed)
+		if err != nil {
+			http.Error(w, "wrong join code", http.StatusUnauthorized)
+			return
+		}
+		gotCode = "JOIN-CODE"
 		var req struct {
-			Code   string          `json:"code"`
 			Config json.RawMessage `json:"config"`
 		}
-		json.NewDecoder(r.Body).Decode(&req)
-		gotCode = req.Code
+		json.Unmarshal(plain, &req)
 		json.Unmarshal(req.Config, &gotConfig)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
@@ -147,10 +154,17 @@ func TestAddProbeHandler_PopulatesVLANConstructionFields(t *testing.T) {
 		t.Skipf("port 9444 unavailable in this test environment: %v", err)
 	}
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var sealed bootstrap.Sealed
+		json.NewDecoder(r.Body).Decode(&sealed)
+		plain, err := bootstrap.Open("JOIN-CODE", bootstrap.PurposeProbeAdopt, sealed)
+		if err != nil {
+			http.Error(w, "wrong join code", http.StatusUnauthorized)
+			return
+		}
 		var req struct {
 			Config json.RawMessage `json:"config"`
 		}
-		json.NewDecoder(r.Body).Decode(&req)
+		json.Unmarshal(plain, &req)
 		json.Unmarshal(req.Config, &gotConfig)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]bool{"ok": true})

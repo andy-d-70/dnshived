@@ -506,8 +506,11 @@ func TestBootstrapCommitHandler_GeneratesSelfSignedCertWhenNonePasted(t *testing
 		t.Skipf("port 80 unavailable in this test environment: %v", err)
 	}
 	remoteB := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req bootstrapAdoptRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		req, ok := openTestAdopt(r, "OTP-B")
+		if !ok {
+			http.Error(w, "wrong join code", http.StatusUnauthorized)
+			return
+		}
 		gotTLSCert = req.TLSCertPEM
 		gotTLSKey = req.TLSKeyPEM
 		w.WriteHeader(http.StatusOK)

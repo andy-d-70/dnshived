@@ -366,6 +366,7 @@ type generatedProbeConfig struct {
 	LocalOctet        int               `json:"local_octet,omitempty"`
 	ProbeHelperSocket string            `json:"probe_helper_socket,omitempty"`
 	KnownVLANsPath    string            `json:"known_vlans_path,omitempty"`
+	ClusterCertPEM    string            `json:"cluster_cert_pem,omitempty"`
 }
 
 // probeListenAddr matches cmd/dnshived-probe's default listen address.
@@ -414,10 +415,9 @@ func buildProbeConfig(secrets generatedSecrets, allNodes []clusterNode, probeNod
 }
 
 func pushProbeAdopt(addr, otp string, probeJSON []byte) error {
-	body, err := json.Marshal(struct {
-		Code   string          `json:"code"`
+	plain, err := json.Marshal(struct {
 		Config json.RawMessage `json:"config"`
-	}{Code: otp, Config: probeJSON})
+	}{Config: probeJSON})
 	if err != nil {
 		return err
 	}
@@ -426,20 +426,7 @@ func pushProbeAdopt(addr, otp string, probeJSON []byte) error {
 	if err != nil {
 		return err
 	}
-
-	client := &http.Client{Timeout: pushConfigTimeout}
-	url := "http://" + target + "/api/v1/bootstrap/adopt"
-	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("unreachable: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(msg)))
-	}
-	return nil
+	return postSealedAdopt("http://"+target+"/api/v1/bootstrap/adopt", otp, bootstrap.PurposeProbeAdopt, plain)
 }
 
 // probeAdoptTarget derives pushProbeAdopt's real destination.
@@ -599,8 +586,7 @@ type adoptPayload struct {
 // bootstrap adopt endpoint, presenting the join code the operator entered
 // for it.
 func pushAdoptConfig(addr, otp string, payload adoptPayload) error {
-	body, err := json.Marshal(bootstrapAdoptRequest{
-		Code:           otp,
+	plain, err := json.Marshal(bootstrapAdoptRequest{
 		ClusterJSON:    payload.ClusterJSON,
 		WebUsersJSON:   payload.WebUsersJSON,
 		WebConfigJSON:  payload.WebConfigJSON,
@@ -612,9 +598,19 @@ func pushAdoptConfig(addr, otp string, payload adoptPayload) error {
 	if err != nil {
 		return err
 	}
+	return postSealedAdopt("http://"+coreBootstrapContactAddr(addr)+"/api/v1/bootstrap/adopt", otp, bootstrap.PurposeCoreAdopt, plain)
+}
 
+func postSealedAdopt(url, otp, purpose string, plain []byte) error {
+	sealed, err := bootstrap.Seal(otp, purpose, plain)
+	if err != nil {
+		return err
+	}
+	body, err := json.Marshal(sealed)
+	if err != nil {
+		return err
+	}
 	client := &http.Client{Timeout: pushConfigTimeout}
-	url := "http://" + coreBootstrapContactAddr(addr) + "/api/v1/bootstrap/adopt"
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("unreachable: %w", err)
@@ -623,6 +619,9 @@ func pushAdoptConfig(addr, otp string, payload adoptPayload) error {
 
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == http.StatusUnauthorized {
+			return fmt.Errorf("%s: %s (or the node runs a dnshived older than 0.9.8.6, which cannot read an encrypted push; upgrade it first)", resp.Status, strings.TrimSpace(string(msg)))
+		}
 		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(msg)))
 	}
 	return nil
@@ -786,6 +785,9 @@ func bootstrapCommitHandler(cfgPath string, state *builderState) http.HandlerFun
 			if err != nil {
 				results = append(results, pushResult{Addr: n.Addr, Role: n.Role, OK: false, Message: "build config: " + err.Error()})
 				continue
+			}
+			if len(pc.ClusterNodes) > 0 && pc.ClusterNodes[0].TLS {
+				pc.ClusterCertPEM = tlsCertPEM
 			}
 			raw, err := json.MarshalIndent(pc, "", "  ")
 			if err != nil {

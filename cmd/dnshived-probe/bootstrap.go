@@ -67,14 +67,32 @@ type probeAdoptRequest struct {
 
 func probeAdoptHandler(otp string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var req probeAdoptRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var env struct {
+			probeAdoptRequest
+			bootstrap.Sealed
+		}
+		if err := json.NewDecoder(r.Body).Decode(&env); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
-		if subtle.ConstantTimeCompare([]byte(req.Code), []byte(otp)) != 1 {
-			http.Error(w, "wrong join code", http.StatusUnauthorized)
-			return
+		req := env.probeAdoptRequest
+		if env.IsSealed() {
+			plain, err := bootstrap.Open(otp, bootstrap.PurposeProbeAdopt, env.Sealed)
+			if err != nil {
+				http.Error(w, "wrong join code", http.StatusUnauthorized)
+				return
+			}
+			req = probeAdoptRequest{}
+			if err := json.Unmarshal(plain, &req); err != nil {
+				http.Error(w, "invalid request body", http.StatusBadRequest)
+				return
+			}
+		} else {
+			if subtle.ConstantTimeCompare([]byte(req.Code), []byte(otp)) != 1 {
+				http.Error(w, "wrong join code", http.StatusUnauthorized)
+				return
+			}
+			log.Printf("[BOOTSTRAP:ADOPT] unencrypted adopt push from %s (sender older than 0.9.8.6): the probe tokens crossed the network in cleartext", r.RemoteAddr)
 		}
 
 		var pc ProbeConfig

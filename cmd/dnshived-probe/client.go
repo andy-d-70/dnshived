@@ -4,20 +4,19 @@
 package main
 
 import (
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
 
 	"dnshived/internal/config"
+	"dnshived/internal/tlspin"
 )
 
-// clusterHTTPClient's Transport skips certificate verification.
 var clusterHTTPClient = &http.Client{
 	Timeout: 8 * time.Second,
 	Transport: &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: tlspin.Config(),
 	},
 }
 

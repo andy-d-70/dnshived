@@ -40,6 +40,10 @@ type Manager struct {
 	// dataDir/dirty back Manager's own persistence.
 	dataDir string
 	dirty   bool
+
+	// grantsPausedUntil: grants are flushed to disk asynchronously, so after a restart this
+	// arbiter may have forgotten a grant that is still valid; it grants nothing new until that has expired.
+	grantsPausedUntil time.Time
 }
 
 // New creates a Manager.
@@ -50,7 +54,16 @@ func New(psk []byte, quorumFunc func() bool, dataDir string) *Manager {
 		quorumFunc: quorumFunc,
 		nonceCache: make(map[string]int64),
 		dataDir:    dataDir,
+
+		grantsPausedUntil: time.Now().Add(tokenTTL),
 	}
+}
+
+// ResumeGrants ends the startup pause early.
+func (m *Manager) ResumeGrants() {
+	m.mu.Lock()
+	m.grantsPausedUntil = time.Time{}
+	m.mu.Unlock()
 }
 
 func (m *Manager) SetTrustedHosts(hosts []string) {
@@ -176,6 +189,17 @@ func (m *Manager) handleRequest(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"accepted": false,
 			"reason":   "scope already owned by " + existing.Owner,
+		})
+		return
+	}
+	if wait := time.Until(m.grantsPausedUntil); wait > 0 && !(occupied && !existing.Expired() && existing.Owner == req.NodeID) {
+		m.mu.Unlock()
+		loglevel.InfoOnChange("arbiter-pause:"+req.Scope, "paused", "[ARBITER:PAUSE] token request deferred after arbiter start: scope=%s requester=%s, new grants resume in %s",
+			req.Scope, req.NodeID, wait.Round(time.Second))
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"accepted": false,
+			"reason":   fmt.Sprintf("arbiter restarted, new grants resume in %s", wait.Round(time.Second)),
 		})
 		return
 	}

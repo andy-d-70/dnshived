@@ -5,6 +5,7 @@ package main
 
 import (
 	"crypto/subtle"
+	"dnshived/internal/bootstrap"
 	"dnshived/internal/loglevel"
 	"encoding/json"
 	"log"
@@ -34,14 +35,32 @@ type bootstrapAdoptRequest struct {
 // session, validates it, writes it, and hands off to the real daemon.
 func bootstrapAdoptHandler(otp, cfgPath string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var req bootstrapAdoptRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var env struct {
+			bootstrapAdoptRequest
+			bootstrap.Sealed
+		}
+		if err := json.NewDecoder(r.Body).Decode(&env); err != nil {
 			http.Error(w, "invalid request body", http.StatusBadRequest)
 			return
 		}
-		if subtle.ConstantTimeCompare([]byte(req.Code), []byte(otp)) != 1 {
-			http.Error(w, "wrong join code", http.StatusUnauthorized)
-			return
+		req := env.bootstrapAdoptRequest
+		if env.IsSealed() {
+			plain, err := bootstrap.Open(otp, bootstrap.PurposeCoreAdopt, env.Sealed)
+			if err != nil {
+				http.Error(w, "wrong join code", http.StatusUnauthorized)
+				return
+			}
+			req = bootstrapAdoptRequest{}
+			if err := json.Unmarshal(plain, &req); err != nil {
+				http.Error(w, "invalid request body", http.StatusBadRequest)
+				return
+			}
+		} else {
+			if subtle.ConstantTimeCompare([]byte(req.Code), []byte(otp)) != 1 {
+				http.Error(w, "wrong join code", http.StatusUnauthorized)
+				return
+			}
+			loglevel.Warnf("[BOOTSTRAP:ADOPT] unencrypted adopt push from %s (sender older than 0.9.8.6): the cluster secrets crossed the network in cleartext", r.RemoteAddr)
 		}
 
 		var c config.Cluster

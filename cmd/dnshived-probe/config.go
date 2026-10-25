@@ -40,6 +40,9 @@ type ProbeConfig struct {
 
 	ClusterNodes []ClusterNode `json:"cluster_nodes"`
 
+	// ClusterCertPEM is the cores' shared certificate (public part); when set, connections to the cores are pinned to it.
+	ClusterCertPEM string `json:"cluster_cert_pem,omitempty"`
+
 	// APITokens gates THIS binary's own read API (GET /api/v1/status, GET
 	// /api/v1/probe/<scope>) for dnshived-web/dnshived-top to poll.
 	APITokens []config.APIToken `json:"api_tokens,omitempty"`

@@ -91,6 +91,9 @@ func addProbeHandler(observer *cluster.Observer) http.HandlerFunc {
 			ProbeHelperSocket: defaultProbeHelperSocket,
 			KnownVLANsPath:    defaultKnownVLANsPath,
 		}
+		if cfg.TLSEnabled() {
+			pc.ClusterCertPEM = string(readFileBestEffort(cfg.TLSCert))
+		}
 		if probeAdminToken != "" {
 			pc.APITokens = append(pc.APITokens, config.APIToken{Name: "probe-admin", Token: probeAdminToken, Role: "admin"})
 		}

@@ -6,11 +6,13 @@
 package state
 
 import (
+	"dnshived/internal/loglevel"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // DefaultDir is where dnshived stores persistent runtime state.
@@ -27,20 +29,20 @@ func NextIncarnation(dir string) (uint64, error) {
 	}
 	path := filepath.Join(dir, "incarnation")
 
-	var current uint64
+	next := uint64(1)
 	data, err := os.ReadFile(path)
 	if err == nil {
 		s := strings.TrimSpace(string(data))
 		if v, perr := strconv.ParseUint(s, 10, 64); perr == nil {
-			current = v
+			next = v + 1
+		} else {
+			// The counter only grows by one per start, so the current Unix time is above any value it reached.
+			next = uint64(time.Now().Unix())
+			loglevel.Warnf("[STATE:INCARNATION] %s is unreadable (%q), continuing with incarnation %d instead of restarting the count", path, s, next)
 		}
-		// A corrupt/unparseable file resets to 0 → next becomes 1.
-		// Safe: we only ever move forward from whatever we can read.
 	} else if !os.IsNotExist(err) {
 		return 0, fmt.Errorf("read incarnation: %w", err)
 	}
-
-	next := current + 1
 
 	// Atomic write: temp file + fsync + rename + directory fsync.
 	tmp := path + ".tmp"

@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -274,7 +275,7 @@ func runBootstrapMode(cfgPath, addr, tlsAddr, dataDir, otpPath string) {
 	loglevel.Infof("[BOOTSTRAP:READY] this node is not yet configured (no %s)", cfgPath)
 	loglevel.Infof("[BOOTSTRAP:READY] hostname: %s", hostname)
 	loglevel.Infof("[BOOTSTRAP:READY] join code: %s (the same code for a core role and for a probe role)", otp)
-	loglevel.Infof("[BOOTSTRAP:READY] open http://%s/ (or https://%s/, self-signed) and enter the join code above to continue", addr, tlsAddr)
+	loglevel.Infof("[BOOTSTRAP:READY] open https://%s/ (self-signed; http://%s/ redirects there) and enter the join code above to continue", tlsAddr, addr)
 
 	loglevel.Infof("[DISCOVERY] broadcasting as unclaimed on port %d every 5s", discovery.Port)
 	go discovery.Broadcast(context.Background(), hostname, version, discovery.PortFromAddr(addr, 80))
@@ -290,13 +291,19 @@ func runBootstrapMode(cfgPath, addr, tlsAddr, dataDir, otpPath string) {
 		log.Fatalf("[BOOTSTRAP:INIT] parse generated certificate: %v", err)
 	}
 	tlsSrv := &http.Server{Addr: tlsAddr, Handler: mux, TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}}
-	go func() {
-		if err := tlsSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
-			loglevel.Warnf("[BOOTSTRAP:INIT] https listener on %s: %v", tlsAddr, err)
-		}
-	}()
+	var plain http.Handler = mux
+	if ln, err := net.Listen("tcp", tlsAddr); err != nil {
+		loglevel.Warnf("[BOOTSTRAP:INIT] https listener on %s: %v — the setup pages stay on plain HTTP", tlsAddr, err)
+	} else {
+		go func() {
+			if err := tlsSrv.ServeTLS(ln, "", ""); err != nil && err != http.ErrServerClosed {
+				loglevel.Warnf("[BOOTSTRAP:INIT] https listener on %s: %v", tlsAddr, err)
+			}
+		}()
+		plain = redirectPagesToHTTPS(mux, tlsAddr)
+	}
 
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, plain); err != nil {
 		log.Fatalf("[BOOTSTRAP:INIT] listen on %s: %v", addr, err)
 	}
 }
@@ -330,4 +337,24 @@ func interfaceForLocalAddr(r *http.Request) string {
 		}
 	}
 	return ""
+}
+
+// redirectPagesToHTTPS keeps the machine API on plain HTTP and sends browser pages to HTTPS,
+// so join codes typed into the wizard never cross the network in cleartext.
+func redirectPagesToHTTPS(next http.Handler, tlsAddr string) http.Handler {
+	_, tlsPort, _ := net.SplitHostPort(tlsAddr)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		host := r.Host
+		if h, _, err := net.SplitHostPort(r.Host); err == nil {
+			host = h
+		}
+		if tlsPort != "" && tlsPort != "443" {
+			host = net.JoinHostPort(host, tlsPort)
+		}
+		http.Redirect(w, r, "https://"+host+r.URL.RequestURI(), http.StatusPermanentRedirect)
+	})
 }

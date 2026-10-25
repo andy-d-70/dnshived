@@ -60,6 +60,7 @@ func TestUntrustedHostDeniedDespiteValidHMAC(t *testing.T) {
 func TestTrustedHostStillGrantedWithValidHMAC(t *testing.T) {
 	psk := []byte("test-psk")
 	m := New(psk, func() bool { return true }, t.TempDir())
+	m.ResumeGrants()
 	m.SetTrustedHosts([]string{"192.0.2.22"})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/token/request",
@@ -89,6 +90,7 @@ func TestTrustedHostStillGrantedWithValidHMAC(t *testing.T) {
 func TestEmptyTrustedHostsFailsOpen(t *testing.T) {
 	psk := []byte("test-psk")
 	m := New(psk, func() bool { return true }, t.TempDir())
+	m.ResumeGrants()
 	// No SetTrustedHosts call at all — zero value.
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/token/request",
@@ -191,6 +193,7 @@ func TestTokenPersistence_SurvivesRestart(t *testing.T) {
 	psk := []byte("test-psk")
 
 	m1 := New(psk, func() bool { return true }, dir)
+	m1.ResumeGrants()
 	m1.SetTrustedHosts([]string{"192.0.2.22"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/token/request",
 		bytes.NewReader(newSignedRequestBody(psk, "rw-100", "core-2")))
@@ -281,5 +284,58 @@ func TestHandleRenew_RejectsExpiredTokenEvenWithValidSignature(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for an expired token even with a valid signature, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func requestGrant(t *testing.T, m *Manager, psk []byte, scope, nodeID string) bool {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/token/request",
+		bytes.NewReader(newSignedRequestBody(psk, scope, nodeID)))
+	w := httptest.NewRecorder()
+	m.handleRequest(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("request %s/%s: status %d: %s", scope, nodeID, w.Code, w.Body.String())
+	}
+	var resp struct {
+		Accepted bool `json:"accepted"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return resp.Accepted
+}
+
+func TestHandleRequest_PausedAfterStart(t *testing.T) {
+	psk := []byte("test-psk")
+	m := New(psk, func() bool { return true }, t.TempDir())
+
+	if requestGrant(t, m, psk, "rw-100", "core-1") {
+		t.Fatal("a just-started arbiter granted a new token; it may have forgotten a still-valid grant for this scope")
+	}
+	if _, ok := m.tokens["rw-100"]; ok {
+		t.Fatal("a deferred request must not store a token")
+	}
+}
+
+func TestHandleRequest_PauseAllowsCurrentOwner(t *testing.T) {
+	psk := []byte("test-psk")
+	m := New(psk, func() bool { return true }, t.TempDir())
+	m.tokens["rw-100"] = &Token{Scope: "rw-100", Owner: "core-2", Incarnation: 1, ExpiresAt: time.Now().Add(tokenTTL)}
+
+	if !requestGrant(t, m, psk, "rw-100", "core-2") {
+		t.Fatal("the remembered owner of a still-valid token was refused during the pause")
+	}
+	if requestGrant(t, m, psk, "rw-100", "core-1") {
+		t.Fatal("a different node was granted a scope with a valid owner")
+	}
+}
+
+func TestHandleRequest_GrantsAfterPause(t *testing.T) {
+	psk := []byte("test-psk")
+	m := New(psk, func() bool { return true }, t.TempDir())
+	m.grantsPausedUntil = time.Now().Add(-time.Second)
+
+	if !requestGrant(t, m, psk, "rw-100", "core-1") {
+		t.Fatal("grant refused after the pause ended")
 	}
 }

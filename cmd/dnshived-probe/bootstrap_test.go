@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"dnshived/internal/bootstrap"
 )
 
 func TestProbeBootstrapUnits_IsEmpty(t *testing.T) {
@@ -64,6 +66,38 @@ func TestProbeAdoptHandler_WrongCodeRejectedBeforeTouchingConfig(t *testing.T) {
 	}
 	if *written != nil {
 		t.Error("probeHelperWriteConfigFunc was called despite a wrong code — must never happen")
+	}
+}
+
+func TestProbeAdoptHandler_Sealed(t *testing.T) {
+	seal := func(code, purpose string) []byte {
+		plain, _ := json.Marshal(probeAdoptRequest{Config: json.RawMessage(`{"listen_addr":"0.0.0.0:9444"}`)})
+		sealed, err := bootstrap.Seal(code, purpose, plain)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := json.Marshal(sealed)
+		return body
+	}
+	cases := []struct {
+		name string
+		body []byte
+		want int
+	}{
+		{"wrong code", seal("WRONG-CODE", bootstrap.PurposeProbeAdopt), http.StatusUnauthorized},
+		{"core purpose", seal("REAL-CODE", bootstrap.PurposeCoreAdopt), http.StatusUnauthorized},
+		{"right code reaches validation", seal("REAL-CODE", bootstrap.PurposeProbeAdopt), http.StatusBadRequest},
+	}
+	for _, c := range cases {
+		written := withMockProbeHelperWrite(t, nil)
+		rec := httptest.NewRecorder()
+		probeAdoptHandler("REAL-CODE")(rec, httptest.NewRequest(http.MethodPost, "/api/v1/bootstrap/adopt", bytes.NewReader(c.body)))
+		if rec.Code != c.want {
+			t.Errorf("%s: status = %d, want %d", c.name, rec.Code, c.want)
+		}
+		if *written != nil {
+			t.Errorf("%s: config written", c.name)
+		}
 	}
 }
 

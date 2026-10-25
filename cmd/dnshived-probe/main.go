@@ -13,6 +13,7 @@ import (
 
 	"dnshived/internal/auth"
 	"dnshived/internal/eventlog"
+	"dnshived/internal/tlspin"
 )
 
 var version = "0.9.7-dev"
@@ -55,6 +56,11 @@ func main() {
 
 	log.Printf("dnshived-probe %s starting — trunk_parent=%s, %d cluster node(s), probe every %dms",
 		version, cfg.TrunkParent, len(cfg.ClusterNodes), cfg.probeInterval())
+	if cfg.ClusterCertPEM != "" {
+		if err := tlspin.SetPEM([]byte(cfg.ClusterCertPEM)); err != nil {
+			log.Fatalf("config: cluster_cert_pem: %v", err)
+		}
+	}
 
 	store := newResultStore()
 	tracker := newProbeLogTracker(newProbeFailureLog(cfg.EventLogPath))
