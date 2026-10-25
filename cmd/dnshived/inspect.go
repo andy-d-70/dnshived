@@ -6,10 +6,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"dnshived/internal/loglevel"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"sort"
 	"sync"
@@ -115,7 +115,7 @@ func correlateCandidateInterfaces(ctx context.Context, myTrunks []string, candid
 		return nil, bootstrapStatusResponse{}, fmt.Errorf("reach candidate: %w", err)
 	}
 	if status.MgmtInterface == "" {
-		log.Printf("[API:NODES] interface check: %s reported no management interface", candidateAddr)
+		loglevel.Infof("[API:NODES] interface check: %s reported no management interface", candidateAddr)
 	}
 
 	mapping := make(map[string]string, len(myTrunks))
@@ -153,7 +153,7 @@ func correlateCandidateInterfaces(ctx context.Context, myTrunks []string, candid
 
 	for _, t := range myTrunks {
 		if mapping[t] == "" {
-			log.Printf("[API:NODES] interface check: nothing heard from %s on trunk %s (rp_filter=%s; non-zero drops the probe on an address-less trunk)", candidateAddr, t, rpfilter.Value(t))
+			loglevel.Infof("[API:NODES] interface check: nothing heard from %s on trunk %s (rp_filter=%s; non-zero drops the probe on an address-less trunk)", candidateAddr, t, rpfilter.Value(t))
 		}
 	}
 	return mapping, status, nil

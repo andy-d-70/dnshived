@@ -1,3 +1,33 @@
+dnshived (0.9.8.6~dev-14) unstable; urgency=medium
+
+  * The serving-set change line in the log is renamed from the benchmark tag to a plain agent tag.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Fri, 23 Oct 2026 18:14:00 +0200
+
+dnshived (0.9.8.6~dev-13) unstable; urgency=medium
+
+  * The keepalived reload line in the log loses its benchmark tag and keeps the time from decision to reload.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Thu, 22 Oct 2026 18:54:38 +0200
+
+dnshived (0.9.8.6~dev-12) unstable; urgency=medium
+
+  * A second daemon start is refused with the running PID, unknown arguments print usage and exit 2.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Thu, 22 Oct 2026 18:21:34 +0200
+
+dnshived (0.9.8.6~dev-11) unstable; urgency=medium
+
+  * log_level covers the whole daemon: the level applies from the moment the config loads, so startup messages obey it, and the remaining cluster commands and bootstrap paths report their failures as warnings and their successes as info.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Thu, 22 Oct 2026 05:10:33 +0200
+
+dnshived (0.9.8.6~dev-10) unstable; urgency=medium
+
+  * log_level takes effect: warning, info, debug and auto filter the daemon's log lines, a level change applies without a restart, and auto summarises suppressed routine messages every 10 minutes.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Thu, 22 Oct 2026 04:46:09 +0200
+
 dnshived (0.9.8.6~dev-9) unstable; urgency=medium
 
   * Privileged helper socket: per-connection deadline and request size limit,

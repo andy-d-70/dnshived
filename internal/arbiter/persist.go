@@ -4,8 +4,8 @@
 package arbiter
 
 import (
+	"dnshived/internal/loglevel"
 	"encoding/json"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -24,7 +24,7 @@ func loadTokens(dataDir string) map[string]*Token {
 	}
 	var loaded map[string]*Token
 	if err := json.Unmarshal(data, &loaded); err != nil {
-		log.Printf("[ARBITER:WARN] arbiter-tokens file corrupt, ignoring: %v", err)
+		loglevel.Warnf("[ARBITER:WARN] arbiter-tokens file corrupt, ignoring: %v", err)
 		return make(map[string]*Token)
 	}
 	now := time.Now()

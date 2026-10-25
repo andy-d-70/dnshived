@@ -8,11 +8,11 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
+	"dnshived/internal/loglevel"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"net"
 	"net/http"
@@ -500,9 +500,9 @@ func (o *Observer) probe(addr string) {
 		wasExcluded := ps.ExcludedFromQuorum
 		updateQuorumExclusion(ps, now, o.failGracePeriod, o.reconnectGracePeriod)
 		if !wasExcluded && ps.ExcludedFromQuorum {
-			log.Printf("[CLUSTER:QUORUM_EXCLUDE] peer %s excluded from EffectiveQuorum — unreachable for at least %s, may now serve standalone", peerNodeDesc(ps), o.failGracePeriod)
+			loglevel.Warnf("[CLUSTER:QUORUM_EXCLUDE] peer %s excluded from EffectiveQuorum — unreachable for at least %s, may now serve standalone", peerNodeDesc(ps), o.failGracePeriod)
 		} else if wasExcluded && !ps.ExcludedFromQuorum {
-			log.Printf("[CLUSTER:QUORUM_REINCLUDE] peer %s re-included in EffectiveQuorum — reachable again for at least %s", peerNodeDesc(ps), o.reconnectGracePeriod)
+			loglevel.Infof("[CLUSTER:QUORUM_REINCLUDE] peer %s re-included in EffectiveQuorum — reachable again for at least %s", peerNodeDesc(ps), o.reconnectGracePeriod)
 		}
 	}()
 	ps.Checks++
@@ -554,7 +554,7 @@ func (o *Observer) probe(addr string) {
 		ps.ReachableSince = now
 		ps.pushStateChange(true, now)
 		o.signalChanged()
-		log.Printf("[CLUSTER:REACHABLE] peer %s (%s)%s",
+		loglevel.Infof("[CLUSTER:REACHABLE] peer %s (%s)%s",
 			peerID.NodeID, peerID.Role, downFor)
 	}
 }
@@ -824,7 +824,7 @@ func (o *Observer) recordProbeFailure(ps *PeerState, now int64, wasReachable boo
 		ps.pushStateChange(false, now)
 		o.signalChanged()
 		nodeDesc := peerNodeDesc(ps)
-		log.Printf("[CLUSTER:UNREACHABLE] peer %s (%s, after %d consecutive failed probes)",
+		loglevel.Warnf("[CLUSTER:UNREACHABLE] peer %s (%s, after %d consecutive failed probes)",
 			nodeDesc, logReason, ps.Failures)
 	}
 }
@@ -1149,7 +1149,7 @@ func (o *Observer) HandlePing(w http.ResponseWriter, r *http.Request) {
 	trusted := o.trustedHosts
 	o.mu.RUnlock()
 	if !trusted.Allowed(r.RemoteAddr) {
-		log.Printf("[OBSERVER:DENY_UNTRUSTED] ping from untrusted host: remote_addr=%s", r.RemoteAddr)
+		loglevel.Warnf("[OBSERVER:DENY_UNTRUSTED] ping from untrusted host: remote_addr=%s", r.RemoteAddr)
 		http.Error(w, "source address not in trusted_hosts", http.StatusForbidden)
 		return
 	}

@@ -4,9 +4,9 @@
 package fencing
 
 import (
+	"dnshived/internal/loglevel"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -57,11 +57,11 @@ func (w *Watermark) persist() {
 	}
 	data, err := json.Marshal(w.current)
 	if err != nil {
-		log.Printf("[FENCING:CRITICAL]: cannot marshal watermark: %v", err)
+		loglevel.Warnf("[FENCING:CRITICAL]: cannot marshal watermark: %v", err)
 		return
 	}
 	if err := atomicWriteSync(w.path, data); err != nil {
-		log.Printf("[FENCING:CRITICAL]: watermark persistence failed: %v", err)
+		loglevel.Warnf("[FENCING:CRITICAL]: watermark persistence failed: %v", err)
 		// The watermark advanced in memory but NOT on disk.
 	}
 }

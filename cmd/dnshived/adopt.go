@@ -5,6 +5,7 @@ package main
 
 import (
 	"crypto/subtle"
+	"dnshived/internal/loglevel"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -58,10 +59,10 @@ func bootstrapAdoptHandler(otp, cfgPath string) http.HandlerFunc {
 			os.MkdirAll(filepath.Dir(c.TLSCert), 0o755)
 			os.MkdirAll(filepath.Dir(c.TLSKey), 0o755)
 			if err := os.WriteFile(c.TLSCert, req.CoreTLSCertPEM, 0o644); err != nil {
-				log.Printf("[BOOTSTRAP:ADOPT] write core TLS cert %s: %v", c.TLSCert, err)
+				loglevel.Warnf("[BOOTSTRAP:ADOPT] write core TLS cert %s: %v", c.TLSCert, err)
 			}
 			if err := os.WriteFile(c.TLSKey, req.CoreTLSKeyPEM, 0o600); err != nil {
-				log.Printf("[BOOTSTRAP:ADOPT] write core TLS key %s: %v", c.TLSKey, err)
+				loglevel.Warnf("[BOOTSTRAP:ADOPT] write core TLS key %s: %v", c.TLSKey, err)
 			}
 		}
 
@@ -76,7 +77,7 @@ func bootstrapAdoptHandler(otp, cfgPath string) http.HandlerFunc {
 		reenableHelperAfterAdopt()
 		stopProbeDaemonsOnThisHost()
 
-		log.Printf("[BOOTSTRAP:ADOPT] real cluster config received and written (role=%s, cluster_id=%s) — restarting as a configured daemon", c.Role, c.ClusterID)
+		loglevel.Infof("[BOOTSTRAP:ADOPT] real cluster config received and written (role=%s, cluster_id=%s) — restarting as a configured daemon", c.Role, c.ClusterID)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -102,7 +103,7 @@ func reExecAsConfiguredDaemon() {
 	if err != nil {
 		log.Fatalf("[BOOTSTRAP:ADOPT] find own executable path: %v", err)
 	}
-	log.Printf("[BOOTSTRAP:ADOPT] re-executing as the now-configured daemon")
+	loglevel.Infof("[BOOTSTRAP:ADOPT] re-executing as the now-configured daemon")
 	if err := syscall.Exec(exe, os.Args, os.Environ()); err != nil {
 		log.Fatalf("[BOOTSTRAP:ADOPT] re-exec: %v", err)
 	}

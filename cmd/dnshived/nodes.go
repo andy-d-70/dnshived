@@ -6,9 +6,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"dnshived/internal/loglevel"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -434,7 +434,7 @@ func applyLivePeerSwap(observer *cluster.Observer, oldAddr, newAddr string) {
 		observer.RemovePeer(oldAddr)
 	}
 	observer.AddPeer(newAddr)
-	log.Printf("[API:NODES] peer list applied live (added %s%s), no restart", newAddr, map[bool]string{true: ", removed " + oldAddr, false: ""}[oldAddr != "" && oldAddr != newAddr])
+	loglevel.Infof("[API:NODES] peer list applied live (added %s%s), no restart", newAddr, map[bool]string{true: ", removed " + oldAddr, false: ""}[oldAddr != "" && oldAddr != newAddr])
 }
 
 func clearStalePathReliability(observer *cluster.Observer, cfg *config.Cluster, role string) {
@@ -633,13 +633,13 @@ func removePeerHandler(cfgPath string, observer *cluster.Observer, ag *agent.Age
 		observer.RemovePeer(req.Addr)
 
 		if hosts, changed, err := removeTrustedHostInConfig(cfgPath, hostOnly(req.Addr)); err != nil {
-			log.Printf("[API:NODES] remove %s from trusted_hosts: %v", hostOnly(req.Addr), err)
+			loglevel.Warnf("[API:NODES] remove %s from trusted_hosts: %v", hostOnly(req.Addr), err)
 		} else if changed {
 			applyLiveTrustedHosts(cfgPath, hosts, observer, arbiterMgr, leaseSyncHandler)
 		}
 		if req.Role != "" {
 			if err := applyRoleAddressingReset(cfgPath, req.Role, "", nil, observer, ag); err != nil {
-				log.Printf("[API:NODES] reset %s's addressing: %v", req.Role, err)
+				loglevel.Warnf("[API:NODES] reset %s's addressing: %v", req.Role, err)
 			}
 		}
 
@@ -653,7 +653,7 @@ func removePeerHandler(cfgPath string, observer *cluster.Observer, ag *agent.Age
 func forwardRemovePeer(cfg *config.Cluster, req removePeerRequest) {
 	adminToken, err := findTokenByRole(cfg, "admin")
 	if err != nil {
-		log.Printf("[API:NODES] forward removal of %s: %v", req.Addr, err)
+		loglevel.Warnf("[API:NODES] forward removal of %s: %v", req.Addr, err)
 		return
 	}
 	for _, peer := range cfg.Peers {
@@ -661,10 +661,10 @@ func forwardRemovePeer(cfg *config.Cluster, req removePeerRequest) {
 			continue
 		}
 		if err := pushRemovePeer(cfg, peer, adminToken, req.Addr, req.Role); err != nil {
-			log.Printf("[API:NODES] forward removal of %s to %s: %v", req.Addr, peer, err)
+			loglevel.Warnf("[API:NODES] forward removal of %s to %s: %v", req.Addr, peer, err)
 			continue
 		}
-		log.Printf("[API:NODES] forwarded removal of %s to %s", req.Addr, peer)
+		loglevel.Infof("[API:NODES] forwarded removal of %s to %s", req.Addr, peer)
 	}
 }
 
@@ -905,7 +905,7 @@ func replaceNodeHandler(cfgPath string, observer *cluster.Observer, ag *agent.Ag
 		oldDeadAddr := resolveOldDeadAddr(req.OldAddr, thirdAddr, cfg.Peers)
 		if thirdAddr == "" {
 			if configured := configuredThirdAddr(cfg.ControlAddr, cfg.Peers, oldDeadAddr, newControlAddr); configured != "" {
-				log.Printf("[API:NODES] third member %s is configured but not reachable right now — keeping it as a peer and in trusted_hosts", configured)
+				loglevel.Warnf("[API:NODES] third member %s is configured but not reachable right now — keeping it as a peer and in trusted_hosts", configured)
 				thirdAddr = configured
 				if oldDeadAddr == "" {
 					oldDeadAddr = resolveOldDeadAddr(req.OldAddr, thirdAddr, cfg.Peers)
@@ -916,14 +916,14 @@ func replaceNodeHandler(cfgPath string, observer *cluster.Observer, ag *agent.Ag
 
 		ri, ifaceWarnings, matchErr := matchCandidateInterfaces(r.Context(), cfg, req.Addr)
 		if matchErr != nil {
-			log.Printf("[API:NODES] interface match with %s failed: %v — keeping the cluster's interface names for %s", req.Addr, matchErr, req.Role)
+			loglevel.Warnf("[API:NODES] interface match with %s failed: %v — keeping the cluster's interface names for %s", req.Addr, matchErr, req.Role)
 			ifaceWarnings = append(ifaceWarnings, "interface match failed: "+matchErr.Error())
 		}
 		for _, warning := range ifaceWarnings {
-			log.Printf("[API:NODES] %s: %s", req.Role, warning)
+			loglevel.Warnf("[API:NODES] %s: %s", req.Role, warning)
 		}
 		if len(ifaceWarnings) > 0 && !req.AllowUndetectedTrunks {
-			log.Printf("[API:NODES] replace %s with %s refused: interface check incomplete, nothing changed", req.Role, req.Addr)
+			loglevel.Warnf("[API:NODES] replace %s with %s refused: interface check incomplete, nothing changed", req.Role, req.Addr)
 			writeJSON(w, http.StatusConflict, map[string]interface{}{
 				"error":              "interface check incomplete — nothing was changed; fix cabling/bridges or confirm onboarding anyway",
 				"interface_warnings": ifaceWarnings,
@@ -931,12 +931,12 @@ func replaceNodeHandler(cfgPath string, observer *cluster.Observer, ag *agent.Ag
 			return
 		}
 		if ri != nil {
-			log.Printf("[API:NODES] %s interfaces from the broadcast match: trunks %v, mgmt %q", req.Role, ri.Workers, ri.Mgmt)
+			loglevel.Infof("[API:NODES] %s interfaces from the broadcast match: trunks %v, mgmt %q", req.Role, ri.Workers, ri.Mgmt)
 		}
 
 		resetCfg, resetErr := resetRoleAddressingInConfig(cfgPath, req.Role, newControlAddr, ri)
 		if resetErr != nil {
-			log.Printf("[API:NODES] reset %s's own scope-addressing defaults: %v", req.Role, resetErr)
+			loglevel.Warnf("[API:NODES] reset %s's own scope-addressing defaults: %v", req.Role, resetErr)
 			resetCfg = *cfg
 		} else {
 			observer.SetFallbackAddrs(computeFallbackTargets(&resetCfg, observer))
@@ -1031,7 +1031,7 @@ func replaceNodeHandler(cfgPath string, observer *cluster.Observer, ag *agent.Ag
 		var oldNodeDecommissionErr error
 		if addrChanged && oldDeadAddr != "" && tokErr == nil {
 			if err := pushSelfDecommission(cfg, oldDeadAddr, adminToken); err != nil {
-				log.Printf("[API:NODES] best-effort decommission of old address %s: %v", oldDeadAddr, err)
+				loglevel.Warnf("[API:NODES] best-effort decommission of old address %s: %v", oldDeadAddr, err)
 				oldNodeDecommissionErr = err
 			}
 		}

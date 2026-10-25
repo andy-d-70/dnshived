@@ -4,7 +4,7 @@
 package desired
 
 import (
-	"log"
+	"dnshived/internal/loglevel"
 	"sync"
 	"time"
 
@@ -209,7 +209,7 @@ func (e *Engine) Reconcile(state fsm.State, live WorkerLiveness, genFloor uint64
 			if st.disputed && now.Sub(st.since) < e.unservedGrace {
 				why = ", a peer's map at the same generation names another owner"
 			}
-			log.Printf("[DESIRED:STICKY] scope %s: last owner %s seen not serving for %s%s — no longer kept, owner recomputed",
+			loglevel.Infof("[DESIRED:STICKY] scope %s: last owner %s seen not serving for %s%s — no longer kept, owner recomputed",
 				a.Scope, a.Owner, now.Sub(st.since).Round(time.Second), why)
 		}
 		delete(e.ownerUnserved, a.Scope)
@@ -374,6 +374,6 @@ func logOwnerChanges(previous, current []Assignment, first bool, generation uint
 		if first {
 			old = OwnerNone
 		}
-		log.Printf("[DESIRED:OWNER] scope %s: %s -> %s (generation %d)", a.Scope, ownerLabel(old), ownerLabel(a.Owner), generation)
+		loglevel.Infof("[DESIRED:OWNER] scope %s: %s -> %s (generation %d)", a.Scope, ownerLabel(old), ownerLabel(a.Owner), generation)
 	}
 }

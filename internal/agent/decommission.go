@@ -4,9 +4,9 @@
 package agent
 
 import (
+	"dnshived/internal/loglevel"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -35,7 +35,7 @@ func loadKnownScopes(dataDir string) map[string]knownScope {
 	}
 	var known map[string]knownScope
 	if err := json.Unmarshal(data, &known); err != nil {
-		log.Printf("[AGENT:WARN] known-scopes file corrupt, ignoring: %v", err)
+		loglevel.Warnf("[AGENT:WARN] known-scopes file corrupt, ignoring: %v", err)
 		return nil
 	}
 	return known
@@ -83,7 +83,7 @@ func (a *Agent) DecommissionRemovedScopes() (removed []string, saveErr error) {
 
 	for _, name := range removed {
 		if isUnsafeScopeName(name) {
-			log.Printf("[AGENT:WARN] known-scopes entry %q looks unsafe — skipping teardown for it", name)
+			loglevel.Warnf("[AGENT:WARN] known-scopes entry %q looks unsafe — skipping teardown for it", name)
 			continue
 		}
 
@@ -93,11 +93,11 @@ func (a *Agent) DecommissionRemovedScopes() (removed []string, saveErr error) {
 		if cur, stillConfigured := currentScopes[name]; stillConfigured {
 			reason = fmt.Sprintf("moved from %s.%d to %s.%d", ks.Parent, ks.VLANID, cur.Parent, cur.VLANID)
 		}
-		log.Printf("[AGENT:DECOMMISSION] scope %s %s — tearing down %s.%d and its dnsmasq unit",
+		loglevel.Infof("[AGENT:DECOMMISSION] scope %s %s — tearing down %s.%d and its dnsmasq unit",
 			name, reason, ks.Parent, ks.VLANID)
 		a.deleteInterface(name, sc)
 		if err := a.stopDnsmasqUnit(name); err != nil {
-			log.Printf("[AGENT:WARN] scope %s: stop dnsmasq: %v", name, err)
+			loglevel.Warnf("[AGENT:WARN] scope %s: stop dnsmasq: %v", name, err)
 		}
 		os.Remove(filepath.Join(a.dataDir, "dnsmasq-"+name+".conf"))
 		os.Remove(filepath.Join(a.dataDir, "reservations-"+name+".conf"))
@@ -105,7 +105,7 @@ func (a *Agent) DecommissionRemovedScopes() (removed []string, saveErr error) {
 	}
 
 	if err := saveKnownScopes(a.dataDir, currentScopes); err != nil {
-		log.Printf("[AGENT:WARN] save known scopes: %v", err)
+		loglevel.Warnf("[AGENT:WARN] save known scopes: %v", err)
 		saveErr = err
 	}
 

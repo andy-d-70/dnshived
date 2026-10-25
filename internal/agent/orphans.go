@@ -4,8 +4,8 @@
 package agent
 
 import (
+	"dnshived/internal/loglevel"
 	"fmt"
-	"log"
 	"net"
 	"sort"
 	"strconv"
@@ -110,7 +110,7 @@ func StopOrphanDnsmasqUnit(helperClient *helper.Client, scope string) error {
 // finds under the given log tag.
 func (a *Agent) TriggerOrphanCheck(logTag string) {
 	for _, f := range a.checkOrphans(nil) {
-		log.Printf("[AGENT:%s] %s: %s", logTag, f.What, f.Detail)
+		loglevel.Infof("[AGENT:%s] %s: %s", logTag, f.What, f.Detail)
 	}
 }
 

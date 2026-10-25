@@ -7,9 +7,9 @@ package discovery
 
 import (
 	"context"
+	"dnshived/internal/loglevel"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"sort"
@@ -51,7 +51,7 @@ func Broadcast(ctx context.Context, hostname, version string, bootstrapPort int)
 		Hostname: hostname, Version: version, BootstrapPort: bootstrapPort,
 	})
 	if err != nil {
-		log.Printf("[DISCOVERY] marshal announcement: %v", err)
+		loglevel.Infof("[DISCOVERY] marshal announcement: %v", err)
 		return
 	}
 
@@ -225,7 +225,7 @@ func broadcastOnInterfaceAt(ctx context.Context, iface, hostname string, port in
 	send := func() {
 		if _, err := pc.WriteTo(payload, dst); err != nil && !logged {
 			logged = true
-			log.Printf("[DISCOVERY:WARN] interface probe send on %s: %v", iface, err)
+			loglevel.Warnf("[DISCOVERY:WARN] interface probe send on %s: %v", iface, err)
 		}
 	}
 	send()
@@ -249,7 +249,7 @@ func listenOnInterfaceAt(ctx context.Context, localIface string, timeout time.Du
 	lc := bindToDeviceUDP4(localIface)
 	pc, err := lc.ListenPacket(ctx, "udp4", fmt.Sprintf(":%d", port))
 	if err != nil {
-		log.Printf("[DISCOVERY:ERROR] listen for interface probes on %s: %v", localIface, err)
+		loglevel.Warnf("[DISCOVERY:ERROR] listen for interface probes on %s: %v", localIface, err)
 		return InterfaceProbe{}, false
 	}
 	defer pc.Close()
@@ -366,7 +366,7 @@ func linkUp(iface string) {
 		return
 	}
 	if err := LinkUp(iface); err != nil {
-		log.Printf("[DISCOVERY:WARN] bring %s up before beaconing: %v", iface, err)
+		loglevel.Warnf("[DISCOVERY:WARN] bring %s up before beaconing: %v", iface, err)
 	}
 }
 
@@ -391,5 +391,5 @@ func EnsureUp(iface string) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	log.Printf("[DISCOVERY:WARN] %s has no carrier after %s — the interface check may not hear anything on it", iface, carrierWait)
+	loglevel.Warnf("[DISCOVERY:WARN] %s has no carrier after %s — the interface check may not hear anything on it", iface, carrierWait)
 }

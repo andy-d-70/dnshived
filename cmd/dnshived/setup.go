@@ -6,9 +6,9 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"dnshived/internal/loglevel"
 	"fmt"
 	"html/template"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -529,7 +529,7 @@ func bootstrapSetupHandler(hostname, controlPort string, state *builderState) ht
 		data.CurrentStep = parseStepParam(r.URL.Query().Get("step"))
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := bootstrapSetupTmpl.Execute(w, data); err != nil {
-			log.Printf("[BOOTSTRAP:ERROR] render setup page: %v", err)
+			loglevel.Warnf("[BOOTSTRAP:ERROR] render setup page: %v", err)
 		}
 	}
 }

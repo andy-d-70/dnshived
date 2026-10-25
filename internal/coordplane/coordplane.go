@@ -7,10 +7,10 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"dnshived/internal/loglevel"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -172,7 +172,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.role != "core-3" {
-		log.Printf("[COORDPLANE:COORDINATE] processing config push as %s (role=%s) — core-3 (the mgmt VIP's preferred holder) is presumably unreachable, standing in as coordinator", s.nodeID, s.role)
+		loglevel.Infof("[COORDPLANE:COORDINATE] processing config push as %s (role=%s) — core-3 (the mgmt VIP's preferred holder) is presumably unreachable, standing in as coordinator", s.nodeID, s.role)
 	}
 
 	selfDoc, haveSelf := req.Documents[s.selfAddr]
@@ -207,12 +207,12 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	for key, res := range results {
 		if !res.OK {
 			overall = "partial"
-			log.Printf("[COORDPLANE:PUSH_FAIL] peer %s rejected or unreachable: %s", key, res.Error)
+			loglevel.Warnf("[COORDPLANE:PUSH_FAIL] peer %s rejected or unreachable: %s", key, res.Error)
 			continue
 		}
 		if key != s.selfAddr && res.Checksum != selfChecksum {
 			overall = "partial"
-			log.Printf("[COORDPLANE:CHECKSUM_MISMATCH] peer %s checksum=%s want=%s", key, res.Checksum, selfChecksum)
+			loglevel.Warnf("[COORDPLANE:CHECKSUM_MISMATCH] peer %s checksum=%s want=%s", key, res.Checksum, selfChecksum)
 		}
 	}
 
@@ -248,7 +248,7 @@ func (s *Server) relayToPeersConcurrently(req configRequest, results map[string]
 
 func (s *Server) relayToPeersSequentially(req configRequest, results map[string]PeerResult) {
 	peers := s.currentPeers()
-	log.Printf("[COORDPLANE:STAGGER] config push affects central DHCP — relaying to %d peer(s) sequentially with a %s settle wait between each", len(peers), dhcpStaggerSettle)
+	loglevel.Infof("[COORDPLANE:STAGGER] config push affects central DHCP — relaying to %d peer(s) sequentially with a %s settle wait between each", len(peers), dhcpStaggerSettle)
 	for i, addr := range peers {
 		peerDoc, ok := req.Documents[addr]
 		var res PeerResult

@@ -6,12 +6,12 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
+	"dnshived/internal/loglevel"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -300,31 +300,31 @@ var bootstrapUnitFunc = func(action, unit string) error {
 func writeAndStartWebUI(webUsersJSON, webConfigJSON, tlsCertPEM, tlsKeyPEM []byte) {
 	if len(webUsersJSON) > 0 {
 		if err := os.WriteFile(webUIUsersFile, webUsersJSON, 0o600); err != nil {
-			log.Printf("[BOOTSTRAP:WEBUI] write %s: %v", webUIUsersFile, err)
+			loglevel.Warnf("[BOOTSTRAP:WEBUI] write %s: %v", webUIUsersFile, err)
 		}
 		chownDnshived(webUIUsersFile)
 	}
 	if len(webConfigJSON) > 0 {
 		if err := os.WriteFile("/etc/dnshived/web.json", webConfigJSON, 0o640); err != nil {
-			log.Printf("[BOOTSTRAP:WEBUI] write web.json: %v", err)
+			loglevel.Warnf("[BOOTSTRAP:WEBUI] write web.json: %v", err)
 		}
 		chownDnshived("/etc/dnshived/web.json")
 	}
 	if len(tlsCertPEM) > 0 && len(tlsKeyPEM) > 0 {
 		if err := os.WriteFile(webUITLSCertFile, tlsCertPEM, 0o644); err != nil {
-			log.Printf("[BOOTSTRAP:WEBUI] write %s: %v", webUITLSCertFile, err)
+			loglevel.Warnf("[BOOTSTRAP:WEBUI] write %s: %v", webUITLSCertFile, err)
 		}
 		chownDnshived(webUITLSCertFile)
 		if err := os.WriteFile(webUITLSKeyFile, tlsKeyPEM, 0o600); err != nil {
-			log.Printf("[BOOTSTRAP:WEBUI] write %s: %v", webUITLSKeyFile, err)
+			loglevel.Warnf("[BOOTSTRAP:WEBUI] write %s: %v", webUITLSKeyFile, err)
 		}
 		chownDnshived(webUITLSKeyFile)
 	}
 	if len(webUsersJSON) > 0 && len(webConfigJSON) > 0 {
 		if err := startWebUI(); err != nil {
-			log.Printf("[BOOTSTRAP:WEBUI] start dnshived-web: %v", err)
+			loglevel.Warnf("[BOOTSTRAP:WEBUI] start dnshived-web: %v", err)
 		} else {
-			log.Printf("[BOOTSTRAP:WEBUI] dnshived-web started")
+			loglevel.Infof("[BOOTSTRAP:WEBUI] dnshived-web started")
 		}
 	}
 }
@@ -334,17 +334,17 @@ func writeAndStartWebUI(webUsersJSON, webConfigJSON, tlsCertPEM, tlsKeyPEM []byt
 func chownDnshived(path string) {
 	u, err := user.Lookup("dnshived")
 	if err != nil {
-		log.Printf("[BOOTSTRAP:WEBUI] chown %s: lookup dnshived user: %v", path, err)
+		loglevel.Warnf("[BOOTSTRAP:WEBUI] chown %s: lookup dnshived user: %v", path, err)
 		return
 	}
 	uid, err1 := strconv.Atoi(u.Uid)
 	gid, err2 := strconv.Atoi(u.Gid)
 	if err1 != nil || err2 != nil {
-		log.Printf("[BOOTSTRAP:WEBUI] chown %s: parse dnshived uid/gid: %v / %v", path, err1, err2)
+		loglevel.Warnf("[BOOTSTRAP:WEBUI] chown %s: parse dnshived uid/gid: %v / %v", path, err1, err2)
 		return
 	}
 	if err := os.Chown(path, uid, gid); err != nil {
-		log.Printf("[BOOTSTRAP:WEBUI] chown %s to dnshived: %v", path, err)
+		loglevel.Warnf("[BOOTSTRAP:WEBUI] chown %s to dnshived: %v", path, err)
 	}
 }
 
@@ -888,10 +888,10 @@ func writeLocalClusterConfig(cfgPath string, payload adoptPayload) error {
 			os.MkdirAll(filepath.Dir(c.TLSCert), 0o755)
 			os.MkdirAll(filepath.Dir(c.TLSKey), 0o755)
 			if err := os.WriteFile(c.TLSCert, payload.CoreTLSCertPEM, 0o644); err != nil {
-				log.Printf("[BOOTSTRAP:COMMIT] write core TLS cert %s: %v", c.TLSCert, err)
+				loglevel.Warnf("[BOOTSTRAP:COMMIT] write core TLS cert %s: %v", c.TLSCert, err)
 			}
 			if err := os.WriteFile(c.TLSKey, payload.CoreTLSKeyPEM, 0o600); err != nil {
-				log.Printf("[BOOTSTRAP:COMMIT] write core TLS key %s: %v", c.TLSKey, err)
+				loglevel.Warnf("[BOOTSTRAP:COMMIT] write core TLS key %s: %v", c.TLSKey, err)
 			}
 		}
 	}
@@ -899,21 +899,21 @@ func writeLocalClusterConfig(cfgPath string, payload adoptPayload) error {
 	writeAndStartWebUI(payload.WebUsersJSON, payload.WebConfigJSON, payload.TLSCertPEM, payload.TLSKeyPEM)
 	reenableHelperAfterAdopt()
 	stopProbeDaemonsOnThisHost()
-	log.Printf("[BOOTSTRAP:COMMIT] wrote this node's own cluster config — restarting as a configured daemon")
+	loglevel.Infof("[BOOTSTRAP:COMMIT] wrote this node's own cluster config — restarting as a configured daemon")
 	return nil
 }
 
 // reenableHelperAfterAdopt re-enables dnshived-helper.service.
 func reenableHelperAfterAdopt() {
 	if err := bootstrapUnitFunc("enable", "dnshived-helper.service"); err != nil {
-		log.Printf("[BOOTSTRAP:COMMIT] enable dnshived-helper.service: %v", err)
+		loglevel.Warnf("[BOOTSTRAP:COMMIT] enable dnshived-helper.service: %v", err)
 	}
 }
 
 func stopProbeDaemonsOnThisHost() {
 	for _, unit := range []string{"dnshived-probe.service", "dnshived-probe-helper.service"} {
 		if err := bootstrapUnitFunc("disable-now", unit); err != nil {
-			log.Printf("[BOOTSTRAP:COMMIT] stop/disable %s (mutual exclusion with this node's new core role): %v", unit, err)
+			loglevel.Warnf("[BOOTSTRAP:COMMIT] stop/disable %s (mutual exclusion with this node's new core role): %v", unit, err)
 		}
 	}
 }

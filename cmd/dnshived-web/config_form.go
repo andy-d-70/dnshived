@@ -38,7 +38,7 @@ moved to <a href="/probes#settings">probes &rarr;</a>.</p>
 {{end}}</textarea></td></tr>
 <tr><td>tls_cert</td><td><input name="tls_cert" value="{{.Cluster.TLSCert}}" size="60"></td></tr>
 <tr><td>tls_key</td><td><input type="text" name="tls_key" value="{{.Cluster.TLSKey}}" size="60"> (a filesystem path, not the key material itself — not sensitive)</td></tr>
-<tr><td>log_level <span class="info-ico" title="auto (the default, leave this alone unless actively debugging) picks a sensible level on its own; debug is very verbose and meant for short-lived troubleshooting, not routine operation — remember to set it back afterward.">ⓘ</span></td><td>
+<tr><td>log_level <span class="info-ico" title="auto (default): info, plus debug detail for a subsystem for 5 minutes after it warns, and a summary of suppressed routine messages every 10 minutes. info: state changes (scope gained or lost, VRRP, DHCP gate, failover, config commits, nodes joining or leaving). warning: errors, failures, denials and refusals only. debug: every routine success (witness renewals, peer pings, probe results) — very verbose, for short troubleshooting.">ⓘ</span></td><td>
   <select name="log_level">
     <option value="" {{if eq .Cluster.LogLevel ""}}selected{{end}}>auto</option>
     <option value="debug" {{if eq .Cluster.LogLevel "debug"}}selected{{end}}>debug</option>

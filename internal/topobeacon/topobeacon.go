@@ -7,8 +7,8 @@ package topobeacon
 
 import (
 	"context"
+	"dnshived/internal/loglevel"
 	"encoding/json"
-	"log"
 	"net"
 	"sync"
 	"syscall"
@@ -256,14 +256,14 @@ func SendOnInterface(ctx context.Context, role string, spec IfaceSpec, interval 
 
 	payload, err := json.Marshal(Beacon{Magic: Magic, Role: role, Iface: spec.Name, Kind: spec.Kind})
 	if err != nil {
-		log.Printf("[TOPOBEACON:ERROR] marshal beacon for %s: %v", spec.Name, err)
+		loglevel.Warnf("[TOPOBEACON:ERROR] marshal beacon for %s: %v", spec.Name, err)
 		return
 	}
 
 	lc := bindToDeviceUDP4(spec.Name)
 	pc, err := lc.ListenPacket(ctx, "udp4", ":0")
 	if err != nil {
-		log.Printf("[TOPOBEACON:ERROR] bind send socket on %s: %v", spec.Name, err)
+		loglevel.Warnf("[TOPOBEACON:ERROR] bind send socket on %s: %v", spec.Name, err)
 		return
 	}
 	defer pc.Close()
@@ -274,9 +274,9 @@ func SendOnInterface(ctx context.Context, role string, spec IfaceSpec, interval 
 		_, err := pc.WriteTo(payload, dst)
 		switch {
 		case err != nil && !failing:
-			log.Printf("[TOPOBEACON:ERROR] send beacon on %s: %v", spec.Name, err)
+			loglevel.Warnf("[TOPOBEACON:ERROR] send beacon on %s: %v", spec.Name, err)
 		case err == nil && failing:
-			log.Printf("[TOPOBEACON:RECOVERED] beacon send on %s works again", spec.Name)
+			loglevel.Infof("[TOPOBEACON:RECOVERED] beacon send on %s works again", spec.Name)
 		}
 		failing = err != nil
 	}
@@ -299,7 +299,7 @@ func listenOnInterface(ctx context.Context, spec IfaceSpec, store *Store) {
 	lc := bindToDeviceUDP4(spec.Name)
 	pc, err := lc.ListenPacket(ctx, "udp4", ":"+itoa(Port))
 	if err != nil {
-		log.Printf("[TOPOBEACON:ERROR] bind listen socket on %s: %v", spec.Name, err)
+		loglevel.Warnf("[TOPOBEACON:ERROR] bind listen socket on %s: %v", spec.Name, err)
 		return
 	}
 	defer pc.Close()
@@ -358,6 +358,6 @@ func linkUp(iface string) {
 		return
 	}
 	if err := LinkUp(iface); err != nil {
-		log.Printf("[TOPOBEACON:WARN] bring %s up before beaconing: %v", iface, err)
+		loglevel.Warnf("[TOPOBEACON:WARN] bring %s up before beaconing: %v", iface, err)
 	}
 }

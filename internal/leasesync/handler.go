@@ -5,9 +5,9 @@ package leasesync
 
 import (
 	"bytes"
+	"dnshived/internal/loglevel"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 
 	"dnshived/internal/trustedhosts"
@@ -64,7 +64,7 @@ type fingerprintResponse struct {
 
 func (h *Handler) handleFingerprint(w http.ResponseWriter, r *http.Request) {
 	if !h.trustedHosts.Allowed(r.RemoteAddr) {
-		log.Printf("[LEASESYNC:DENY_UNTRUSTED] request from untrusted host: remote_addr=%s", r.RemoteAddr)
+		loglevel.Warnf("[LEASESYNC:DENY_UNTRUSTED] request from untrusted host: remote_addr=%s", r.RemoteAddr)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -81,7 +81,7 @@ func (h *Handler) handleFingerprint(w http.ResponseWriter, r *http.Request) {
 // never unconditionally.
 func (h *Handler) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 	if !h.trustedHosts.Allowed(r.RemoteAddr) {
-		log.Printf("[LEASESYNC:DENY_UNTRUSTED] request from untrusted host: remote_addr=%s", r.RemoteAddr)
+		loglevel.Warnf("[LEASESYNC:DENY_UNTRUSTED] request from untrusted host: remote_addr=%s", r.RemoteAddr)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -95,7 +95,7 @@ func (h *Handler) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {
 	if !h.trustedHosts.Allowed(r.RemoteAddr) {
-		log.Printf("[LEASESYNC:DENY_UNTRUSTED] request from untrusted host: remote_addr=%s", r.RemoteAddr)
+		loglevel.Warnf("[LEASESYNC:DENY_UNTRUSTED] request from untrusted host: remote_addr=%s", r.RemoteAddr)
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}

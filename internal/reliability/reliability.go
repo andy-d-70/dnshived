@@ -4,8 +4,8 @@
 package reliability
 
 import (
+	"dnshived/internal/loglevel"
 	"encoding/json"
-	"log"
 	"os"
 	"sync"
 	"time"
@@ -65,7 +65,7 @@ func NewStore(path string) *Store {
 	}
 	var loaded map[string]Entry
 	if err := json.Unmarshal(data, &loaded); err != nil {
-		log.Printf("[RELIABILITY:WARN] %s corrupt, ignoring: %v", path, err)
+		loglevel.Warnf("[RELIABILITY:WARN] %s corrupt, ignoring: %v", path, err)
 		return s
 	}
 	s.data = loaded
@@ -81,7 +81,7 @@ func (s *Store) Observe(key string, healthyNow bool) int {
 
 	if s.path != "" {
 		if err := save(s.path, s.cloneLocked()); err != nil {
-			log.Printf("[RELIABILITY:WARN] persist %s: %v", s.path, err)
+			loglevel.Warnf("[RELIABILITY:WARN] persist %s: %v", s.path, err)
 		}
 	}
 	return next.Score
@@ -119,7 +119,7 @@ func (s *Store) Reset(key string) {
 
 	if s.path != "" {
 		if err := save(s.path, s.cloneLocked()); err != nil {
-			log.Printf("[RELIABILITY:WARN] persist %s: %v", s.path, err)
+			loglevel.Warnf("[RELIABILITY:WARN] persist %s: %v", s.path, err)
 		}
 	}
 }
@@ -136,7 +136,7 @@ func (s *Store) RestoreAll(entries map[string]Entry) {
 
 	if s.path != "" {
 		if err := save(s.path, s.cloneLocked()); err != nil {
-			log.Printf("[RELIABILITY:WARN] persist %s: %v", s.path, err)
+			loglevel.Warnf("[RELIABILITY:WARN] persist %s: %v", s.path, err)
 		}
 	}
 }

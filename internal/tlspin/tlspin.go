@@ -10,11 +10,11 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"crypto/tls"
+	"dnshived/internal/loglevel"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"sync"
 )
@@ -33,7 +33,7 @@ func SetFile(path string) {
 	pin.mu.Unlock()
 	if path != "" {
 		if err := reload(); err != nil {
-			log.Printf("[TLS] cannot read the cluster certificate %s for pinning: %v — connections to cluster peers will fail until it is readable", path, err)
+			loglevel.Warnf("[TLS] cannot read the cluster certificate %s for pinning: %v — connections to cluster peers will fail until it is readable", path, err)
 		}
 	}
 }
@@ -93,7 +93,7 @@ func verifyPeer(cs tls.ConnectionState) error {
 		pin.mu.Lock()
 		if !pin.warned {
 			pin.warned = true
-			log.Printf("[TLS] no cluster certificate configured — connections to cluster peers are not verified")
+			loglevel.Infof("[TLS] no cluster certificate configured — connections to cluster peers are not verified")
 		}
 		pin.mu.Unlock()
 		return nil

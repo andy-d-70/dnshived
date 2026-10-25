@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"crypto/tls"
+	"dnshived/internal/loglevel"
 	"encoding/hex"
 	"encoding/json"
 	"html/template"
@@ -251,9 +252,9 @@ func runBootstrapMode(cfgPath, addr, tlsAddr, dataDir, otpPath string) {
 	paths := bootstrapPaths(cfgPath, dataDir)
 	findings := bootstrap.DetectExisting(paths)
 	if !findings.Fresh() {
-		log.Printf("[BOOTSTRAP:REFUSE] %s is missing, but this node isn't fresh — refusing to auto-bootstrap", cfgPath)
-		log.Printf("[BOOTSTRAP:REFUSE] found: %s", findings.String())
-		log.Printf("[BOOTSTRAP:REFUSE] resolve this by hand before retrying — this is not a self-service action")
+		loglevel.Warnf("[BOOTSTRAP:REFUSE] %s is missing, but this node isn't fresh — refusing to auto-bootstrap", cfgPath)
+		loglevel.Warnf("[BOOTSTRAP:REFUSE] found: %s", findings.String())
+		loglevel.Warnf("[BOOTSTRAP:REFUSE] resolve this by hand before retrying — this is not a self-service action")
 		os.Exit(1)
 	}
 
@@ -270,12 +271,12 @@ func runBootstrapMode(cfgPath, addr, tlsAddr, dataDir, otpPath string) {
 		hostname = "unknown"
 	}
 
-	log.Printf("[BOOTSTRAP:READY] this node is not yet configured (no %s)", cfgPath)
-	log.Printf("[BOOTSTRAP:READY] hostname: %s", hostname)
-	log.Printf("[BOOTSTRAP:READY] join code: %s (the same code for a core role and for a probe role)", otp)
-	log.Printf("[BOOTSTRAP:READY] open http://%s/ (or https://%s/, self-signed) and enter the join code above to continue", addr, tlsAddr)
+	loglevel.Infof("[BOOTSTRAP:READY] this node is not yet configured (no %s)", cfgPath)
+	loglevel.Infof("[BOOTSTRAP:READY] hostname: %s", hostname)
+	loglevel.Infof("[BOOTSTRAP:READY] join code: %s (the same code for a core role and for a probe role)", otp)
+	loglevel.Infof("[BOOTSTRAP:READY] open http://%s/ (or https://%s/, self-signed) and enter the join code above to continue", addr, tlsAddr)
 
-	log.Printf("[DISCOVERY] broadcasting as unclaimed on port %d every 5s", discovery.Port)
+	loglevel.Infof("[DISCOVERY] broadcasting as unclaimed on port %d every 5s", discovery.Port)
 	go discovery.Broadcast(context.Background(), hostname, version, discovery.PortFromAddr(addr, 80))
 
 	mux := newBootstrapMux(hostname, otp, cfgPath, &builderState{}, &bootstrapSession{})
@@ -291,7 +292,7 @@ func runBootstrapMode(cfgPath, addr, tlsAddr, dataDir, otpPath string) {
 	tlsSrv := &http.Server{Addr: tlsAddr, Handler: mux, TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}}
 	go func() {
 		if err := tlsSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
-			log.Printf("[BOOTSTRAP:INIT] https listener on %s: %v", tlsAddr, err)
+			loglevel.Warnf("[BOOTSTRAP:INIT] https listener on %s: %v", tlsAddr, err)
 		}
 	}()
 

@@ -10,6 +10,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"dnshived/internal/loglevel"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -678,7 +679,7 @@ func (a *Agent) StartTopoBeacon(ctx context.Context, role string, interval time.
 	a.topoCtx = ctx
 	a.mu.Unlock()
 	if !a.RefreshTopoBeacon() {
-		log.Printf("[AGENT:SKIP] topology beacon has no interface yet (no scopes, no mgmt interface) — picked up as soon as one is configured")
+		loglevel.Infof("[AGENT:SKIP] topology beacon has no interface yet (no scopes, no mgmt interface) — picked up as soon as one is configured")
 	}
 	return store
 }
@@ -693,7 +694,7 @@ func (a *Agent) RefreshTopoBeacon() bool {
 	specs := a.topoBeaconIfaceSpecs()
 	added, removed := runner.Update(ctx, specs)
 	if len(added) > 0 || len(removed) > 0 {
-		log.Printf("[AGENT:TOPOBEACON] beacon interfaces now %v (started %v, stopped %v)", specNames(specs), specNames(added), specNames(removed))
+		loglevel.Infof("[AGENT:TOPOBEACON] beacon interfaces now %v (started %v, stopped %v)", specNames(specs), specNames(added), specNames(removed))
 	}
 	var trunks []string
 	for _, sp := range specs {
@@ -847,10 +848,10 @@ func (a *Agent) StartScopeBeacons(ctx context.Context, role string, onUnreachabl
 	a.scopeBeaconRunner = topobeacon.NewScopeBeaconRunner(role, psk, monitor)
 	targets := a.scopeBeaconTargets()
 	if len(targets) == 0 {
-		log.Printf("[AGENT:SKIP] scope beacon not started — no (scope, peer) pairing could be resolved yet")
+		loglevel.Infof("[AGENT:SKIP] scope beacon not started — no (scope, peer) pairing could be resolved yet")
 		return monitor
 	}
-	log.Printf("[AGENT:SCOPEBEACON] starting on %d (scope, peer) pairing(s)", len(targets))
+	loglevel.Infof("[AGENT:SCOPEBEACON] starting on %d (scope, peer) pairing(s)", len(targets))
 	a.scopeBeaconRunner.Update(ctx, targets)
 	return monitor
 }
@@ -926,7 +927,7 @@ func (a *Agent) ConstructPlane() {
 	defer a.constructMu.Unlock()
 
 	if !timehealth.IsHealthy(5 * time.Second) {
-		log.Printf("[AGENT:WARN] time unhealthy, proceeding with plane construction")
+		loglevel.Warnf("[AGENT:WARN] time unhealthy, proceeding with plane construction")
 	}
 
 	allScopes := a.allScopes()
@@ -976,7 +977,7 @@ func (a *Agent) ConstructPlane() {
 		a.mu.Unlock()
 	}
 
-	log.Printf("[AGENT:PLANE] network plane constructed: %d/%d scope(s)%s",
+	loglevel.Infof("[AGENT:PLANE] network plane constructed: %d/%d scope(s)%s",
 		built, len(allScopes), retryNote(built < len(allScopes) || !a.keepalivedReady || !a.relayReady || !a.dnsRelayReady || !a.coreDNSReady || !a.coreDHCPReady))
 }
 
@@ -999,19 +1000,19 @@ func (a *Agent) constructScope(name string, sc config.ScopeConfig) bool {
 
 	if !a.shouldSkipInterfaceRebuild(name, iface) {
 		if err := a.createInterface(name, sc); err != nil {
-			log.Printf("[AGENT:ERROR] scope %s: create interface %s: %v", name, iface, err)
+			loglevel.Warnf("[AGENT:ERROR] scope %s: create interface %s: %v", name, iface, err)
 			return false
 		}
 	}
 
 	if err := a.stopDnsmasqUnit(name); err != nil {
-		log.Printf("[AGENT:WARN] scope %s: stop leftover per-scope dnsmasq: %v (continuing)", name, err)
+		loglevel.Warnf("[AGENT:WARN] scope %s: stop leftover per-scope dnsmasq: %v (continuing)", name, err)
 	}
 
 	if sc.DNSMasqDisabled {
-		log.Printf("[AGENT:PLANE] scope %s constructed on %s (disabled by operator — excluded from DHCP relay and DNS relay, VLAN/VIP still active)", name, iface)
+		loglevel.Infof("[AGENT:PLANE] scope %s constructed on %s (disabled by operator — excluded from DHCP relay and DNS relay, VLAN/VIP still active)", name, iface)
 	} else {
-		log.Printf("[AGENT:PLANE] scope %s constructed on %s (DNS via dnshived-dnsrelay, DHCP via relay once eligible, gate closed)", name, iface)
+		loglevel.Infof("[AGENT:PLANE] scope %s constructed on %s (DNS via dnshived-dnsrelay, DHCP via relay once eligible, gate closed)", name, iface)
 	}
 	return true
 }
@@ -1021,14 +1022,14 @@ func (a *Agent) constructScope(name string, sc config.ScopeConfig) bool {
 func (a *Agent) constructKeepalivedPlane(extraReady map[string]bool) bool {
 
 	if err := a.renderKeepalivedConfigAll(nil, extraReady); err != nil {
-		log.Printf("[AGENT:ERROR] render consolidated keepalived config: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] render consolidated keepalived config: %v", err)
 		return false
 	}
 	if err := a.ensureKeepalivedRunning(); err != nil {
-		log.Printf("[AGENT:ERROR] start consolidated keepalived: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] start consolidated keepalived: %v", err)
 		return false
 	}
-	log.Printf("[AGENT:PLANE] consolidated keepalived running (%d scope instance(s))", a.scopeCount())
+	loglevel.Debugf("[AGENT:PLANE] consolidated keepalived running (%d scope instance(s))", a.scopeCount())
 	return true
 }
 
@@ -1044,23 +1045,23 @@ func (a *Agent) constructRelayPlane() bool {
 	relayScopes := relayEligibleScopes(allScopes, a.batchedDnsmasqActiveChecker())
 
 	if len(relayScopes) == 0 {
-		log.Printf("[AGENT:SKIP] dnshived-relay not started — no scope is relay-eligible yet (0/%d, still on per-scope dnsmasq or missing node_ip)", len(allScopes))
+		loglevel.Infof("[AGENT:SKIP] dnshived-relay not started — no scope is relay-eligible yet (0/%d, still on per-scope dnsmasq or missing node_ip)", len(allScopes))
 		return true
 	}
 
 	restarted, throttled, err := a.applyRelayConfig(relayScopes)
 	if err != nil {
-		log.Printf("[AGENT:ERROR] apply relay config: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] apply relay config: %v", err)
 		return false
 	}
 	if throttled {
-		log.Printf("[AGENT:RATE_LIMIT] dnshived-relay restart suppressed — will retry next tick")
+		loglevel.Infof("[AGENT:RATE_LIMIT] dnshived-relay restart suppressed — will retry next tick")
 		return false
 	}
 	if restarted {
-		log.Printf("[AGENT:RELAY_APPLIED] dnshived-relay (config not yet applied to the running process — reloaded live via SIGHUP if already running, no other VLAN disturbed; a genuine first start/crash-recovery still restarts, see reloadRelayUnit/restartRelayUnit's own doc comments)")
+		loglevel.Infof("[AGENT:RELAY_APPLIED] dnshived-relay (config not yet applied to the running process — reloaded live via SIGHUP if already running, no other VLAN disturbed; a genuine first start/crash-recovery still restarts, see reloadRelayUnit/restartRelayUnit's own doc comments)")
 	}
-	log.Printf("[AGENT:PLANE] dnshived-relay running (%d/%d scope(s) relay-eligible)", len(relayScopes), len(allScopes))
+	loglevel.Debugf("[AGENT:PLANE] dnshived-relay running (%d/%d scope(s) relay-eligible)", len(relayScopes), len(allScopes))
 	return true
 }
 
@@ -1118,22 +1119,22 @@ func (a *Agent) refreshRelayConfig() {
 	if len(relayScopes) == 0 {
 		if a.unitActive("dnshived-relay.service") {
 			if err := a.stopRelayUnit(); err != nil {
-				log.Printf("[AGENT:ERROR] stop dnshived-relay (zero eligible scopes): %v", err)
+				loglevel.Warnf("[AGENT:ERROR] stop dnshived-relay (zero eligible scopes): %v", err)
 				return
 			}
-			log.Printf("[AGENT:RELAY_APPLIED] dnshived-relay stopped — zero scope is relay-eligible")
+			loglevel.Infof("[AGENT:RELAY_APPLIED] dnshived-relay stopped — zero scope is relay-eligible")
 		}
 		return
 	}
 	restarted, throttled, err := a.applyRelayConfig(relayScopes)
 	if err != nil {
-		log.Printf("[AGENT:ERROR] refresh relay config: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] refresh relay config: %v", err)
 		return
 	}
 	if throttled || !restarted {
 		return
 	}
-	log.Printf("[AGENT:RELAY_APPLIED] dnshived-relay (scope change picked up — reloaded live via SIGHUP, no other VLAN disturbed; see reloadRelayUnit's own doc comment)")
+	loglevel.Infof("[AGENT:RELAY_APPLIED] dnshived-relay (scope change picked up — reloaded live via SIGHUP, no other VLAN disturbed; see reloadRelayUnit's own doc comment)")
 }
 
 // DNSRelayConfigPath matches dnshived-dnsrelay's own --config default
@@ -1150,23 +1151,23 @@ func (a *Agent) constructDNSRelayPlane() bool {
 
 	allScopes := a.allScopes()
 	if len(allScopes) == 0 {
-		log.Printf("[AGENT:SKIP] dnshived-dnsrelay not started — no scope configured yet")
+		loglevel.Infof("[AGENT:SKIP] dnshived-dnsrelay not started — no scope configured yet")
 		return true
 	}
 
 	restarted, throttled, err := a.applyDNSRelayConfig(allScopes)
 	if err != nil {
-		log.Printf("[AGENT:ERROR] apply dnsrelay config: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] apply dnsrelay config: %v", err)
 		return false
 	}
 	if throttled {
-		log.Printf("[AGENT:RATE_LIMIT] dnshived-dnsrelay restart suppressed — will retry next tick")
+		loglevel.Infof("[AGENT:RATE_LIMIT] dnshived-dnsrelay restart suppressed — will retry next tick")
 		return false
 	}
 	if restarted {
-		log.Printf("[AGENT:DNSRELAY_APPLIED] dnshived-dnsrelay (reloaded live via SIGHUP if already running, no other VLAN disturbed; a genuine first start/crash-recovery still restarts)")
+		loglevel.Infof("[AGENT:DNSRELAY_APPLIED] dnshived-dnsrelay (reloaded live via SIGHUP if already running, no other VLAN disturbed; a genuine first start/crash-recovery still restarts)")
 	}
-	log.Printf("[AGENT:PLANE] dnshived-dnsrelay running (%d scope(s) configured)", len(allScopes))
+	loglevel.Debugf("[AGENT:PLANE] dnshived-dnsrelay running (%d scope(s) configured)", len(allScopes))
 	return true
 }
 
@@ -1246,42 +1247,42 @@ func (a *Agent) refreshDNSRelayConfig() {
 	if eligible == 0 {
 		if a.unitActive("dnshived-dnsrelay.service") {
 			if err := a.stopDNSRelayUnit(); err != nil {
-				log.Printf("[AGENT:ERROR] stop dnshived-dnsrelay (zero eligible scopes): %v", err)
+				loglevel.Warnf("[AGENT:ERROR] stop dnshived-dnsrelay (zero eligible scopes): %v", err)
 				return
 			}
-			log.Printf("[AGENT:DNSRELAY_APPLIED] dnshived-dnsrelay stopped — zero scope is relay-eligible")
+			loglevel.Infof("[AGENT:DNSRELAY_APPLIED] dnshived-dnsrelay stopped — zero scope is relay-eligible")
 		}
 		return
 	}
 	restarted, throttled, err := a.applyDNSRelayConfig(allScopes)
 	if err != nil {
-		log.Printf("[AGENT:ERROR] refresh dnsrelay config: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] refresh dnsrelay config: %v", err)
 		return
 	}
 	if throttled || !restarted {
 		return
 	}
-	log.Printf("[AGENT:DNSRELAY_APPLIED] dnshived-dnsrelay (scope change picked up — reloaded live via SIGHUP, no other VLAN disturbed)")
+	loglevel.Infof("[AGENT:DNSRELAY_APPLIED] dnshived-dnsrelay (scope change picked up — reloaded live via SIGHUP, no other VLAN disturbed)")
 }
 
 func (a *Agent) refreshCoreDNSConfig() {
 	restarted, throttled, err := a.applyCoreDNSConfig()
 	if err != nil {
-		log.Printf("[AGENT:ERROR] refresh dnsmasq.central config: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] refresh dnsmasq.central config: %v", err)
 		return
 	}
 	if throttled || !restarted {
 		return
 	}
-	log.Printf("[AGENT:DNSMASQ_RESTART] dnshived-dnsmasq@core-dns (scope change picked up)")
+	loglevel.Infof("[AGENT:DNSMASQ_RESTART] dnshived-dnsmasq@core-dns (scope change picked up)")
 }
 
 func (a *Agent) refreshCoreDHCPConfig() {
 	restarted, throttled, err := a.applyCoreDHCPConfig()
 	if err != nil {
-		log.Printf("[AGENT:ERROR] refresh central DHCP config: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] refresh central DHCP config: %v", err)
 	} else if !throttled && restarted {
-		log.Printf("[AGENT:DNSMASQ_RESTART] dnshived-dnsmasq@core-dhcp (scope change picked up)")
+		loglevel.Infof("[AGENT:DNSMASQ_RESTART] dnshived-dnsmasq@core-dhcp (scope change picked up)")
 	}
 	a.pruneAndApplyDHCPHosts()
 }
@@ -1291,19 +1292,19 @@ func (a *Agent) pruneAndApplyDHCPHosts() {
 	prunedLocal := a.localDHCPLeases.PruneExpired(now)
 	prunedPeer := a.peerDHCPLeases.PruneExpired(now)
 	if prunedLocal > 0 || prunedPeer > 0 {
-		log.Printf("[AGENT:LEASESYNC] pruned %d local + %d peer expired shadow lease(s)", prunedLocal, prunedPeer)
+		loglevel.Infof("[AGENT:LEASESYNC] pruned %d local + %d peer expired shadow lease(s)", prunedLocal, prunedPeer)
 	}
 	if _, _, err := a.applyCoreDHCPHostsFile(); err != nil {
-		log.Printf("[AGENT:ERROR] apply central DHCP hosts file: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] apply central DHCP hosts file: %v", err)
 	}
 	if _, _, err := a.applyCoreDNSDynamicHostsFile(); err != nil {
-		log.Printf("[AGENT:ERROR] apply central DNS dynamic hosts file: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] apply central DNS dynamic hosts file: %v", err)
 	}
 	if err := a.localDHCPLeases.FlushIfDirty(); err != nil {
-		log.Printf("[AGENT:ERROR] persist local lease store: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] persist local lease store: %v", err)
 	}
 	if err := a.peerDHCPLeases.FlushIfDirty(); err != nil {
-		log.Printf("[AGENT:ERROR] persist peer lease store: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] persist peer lease store: %v", err)
 	}
 }
 
@@ -1509,14 +1510,14 @@ func (a *Agent) HandleLocalLeaseEvent(action, mac, ip, hostname string, expiresA
 		a.localDHCPLeases.Remove(mac)
 		wireAction = "remove"
 	default:
-		log.Printf("[AGENT:LEASESYNC] ignoring unknown dhcp-script action %q for mac=%s", action, mac)
+		loglevel.Warnf("[AGENT:LEASESYNC] ignoring unknown dhcp-script action %q for mac=%s", action, mac)
 		return
 	}
 	if _, _, err := a.applyCoreDHCPHostsFile(); err != nil {
-		log.Printf("[AGENT:ERROR] apply central DHCP hosts file: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] apply central DHCP hosts file: %v", err)
 	}
 	if _, _, err := a.applyCoreDNSDynamicHostsFile(); err != nil {
-		log.Printf("[AGENT:ERROR] apply central DNS dynamic hosts file: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] apply central DNS dynamic hosts file: %v", err)
 	}
 	a.pushLeaseToPeer(mac, ip, hostname, expiresAt, wireAction)
 }
@@ -1542,7 +1543,7 @@ func (a *Agent) pushLeaseToPeer(mac, ip, hostname string, expiresAt int64, wireA
 	for _, addr := range a.observer.AllPeerAddrs() {
 		l := leasesync.SyncedLease{MAC: mac, IP: ip, ExpiresAt: expiresAt, Hostname: hostname}
 		if err := leasesync.Push(a.witnessHTTPClient(), a.witnessScheme(), addr, l, wireAction); err != nil {
-			log.Printf("[AGENT:LEASESYNC] push %s to %s failed: %v", wireAction, addr, err)
+			loglevel.Warnf("[AGENT:LEASESYNC] push %s to %s failed: %v", wireAction, addr, err)
 		}
 	}
 }
@@ -1551,10 +1552,10 @@ func (a *Agent) pushLeaseToPeer(mac, ip, hostname string, expiresAt int64, wireA
 // cmd/dnshived's own main.go.
 func (a *Agent) OnPeerLeaseSync() {
 	if _, _, err := a.applyCoreDHCPHostsFile(); err != nil {
-		log.Printf("[AGENT:ERROR] apply central DHCP hosts file (peer sync): %v", err)
+		loglevel.Warnf("[AGENT:ERROR] apply central DHCP hosts file (peer sync): %v", err)
 	}
 	if _, _, err := a.applyCoreDNSDynamicHostsFile(); err != nil {
-		log.Printf("[AGENT:ERROR] apply central DNS dynamic hosts file (peer sync): %v", err)
+		loglevel.Warnf("[AGENT:ERROR] apply central DNS dynamic hosts file (peer sync): %v", err)
 	}
 }
 
@@ -1576,14 +1577,14 @@ func (a *Agent) SetLeasePersistDir(dataDir string) {
 	a.peerDHCPLeases.SetPersistPath(filepath.Join(dataDir, "leasesync-peer.json"))
 	nLocal, err := a.localDHCPLeases.LoadFromDisk()
 	if err != nil {
-		log.Printf("[AGENT:LEASESYNC] load local lease store: %v", err)
+		loglevel.Infof("[AGENT:LEASESYNC] load local lease store: %v", err)
 	}
 	nPeer, err := a.peerDHCPLeases.LoadFromDisk()
 	if err != nil {
-		log.Printf("[AGENT:LEASESYNC] load peer lease store: %v", err)
+		loglevel.Infof("[AGENT:LEASESYNC] load peer lease store: %v", err)
 	}
 	if nLocal > 0 || nPeer > 0 {
-		log.Printf("[AGENT:LEASESYNC] loaded %d local + %d peer lease(s) from disk", nLocal, nPeer)
+		loglevel.Infof("[AGENT:LEASESYNC] loaded %d local + %d peer lease(s) from disk", nLocal, nPeer)
 	}
 }
 
@@ -1660,10 +1661,10 @@ func (a *Agent) CheckLeaseSanity() []PlaneHealth {
 	}
 	if healedAny {
 		if _, _, err := a.applyCoreDHCPHostsFile(); err != nil {
-			log.Printf("[AGENT:ERROR] apply central DHCP hosts file (lease sanity self-heal): %v", err)
+			loglevel.Warnf("[AGENT:ERROR] apply central DHCP hosts file (lease sanity self-heal): %v", err)
 		}
 		if _, _, err := a.applyCoreDNSDynamicHostsFile(); err != nil {
-			log.Printf("[AGENT:ERROR] apply central DNS dynamic hosts file (lease sanity self-heal): %v", err)
+			loglevel.Warnf("[AGENT:ERROR] apply central DNS dynamic hosts file (lease sanity self-heal): %v", err)
 		}
 	}
 	return found
@@ -1716,20 +1717,20 @@ func (a *Agent) CatchUpLeases() {
 	for _, addr := range peers {
 		snap, err := leasesync.FetchSnapshot(a.witnessHTTPClient(), a.witnessScheme(), addr)
 		if err != nil {
-			log.Printf("[AGENT:LEASESYNC] catch-up fetch from %s failed: %v", addr, err)
+			loglevel.Warnf("[AGENT:LEASESYNC] catch-up fetch from %s failed: %v", addr, err)
 			continue
 		}
 		reached++
 		for _, l := range snap {
 			if existing, ok := merged[l.MAC]; ok && existing.IP != l.IP {
-				log.Printf("[AGENT:LEASESYNC] catch-up: peers disagree on mac=%s (%s vs %s) — keeping first seen", l.MAC, existing.IP, l.IP)
+				loglevel.Infof("[AGENT:LEASESYNC] catch-up: peers disagree on mac=%s (%s vs %s) — keeping first seen", l.MAC, existing.IP, l.IP)
 				continue
 			}
 			merged[l.MAC] = l
 		}
 	}
 	if reached == 0 {
-		log.Printf("[AGENT:LEASESYNC] catch-up: no peer reachable yet, starting with whatever was persisted locally")
+		loglevel.Infof("[AGENT:LEASESYNC] catch-up: no peer reachable yet, starting with whatever was persisted locally")
 		return
 	}
 	now := time.Now().Unix()
@@ -1741,13 +1742,13 @@ func (a *Agent) CatchUpLeases() {
 		a.peerDHCPLeases.Upsert(l)
 		applied++
 	}
-	log.Printf("[AGENT:LEASESYNC] catch-up: seeded %d lease(s) from %d/%d reachable peer(s)", applied, reached, len(peers))
+	loglevel.Infof("[AGENT:LEASESYNC] catch-up: seeded %d lease(s) from %d/%d reachable peer(s)", applied, reached, len(peers))
 	if applied > 0 {
 		if _, _, err := a.applyCoreDHCPHostsFile(); err != nil {
-			log.Printf("[AGENT:ERROR] apply central DHCP hosts file (catch-up): %v", err)
+			loglevel.Warnf("[AGENT:ERROR] apply central DHCP hosts file (catch-up): %v", err)
 		}
 		if _, _, err := a.applyCoreDNSDynamicHostsFile(); err != nil {
-			log.Printf("[AGENT:ERROR] apply central DNS dynamic hosts file (catch-up): %v", err)
+			loglevel.Warnf("[AGENT:ERROR] apply central DNS dynamic hosts file (catch-up): %v", err)
 		}
 	}
 }
@@ -1767,10 +1768,10 @@ func (a *Agent) SeedPeerLeasesFromRestore(entries []leasesync.SyncedLease) int {
 	}
 	if applied > 0 {
 		if _, _, err := a.applyCoreDHCPHostsFile(); err != nil {
-			log.Printf("[AGENT:ERROR] apply central DHCP hosts file (restore): %v", err)
+			loglevel.Warnf("[AGENT:ERROR] apply central DHCP hosts file (restore): %v", err)
 		}
 		if _, _, err := a.applyCoreDNSDynamicHostsFile(); err != nil {
-			log.Printf("[AGENT:ERROR] apply central DNS dynamic hosts file (restore): %v", err)
+			loglevel.Warnf("[AGENT:ERROR] apply central DNS dynamic hosts file (restore): %v", err)
 		}
 	}
 	return applied
@@ -1851,17 +1852,17 @@ func rotateLogIfNeeded(path string, threshold int64) error {
 func (a *Agent) constructCoreDNSPlane() bool {
 	restarted, throttled, err := a.applyCoreDNSConfig()
 	if err != nil {
-		log.Printf("[AGENT:ERROR] apply dnsmasq.central config: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] apply dnsmasq.central config: %v", err)
 		return false
 	}
 	if throttled {
-		log.Printf("[AGENT:RATE_LIMIT] dnshived-dnsmasq@core-dns restart suppressed — will retry next tick")
+		loglevel.Infof("[AGENT:RATE_LIMIT] dnshived-dnsmasq@core-dns restart suppressed — will retry next tick")
 		return false
 	}
 	if restarted {
-		log.Printf("[AGENT:DNSMASQ_RESTART] dnshived-dnsmasq@core-dns (config not yet applied to the running process)")
+		loglevel.Infof("[AGENT:DNSMASQ_RESTART] dnshived-dnsmasq@core-dns (config not yet applied to the running process)")
 	}
-	log.Printf("[AGENT:PLANE] dnshived-dnsmasq@core-dns running")
+	loglevel.Debugf("[AGENT:PLANE] dnshived-dnsmasq@core-dns running")
 	return true
 }
 
@@ -1907,20 +1908,20 @@ func (a *Agent) applyCoreDNSConfig() (restarted, throttled bool, err error) {
 func (a *Agent) constructCoreDHCPPlane() bool {
 	restarted, throttled, err := a.applyCoreDHCPConfig()
 	if err != nil {
-		log.Printf("[AGENT:ERROR] apply central DHCP config: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] apply central DHCP config: %v", err)
 		return false
 	}
 	if throttled {
-		log.Printf("[AGENT:RATE_LIMIT] dnshived-dnsmasq@core-dhcp restart suppressed — will retry next tick")
+		loglevel.Infof("[AGENT:RATE_LIMIT] dnshived-dnsmasq@core-dhcp restart suppressed — will retry next tick")
 		return false
 	}
 	if restarted {
-		log.Printf("[AGENT:DNSMASQ_RESTART] dnshived-dnsmasq@core-dhcp (config not yet applied to the running process)")
+		loglevel.Infof("[AGENT:DNSMASQ_RESTART] dnshived-dnsmasq@core-dhcp (config not yet applied to the running process)")
 	}
 	if _, _, err := a.applyCoreDHCPHostsFile(); err != nil {
-		log.Printf("[AGENT:ERROR] apply central DHCP hosts file: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] apply central DHCP hosts file: %v", err)
 	}
-	log.Printf("[AGENT:PLANE] dnshived-dnsmasq@core-dhcp running")
+	loglevel.Debugf("[AGENT:PLANE] dnshived-dnsmasq@core-dhcp running")
 	return true
 }
 
@@ -2046,7 +2047,7 @@ func (a *Agent) checkConfigSanity(observed map[string]sanityIfaceObservation) []
 	}
 	sort.Strings(ifaces)
 
-	log.Printf("[AGENT:SANITY] fingerprint mismatch — checking %d ready interface(s) individually: %v", len(ifaces), ifaces)
+	loglevel.Infof("[AGENT:SANITY] fingerprint mismatch — checking %d ready interface(s) individually: %v", len(ifaces), ifaces)
 
 	var found []PlaneHealth
 	var toUpdate []string
@@ -2065,7 +2066,7 @@ func (a *Agent) checkConfigSanity(observed map[string]sanityIfaceObservation) []
 			continue
 		}
 		if want != live {
-			log.Printf("[AGENT:SANITY] DRIFT: %s (scope %s) ifindex changed %d -> %d — interface was torn down and recreated under the same name, a bound socket may now point at a dead device",
+			loglevel.Warnf("[AGENT:SANITY] DRIFT: %s (scope %s) ifindex changed %d -> %d — interface was torn down and recreated under the same name, a bound socket may now point at a dead device",
 				iface, observed[iface].scope, want, live)
 			found = append(found, PlaneHealth{Scope: observed[iface].scope, What: "relay_socket_stale",
 				Detail:   fmt.Sprintf("%s's ifindex changed (%d -> %d) since last verified — the interface was torn down and recreated under the same name, reloading dhcp+dns relay to clear any stale socket", iface, want, live),
@@ -2074,26 +2075,26 @@ func (a *Agent) checkConfigSanity(observed map[string]sanityIfaceObservation) []
 		}
 	}
 	if len(firstSeen) > 0 {
-		log.Printf("[AGENT:SANITY] first observation, caching as baseline (no prior value to compare against): %v", firstSeen)
+		loglevel.Infof("[AGENT:SANITY] first observation, caching as baseline (no prior value to compare against): %v", firstSeen)
 	}
 	if len(unresolved) > 0 {
-		log.Printf("[AGENT:SANITY] %d interface(s) did not resolve this tick (ifindex 0), skipped: %v", len(unresolved), unresolved)
+		loglevel.Infof("[AGENT:SANITY] %d interface(s) did not resolve this tick (ifindex 0), skipped: %v", len(unresolved), unresolved)
 	}
 
 	if len(found) > 0 {
 		relayErr := func() error { _, err := a.reloadRelayUnit(); return err }()
 		dnsRelayErr := func() error { _, err := a.reloadDNSRelayUnit(); return err }()
 		if relayErr != nil {
-			log.Printf("[AGENT:SANITY] reload dnshived-relay to clear stale socket(s): %v", relayErr)
+			loglevel.Infof("[AGENT:SANITY] reload dnshived-relay to clear stale socket(s): %v", relayErr)
 		}
 		if dnsRelayErr != nil {
-			log.Printf("[AGENT:SANITY] reload dnshived-dnsrelay to clear stale socket(s): %v", dnsRelayErr)
+			loglevel.Infof("[AGENT:SANITY] reload dnshived-dnsrelay to clear stale socket(s): %v", dnsRelayErr)
 		}
 		if relayErr == nil && dnsRelayErr == nil {
-			log.Printf("[AGENT:SANITY] reloaded dnshived-relay and dnshived-dnsrelay to clear %d stale socket(s): %v", len(found), toUpdate)
+			loglevel.Infof("[AGENT:SANITY] reloaded dnshived-relay and dnshived-dnsrelay to clear %d stale socket(s): %v", len(found), toUpdate)
 		}
 	} else {
-		log.Printf("[AGENT:SANITY] no genuine drift found — mismatch fully explained by first-ever observation and/or a transient unresolved interface")
+		loglevel.Infof("[AGENT:SANITY] no genuine drift found — mismatch fully explained by first-ever observation and/or a transient unresolved interface")
 	}
 
 	if len(toUpdate) > 0 {
@@ -2577,7 +2578,7 @@ func (a *Agent) Reconcile(in ReconcileInputs) Decision {
 		if forceSettlingClose {
 			elapsed := now.Sub(a.stableSince).Round(time.Second)
 			remaining := (settlingDuration - now.Sub(a.stableSince)).Round(time.Second)
-			log.Printf("[AGENT:SETTLING] suppressing gate-open for scope %s (stable for %s, eligible in %s)",
+			loglevel.Debugf("[AGENT:SETTLING] suppressing gate-open for scope %s (stable for %s, eligible in %s)",
 				scope, elapsed, remaining)
 			desired.Reason = fmt.Sprintf("settling (stable for %s, eligible in %s)", elapsed, remaining)
 		}
@@ -2585,12 +2586,12 @@ func (a *Agent) Reconcile(in ReconcileInputs) Decision {
 		switch timerAction {
 		case timerStart:
 			a.antiFlap[scope] = &AntiFlap{StableSince: now, Delay: timerDelay}
-			log.Printf("[AGENT:ANTIFLAP] scope %s — peer serving, anti-flap timer started (%s)",
+			loglevel.Infof("[AGENT:ANTIFLAP] scope %s — peer serving, anti-flap timer started (%s)",
 				scope, timerDelay)
 		case timerReset:
 			a.antiFlap[scope] = &AntiFlap{StableSince: now, Delay: timerDelay}
 			if timerDelay < a.rebalanceDelay {
-				log.Printf("[AGENT:ANTIFLAP] scope %s — fenced but quiet beforehand, quick-reclaim wait (%s, not the full %s)",
+				loglevel.Infof("[AGENT:ANTIFLAP] scope %s — fenced but quiet beforehand, quick-reclaim wait (%s, not the full %s)",
 					scope, timerDelay, a.rebalanceDelay)
 			}
 		}
@@ -2599,10 +2600,10 @@ func (a *Agent) Reconcile(in ReconcileInputs) Decision {
 
 		if allowed && !wasServing && !forceSettlingClose && timerSnap != nil {
 			if desired.Serve {
-				log.Printf("[AGENT:REBALANCE] scope %s stable for %s, taking over",
+				loglevel.Infof("[AGENT:REBALANCE] scope %s stable for %s, taking over",
 					scope, timerSnap.StableFor().Round(time.Second))
 			} else {
-				log.Printf("[AGENT:READY_WAIT] scope %s stable for %s, eligible in %s",
+				loglevel.Debugf("[AGENT:READY_WAIT] scope %s stable for %s, eligible in %s",
 					scope, timerSnap.StableFor().Round(time.Second), timerSnap.Remaining().Round(time.Second))
 			}
 		}
@@ -2625,7 +2626,7 @@ func (a *Agent) Reconcile(in ReconcileInputs) Decision {
 	for _, scope := range needsConstruction {
 		sc, stillConfigured := freshScopes[scope]
 		if !stillConfigured {
-			log.Printf("[AGENT:HOT_RELOAD] %s: skipping stale construction retry — "+
+			loglevel.Infof("[AGENT:HOT_RELOAD] %s: skipping stale construction retry — "+
 				"removed while this tick waited for constructMu", scope)
 			continue
 		}
@@ -2714,13 +2715,13 @@ func (a *Agent) Reconcile(in ReconcileInputs) Decision {
 		switch r.kind {
 		case gateClose:
 			if r.wasServing {
-				log.Printf("[AGENT:STOP] scope %s (%s)", r.scope, r.reason)
+				loglevel.Infof("[AGENT:STOP] scope %s (%s)", r.scope, r.reason)
 			}
 			delete(a.serving, r.scope)
 		case gateOpen:
 			if r.opened {
 				if !r.wasServing {
-					log.Printf("[AGENT:START] scope %s (%s)", r.scope, r.reason)
+					loglevel.Infof("[AGENT:START] scope %s (%s)", r.scope, r.reason)
 				}
 				a.serving[r.scope] = true
 				delete(a.antiFlap, r.scope) // successfully serving — clear
@@ -2818,9 +2819,9 @@ func (a *Agent) trackUnserved(scope string, servingHere bool, reason string, in 
 		switch {
 		case st == nil:
 		case !st.lastLog.IsZero():
-			log.Printf("[AGENT:UNSERVED] scope %s served again by %s after %s", scope, servedBy, now.Sub(st.since).Round(time.Second))
+			loglevel.Infof("[AGENT:UNSERVED] scope %s served again by %s after %s", scope, servedBy, now.Sub(st.since).Round(time.Second))
 		case !st.atStart && now.Sub(st.since) >= unservedGapLog:
-			log.Printf("[AGENT:UNSERVED] scope %s was served by no node for %s, now served by %s", scope, now.Sub(st.since).Round(time.Second), servedBy)
+			loglevel.Infof("[AGENT:UNSERVED] scope %s was served by no node for %s, now served by %s", scope, now.Sub(st.since).Round(time.Second), servedBy)
 		}
 		delete(a.unserved, scope)
 		return
@@ -2836,7 +2837,7 @@ func (a *Agent) trackUnserved(scope string, servingHere bool, reason string, in 
 	if owner == "" {
 		owner = "none"
 	}
-	log.Printf("[AGENT:UNSERVED] WARNING scope %s served by no node for %s — this node (%s, %s): %s; desired owner here: %s (generation %d)",
+	loglevel.Warnf("[AGENT:UNSERVED] WARNING scope %s served by no node for %s — this node (%s, %s): %s; desired owner here: %s (generation %d)",
 		scope, now.Sub(st.since).Round(time.Second), a.role, in.State, reason, owner, in.SelfToken.Generation)
 	st.lastLog = now
 }
@@ -2851,7 +2852,7 @@ func (a *Agent) closeGate(scope, reason string) {
 		return
 	}
 	if err := a.setDHCPGateState(scope, sc, "closed"); err != nil {
-		log.Printf("[AGENT:ERROR] scope %s: close gate: %v", scope, err)
+		loglevel.Warnf("[AGENT:ERROR] scope %s: close gate: %v", scope, err)
 	} else {
 		a.recordAppliedGate(scope, "closed")
 	}
@@ -2874,20 +2875,20 @@ func (a *Agent) openGate(scope, reason string) bool {
 
 	if a.psk != "" {
 		if !a.acquireWitness(scope) {
-			log.Printf("[AGENT:TOKEN_DENY] cannot open gate for scope %s — arbiter token not acquired", scope)
+			loglevel.Warnf("[AGENT:TOKEN_DENY] cannot open gate for scope %s — arbiter token not acquired", scope)
 			return false
 		}
 	}
 
 	if err := a.setDHCPGateState(scope, sc, "open"); err != nil {
-		log.Printf("[AGENT:ERROR] scope %s: open gate: %v", scope, err)
+		loglevel.Warnf("[AGENT:ERROR] scope %s: open gate: %v", scope, err)
 		a.clearWitness(scope) // don't hold a token for a gate we failed to open
 		return false
 	}
 	a.recordAppliedGate(scope, "open")
 
 	iface := nftgate.InterfaceName(a.localParent(sc.Parent), sc.VLANID)
-	log.Printf("[AGENT:GATE_OPEN] scope %s (%s) on %s", scope, reason, iface)
+	loglevel.Infof("[AGENT:GATE_OPEN] scope %s (%s) on %s", scope, reason, iface)
 	return true
 }
 
@@ -2953,19 +2954,19 @@ func (a *Agent) reconcileVRRPPriorities(decisions []gateDecision, last map[strin
 	}
 
 	if err := a.renderKeepalivedConfigAll(full, constructedScopes); err != nil {
-		log.Printf("[AGENT:ERROR] render keepalived config: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] render keepalived config: %v", err)
 		return last, false
 	}
 	throttled, err := a.reloadKeepalived()
 	if err != nil {
-		log.Printf("[AGENT:ERROR] reload keepalived (config rendered, live process not yet updated): %v", err)
+		loglevel.Warnf("[AGENT:ERROR] reload keepalived (config rendered, live process not yet updated): %v", err)
 		return last, false
 	}
 	if throttled {
-		log.Printf("[AGENT:VRRP_PRIORITY] reload throttled by helper — config rendered, live process not yet updated, will retry")
+		loglevel.Infof("[AGENT:VRRP_PRIORITY] reload throttled by helper — config rendered, live process not yet updated, will retry")
 		return last, false
 	}
-	log.Printf("[AGENT:VRRP_PRIORITY] keepalived reloaded [BENCH:EXECUTE] %s since decision",
+	loglevel.Infof("[AGENT:VRRP_PRIORITY] keepalived reloaded %s after decision",
 		time.Since(decisionStart).Round(time.Millisecond))
 	a.mu.Lock()
 	a.vrrpConfigSig = sig
@@ -3118,7 +3119,7 @@ func (a *Agent) clearWitness(scope string) {
 func (a *Agent) acquireWitness(scope string) bool {
 	candidates := a.arbiterAddrs()
 	if len(candidates) == 0 {
-		log.Printf("[AGENT:TOKEN_DENY] no arbiter instance reachable for scope %s", scope)
+		loglevel.Warnf("[AGENT:TOKEN_DENY] no arbiter instance reachable for scope %s", scope)
 		a.clearWitness(scope)
 		return false
 	}
@@ -3170,19 +3171,19 @@ func (a *Agent) acquireWitness(scope string) bool {
 	a.tokenMu.Unlock()
 
 	if !quorumOK {
-		log.Printf("[AGENT:TOKEN_DENY] quorum not reached for scope %s (%d/%d arbiter instance(s) agreed, need %d)",
+		loglevel.Warnf("[AGENT:TOKEN_DENY] quorum not reached for scope %s (%d/%d arbiter instance(s) agreed, need %d)",
 			scope, agreed, len(candidates), required)
 		return false
 	}
 	if standalone {
 		if viaFailure {
-			log.Printf("[AGENT:STANDALONE] witness confirmed for scope %s — a configured peer has been unreachable past the fail-grace period, serving without peer quorum until it reconnects and stabilizes", scope)
+			loglevel.Warnf("[AGENT:STANDALONE] witness confirmed for scope %s — a configured peer has been unreachable past the fail-grace period, serving without peer quorum until it reconnects and stabilizes", scope)
 		} else {
-			log.Printf("[AGENT:STANDALONE] witness confirmed for scope %s — this is the only configured core node (no peers left after offboard), serving without peer quorum until a replacement is onboarded", scope)
+			loglevel.Warnf("[AGENT:STANDALONE] witness confirmed for scope %s — this is the only configured core node (no peers left after offboard), serving without peer quorum until a replacement is onboarded", scope)
 		}
 		return true
 	}
-	log.Printf("[AGENT:TOKEN_ACQ] witness confirmed for scope %s (%d/%d arbiter instance(s) agreed)", scope, agreed, len(candidates))
+	loglevel.InfoOnChange("token:"+scope, fmt.Sprintf("%d/%d", agreed, len(candidates)), "[AGENT:TOKEN_ACQ] witness confirmed for scope %s (%d/%d arbiter instance(s) agreed)", scope, agreed, len(candidates))
 	return true
 }
 
@@ -3205,7 +3206,7 @@ func (a *Agent) postWitnessRequest(addr, path, scope string, body []byte) (raw j
 	}
 	expiresAt, err = a.checkGrant(scope, result.Token)
 	if err != nil {
-		log.Printf("[AGENT:TOKEN_DENY] grant from %s for scope %s rejected: %v", addr, scope, err)
+		loglevel.Warnf("[AGENT:TOKEN_DENY] grant from %s for scope %s rejected: %v", addr, scope, err)
 		return nil, 0, false, false
 	}
 	return result.Token, expiresAt, true, false
@@ -3267,11 +3268,11 @@ func (a *Agent) acquireFromInstance(scope string, c arbiterCandidate) (json.RawM
 
 	raw, expiresAt, accepted, dialFailed := a.postWitnessRequest(c.addr, "/api/v1/token/request", scope, body)
 	if dialFailed && c.fallback != "" {
-		log.Printf("[AGENT:TOKEN_DENY] request to %s failed for scope %s, trying fallback %s", c.addr, scope, c.fallback)
+		loglevel.Warnf("[AGENT:TOKEN_DENY] request to %s failed for scope %s, trying fallback %s", c.addr, scope, c.fallback)
 		raw, expiresAt, accepted, dialFailed = a.postWitnessRequest(c.fallback, "/api/v1/token/request", scope, body)
 	}
 	if dialFailed {
-		log.Printf("[AGENT:TOKEN_DENY] request to %s failed for scope %s: no reachable path", c.addr, scope)
+		loglevel.Warnf("[AGENT:TOKEN_DENY] request to %s failed for scope %s: no reachable path", c.addr, scope)
 	}
 	if !accepted {
 		return nil, 0, false
@@ -3321,7 +3322,7 @@ func (a *Agent) renewalLoop(ticker *time.Ticker, quit chan struct{}) {
 
 			runConcurrent(scopes, maxConcurrentGateOps, func(scope string) {
 				if !a.acquireWitness(scope) {
-					log.Printf("[AGENT:TOKEN_EXPIRE] renewal failed for scope %s", scope)
+					loglevel.Warnf("[AGENT:TOKEN_EXPIRE] renewal failed for scope %s", scope)
 				}
 			})
 		case <-quit:
@@ -3352,7 +3353,7 @@ func (a *Agent) deleteInterface(scope string, sc config.ScopeConfig) {
 // *Agent.
 func DeleteInterface(helperClient *helper.Client, scope string, sc config.ScopeConfig) {
 	if helperClient == nil {
-		log.Printf("[AGENT:ERROR] delete interface for scope %s: %v", scope, errNoHelper)
+		loglevel.Warnf("[AGENT:ERROR] delete interface for scope %s: %v", scope, errNoHelper)
 		return
 	}
 	helperClient.DeleteInterface(scope, sc.Parent, sc.VLANID)

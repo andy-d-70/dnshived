@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"dnshived/internal/loglevel"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -66,7 +67,7 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		log.Printf("[http:error] failed to encode response: %v", err)
+		loglevel.Warnf("[http:error] failed to encode response: %v", err)
 	}
 }
 
@@ -190,6 +191,11 @@ func main() {
 	bootstrapOTPPath := flag.String("bootstrap-otp-path", defaultBootstrapOTPPath,
 		"where bootstrap mode persists its join code — only used when no config file exists yet; same testing-only rationale as --bootstrap-data-dir")
 	flag.Parse()
+	if flag.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "dnshived: unexpected argument %q\n", flag.Arg(0))
+		flag.Usage()
+		os.Exit(2)
+	}
 
 	if *showVersion {
 		fmt.Println("dnshived", version)
@@ -213,6 +219,10 @@ func main() {
 		}
 		log.Fatalf("config: %v", err)
 	}
+	if err := loglevel.Set(cfg.LogLevel); err != nil {
+		loglevel.Warnf("[CONFIG:WARN] %v", err)
+	}
+	go loglevel.Summarize(context.Background())
 	currentConfig.Store(cfg)
 	setBeaconLinkUp(helperSocketFor(cfg))
 
@@ -245,6 +255,14 @@ func main() {
 		os.Exit(emergencyCloseAllGates(cfg))
 	}
 
+	daemonLock, err = acquireInstanceLock(filepath.Join(dataDir(cfg), "daemon.lock"))
+	if errors.Is(err, errInstanceRunning) {
+		log.Fatalf("start: %v", err)
+	}
+	if err != nil {
+		loglevel.Warnf("[AGENT:INIT] single-instance lock unavailable, starting without it: %v", err)
+	}
+
 	incarnation, err := state.NextIncarnation(cfg.DataDir)
 	if err != nil {
 		log.Fatalf("incarnation: %v", err)
@@ -261,7 +279,7 @@ func main() {
 		Token:       fencing.Token{Epoch: 1, Generation: 1},
 	}
 
-	log.Printf("dnshived %s starting — node=%s role=%s cluster=%s incarnation=%d",
+	loglevel.Infof("dnshived %s starting — node=%s role=%s cluster=%s incarnation=%d",
 		version, self.NodeID, self.Role, self.ClusterID, self.Incarnation)
 
 	if cfg.TLSEnabled() {
@@ -277,23 +295,23 @@ func main() {
 	observer.SetFallbackAddrs(fallbackAddrs)
 	probeInterval := cfg.ProbeInterval()
 	observer.Start(probeInterval)
-	log.Printf("[CLUSTER:INIT] visibility: handshaking %d peers every %s", len(cfg.Peers), probeInterval)
+	loglevel.Infof("[CLUSTER:INIT] visibility: handshaking %d peers every %s", len(cfg.Peers), probeInterval)
 
 	machine := fsm.New(self.Epoch)
 
 	if cfg.LegacyDryRun {
-		log.Printf("[CONFIG:WARN] dry_run no longer exists — removing it from %s. This node SERVES real DHCP/DNS.", *cfgPath)
+		loglevel.Warnf("[CONFIG:WARN] dry_run no longer exists — removing it from %s. This node SERVES real DHCP/DNS.", *cfgPath)
 		if err := config.Save(*cfgPath, cfg); err != nil {
-			log.Printf("[CONFIG:ERROR] remove dry_run from %s: %v", *cfgPath, err)
+			loglevel.Warnf("[CONFIG:ERROR] remove dry_run from %s: %v", *cfgPath, err)
 		}
 	}
 
 	var scopeDefs []desired.ScopeDefinition
 	if cfg.HasScopes() {
 		scopeDefs = desired.ScopesFromConfig(cfg.Scopes)
-		log.Printf("[CONFIG:INIT] %d scopes configured: %v", len(scopeDefs), cfg.ScopeNames())
+		loglevel.Infof("[CONFIG:INIT] %d scopes configured: %v", len(scopeDefs), cfg.ScopeNames())
 	} else {
-		log.Printf("[CONFIG:INIT] no scopes configured — nothing to serve yet")
+		loglevel.Infof("[CONFIG:INIT] no scopes configured — nothing to serve yet")
 	}
 
 	engine := desired.New(self.Generation, scopeDefs, 60*time.Second, 0)
@@ -304,7 +322,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("fencing: %v", err)
 	}
-	log.Printf("[FENCING:INIT] watermark loaded: %s", watermark.Current())
+	loglevel.Infof("[FENCING:INIT] watermark loaded: %s", watermark.Current())
 
 	ag := agent.New(cfg.Role, self.NodeID, self.Incarnation, cfg.PSK, dataDir(cfg), cfg.Scopes, observer)
 	ag.SetTLS(cfg.TLSEnabled())
@@ -328,12 +346,12 @@ func main() {
 	ag.StartTopoBeacon(context.Background(), cfg.Role, topobeacon.DefaultInterval)
 
 	ag.StartScopeBeacons(context.Background(), cfg.Role, func(scope, peerRole string) {
-		log.Printf("[AGENT:SCOPEBEACON] %s unreachable on scope %s — triggering a local sanity check", peerRole, scope)
+		loglevel.Warnf("[AGENT:SCOPEBEACON] %s unreachable on scope %s — triggering a local sanity check", peerRole, scope)
 		ag.TriggerOrphanCheck("SCOPEBEACON_CHECK")
 	})
 
 	ag.SetHelper(helper.NewClient(helperSocketFor(cfg)))
-	log.Printf("[AGENT:INIT] privileged operations via %s", helperSocketFor(cfg))
+	loglevel.Infof("[AGENT:INIT] privileged operations via %s", helperSocketFor(cfg))
 
 	if isCoreRole(cfg.Role) {
 		ag.SetLeasePersistDir(dataDir(cfg))
@@ -352,9 +370,9 @@ func main() {
 			signalLeaseCheck()
 		}
 		if _, err := leasesync.ListenLocal(leasesync.SocketPath, onLocalLeaseEvent); err != nil {
-			log.Printf("[AGENT:ERROR] dhcp lease-sync local listener: %v", err)
+			loglevel.Warnf("[AGENT:ERROR] dhcp lease-sync local listener: %v", err)
 		} else {
-			log.Printf("[AGENT:INIT] dhcp lease-sync local listener on %s", leasesync.SocketPath)
+			loglevel.Infof("[AGENT:INIT] dhcp lease-sync local listener on %s", leasesync.SocketPath)
 		}
 	}
 
@@ -374,17 +392,17 @@ func main() {
 	ag.ConstructPlane() // Build the permanent network plane for every configured scope.
 
 	if err := ag.RenderMgmtVIPConfig(cfg.MgmtVIP, cfg.Platform); err != nil {
-		log.Printf("[AGENT:ERROR] render management VIP config: %v", err)
+		loglevel.Warnf("[AGENT:ERROR] render management VIP config: %v", err)
 	}
 
-	log.Printf("[AGENT:INIT] real service control enabled")
+	loglevel.Infof("[AGENT:INIT] real service control enabled")
 
 	auditLogger := auditlog.New(filepath.Join(dataDir(cfg), "audit.log"))
 
 	// Auth middleware — wraps all API handlers when api_tokens is configured.
 	authMw := auth.New(cfg.APITokens)
 	if authMw.Enabled() {
-		log.Printf("[AUTH:INIT] API authentication enabled (%d token(s))", len(cfg.APITokens))
+		loglevel.Infof("[AUTH:INIT] API authentication enabled (%d token(s))", len(cfg.APITokens))
 	}
 
 	identity := newMonotonicIdentity(self.Epoch, self.Generation, observer.UpdateSelf)
@@ -392,14 +410,14 @@ func main() {
 		if !identity.applyEpoch(epoch) {
 			return // stale, out-of-order callback — see monotonicIdentity's doc comment
 		}
-		log.Printf("[FSM:EPOCH] epoch advanced to %d", epoch)
+		loglevel.Infof("[FSM:EPOCH] epoch advanced to %d", epoch)
 		events.Add("INFO", "FSM:EPOCH", fmt.Sprintf("epoch advanced to %d", epoch))
 	}
 	engine.OnGenerationChange = func(gen uint64) {
 		if !identity.applyGeneration(gen) {
 			return
 		}
-		log.Printf("[DESIRED:GEN] generation advanced to %d", gen)
+		loglevel.Infof("[DESIRED:GEN] generation advanced to %d", gen)
 		events.Add("INFO", "DESIRED:GEN", fmt.Sprintf("generation advanced to %d", gen))
 	}
 
@@ -465,14 +483,14 @@ func main() {
 				curDrift[key] = f
 				if _, already := prevDrift[key]; !already {
 					msg := formatPlaneHealthMsg(f)
-					log.Printf("[AGENT:DRIFT] %s — %s", msg, driftActionText(f))
+					loglevel.Warnf("[AGENT:DRIFT] %s — %s", msg, driftActionText(f))
 					events.Add("WARNING", "AGENT:DRIFT", msg)
 				}
 			}
 			for key, f := range prevDrift {
 				if _, stillDrifted := curDrift[key]; !stillDrifted {
 					msg := formatPlaneHealthMsg(f) + " — resolved"
-					log.Printf("[AGENT:HEALED] %s", msg)
+					loglevel.Infof("[AGENT:HEALED] %s", msg)
 					events.Add("INFO", "AGENT:HEALED", msg)
 				}
 			}
@@ -502,14 +520,14 @@ func main() {
 					curDrift[key] = f
 					if _, already := prevLeaseDrift[key]; !already {
 						msg := formatPlaneHealthMsg(f)
-						log.Printf("[AGENT:DRIFT] %s — %s", msg, driftActionText(f))
+						loglevel.Warnf("[AGENT:DRIFT] %s — %s", msg, driftActionText(f))
 						events.Add("WARNING", "AGENT:DRIFT", msg)
 					}
 				}
 				for key, f := range prevLeaseDrift {
 					if _, stillDrifted := curDrift[key]; !stillDrifted {
 						msg := formatPlaneHealthMsg(f) + " — resolved"
-						log.Printf("[AGENT:HEALED] %s", msg)
+						loglevel.Infof("[AGENT:HEALED] %s", msg)
 						events.Add("INFO", "AGENT:HEALED", msg)
 					}
 				}
@@ -542,7 +560,7 @@ func main() {
 	discoveryListener := discovery.NewListener()
 	go func() {
 		if err := discoveryListener.Run(context.Background()); err != nil {
-			log.Printf("[DISCOVERY] listener: %v", err)
+			loglevel.Infof("[DISCOVERY] listener: %v", err)
 		}
 	}()
 
@@ -558,10 +576,10 @@ func main() {
 				}
 			}
 			if err := ag.RotateCoreDHCPLogIfNeeded(); err != nil {
-				log.Printf("[AGENT:LOGROTATE] %v", err)
+				loglevel.Infof("[AGENT:LOGROTATE] %v", err)
 			}
 			if err := ag.RotateCoreDNSLogIfNeeded(); err != nil {
-				log.Printf("[AGENT:LOGROTATE] %v", err)
+				loglevel.Infof("[AGENT:LOGROTATE] %v", err)
 			}
 		}
 	}()
@@ -582,7 +600,7 @@ func main() {
 				retain = 14
 			}
 			if err := backup.Prune(dataDir(cfg), retain); err != nil {
-				log.Printf("[AGENT:BACKUP] prune: %v", err)
+				loglevel.Infof("[AGENT:BACKUP] prune: %v", err)
 			}
 
 			if cfg.BackupPassword == "" {
@@ -600,23 +618,23 @@ func main() {
 			}
 			plaintext, err := json.MarshalIndent(backupPayloadFor(cfg, ag, observer), "", "  ")
 			if err != nil {
-				log.Printf("[AGENT:BACKUP] marshal config: %v", err)
+				loglevel.Infof("[AGENT:BACKUP] marshal config: %v", err)
 				continue
 			}
 			info, err := backup.Create(dataDir(cfg), cfg.BackupPassword, plaintext, "", true)
 			if err != nil {
-				log.Printf("[AGENT:BACKUP] create: %v", err)
+				loglevel.Infof("[AGENT:BACKUP] create: %v", err)
 				events.Add("WARNING", "AGENT:BACKUP", "automated backup failed: "+err.Error())
 				continue
 			}
 			lastRun = time.Now()
 			if err := writeBackupLastRun(dataDir(cfg), lastRun); err != nil {
-				log.Printf("[AGENT:BACKUP] persist last-run: %v", err)
+				loglevel.Infof("[AGENT:BACKUP] persist last-run: %v", err)
 			}
 			if err := backup.Prune(dataDir(cfg), retain); err != nil {
-				log.Printf("[AGENT:BACKUP] prune: %v", err)
+				loglevel.Infof("[AGENT:BACKUP] prune: %v", err)
 			}
-			log.Printf("[AGENT:BACKUP] wrote %s", info.Name)
+			loglevel.Infof("[AGENT:BACKUP] wrote %s", info.Name)
 			events.Add("INFO", "AGENT:BACKUP", "automated backup written: "+info.Name)
 			if cfg.BackupReplicateToPeers {
 				replicateBackupToPeers(cfg, dataDir(cfg), info.Name)
@@ -1349,7 +1367,7 @@ func main() {
 			go func() {
 				time.Sleep(300 * time.Millisecond)
 				if _, err := ag.RestartSelf(); err != nil {
-					log.Printf("[API:RESTART] dnshived.service: %v", err)
+					loglevel.Infof("[API:RESTART] dnshived.service: %v", err)
 				}
 			}()
 			return
@@ -1406,12 +1424,12 @@ func main() {
 		IdleTimeout:       60 * time.Second,
 	}
 	if cfg.TLSEnabled() {
-		log.Printf("[http] listening on %s (TLS)", addr)
+		loglevel.Infof("[http] listening on %s (TLS)", addr)
 		if err := srv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey); err != nil {
 			log.Fatalf("https: %v", err)
 		}
 	} else {
-		log.Printf("[http] listening on %s", addr)
+		loglevel.Infof("[http] listening on %s", addr)
 		if err := srv.ListenAndServe(); err != nil {
 			log.Fatalf("http: %v", err)
 		}
@@ -1453,14 +1471,14 @@ func (rl *reconcileLoop) once(reason string) {
 		ObservedOnce:   rl.observer.ObservedOnce(),
 	})
 	if st != rl.lastState {
-		log.Printf("[FSM:TRANSITION] state → %s (trigger: %s)", st, reason)
+		loglevel.Infof("[FSM:TRANSITION] state → %s (trigger: %s)", st, reason)
 		rl.events.Add("INFO", "FSM:TRANSITION", fmt.Sprintf("state → %s (trigger: %s)", st, reason))
 		rl.lastState = st
 	}
 
 	if st == fsm.StateStable {
 		if wmTok, moved := rl.observer.AdvanceWatermark(rl.watermark, verdict); moved && wmTok.Compare(rl.lastWM) != 0 {
-			log.Printf("[FENCING:ADVANCE] watermark advanced to %s from peers before the desired-state pass (trigger: %s)", wmTok, reason)
+			loglevel.Infof("[FENCING:ADVANCE] watermark advanced to %s from peers before the desired-state pass (trigger: %s)", wmTok, reason)
 			rl.events.Add("INFO", "FENCING:ADVANCE", fmt.Sprintf("watermark advanced to %s from peers before the desired-state pass (trigger: %s)", wmTok, reason))
 			rl.lastWM = wmTok
 		}
@@ -1491,7 +1509,7 @@ func (rl *reconcileLoop) once(reason string) {
 
 	if wmTok, moved := rl.observer.AdvanceWatermark(rl.watermark, verdict); moved {
 		if wmTok.Compare(rl.lastWM) != 0 {
-			log.Printf("[FENCING:ADVANCE] watermark advanced to %s (trigger: %s)", wmTok, reason)
+			loglevel.Infof("[FENCING:ADVANCE] watermark advanced to %s (trigger: %s)", wmTok, reason)
 			rl.events.Add("INFO", "FENCING:ADVANCE", fmt.Sprintf("watermark advanced to %s (trigger: %s)", wmTok, reason))
 			rl.lastWM = wmTok
 		}
@@ -1511,7 +1529,7 @@ func (rl *reconcileLoop) once(reason string) {
 	})
 	newServing := rl.ag.Serving()
 	if !stringSlicesEqual(prevServing, newServing) {
-		log.Printf("[BENCH:DECISION] serving set changed %v -> %v (trigger: %s)", prevServing, newServing, reason)
+		loglevel.Infof("[AGENT:SERVING_SET] serving set changed %v -> %v (trigger: %s)", prevServing, newServing, reason)
 	}
 	rl.observer.UpdateServing(newServing)
 	rl.observer.UpdateTrunkHealth(rl.ag.TrunkHealth())
@@ -1554,14 +1572,14 @@ func (rl *reconcileLoop) compareDesiredMaps(m desired.Map, owners map[string]str
 		case desired.SplitWarn:
 			msg := fmt.Sprintf("desired-state map differs from %s at generation %d for %s (hash here %s, peer %s): %s",
 				p.Role, m.Generation, lasted.Round(time.Second), hash, p.Hash, detail)
-			log.Printf("[DESIRED:SPLIT] WARNING %s", msg)
+			loglevel.Warnf("[DESIRED:SPLIT] WARNING %s", msg)
 			rl.events.Add("WARNING", "DESIRED:SPLIT", msg)
 		case desired.SplitResolved:
 			msg := fmt.Sprintf("desired-state map agrees with %s again after %s", p.Role, lasted.Round(time.Second))
-			log.Printf("[DESIRED:SPLIT] %s", msg)
+			loglevel.Infof("[DESIRED:SPLIT] %s", msg)
 			rl.events.Add("INFO", "DESIRED:SPLIT", msg)
 		case desired.SplitHealed:
-			log.Printf("[DESIRED:SPLIT] desired-state map differed from %s for %s at the same generation, healed by itself: %s", p.Role, lasted.Round(time.Second), detail)
+			loglevel.Infof("[DESIRED:SPLIT] desired-state map differed from %s for %s at the same generation, healed by itself: %s", p.Role, lasted.Round(time.Second), detail)
 		}
 	}
 	rl.split.Forget(seen)
@@ -1828,14 +1846,14 @@ func replicateBackupToPeers(cfg *config.Cluster, dataDirPath, name string) {
 	}
 	data, err := backup.Read(dataDirPath, name)
 	if err != nil {
-		log.Printf("[AGENT:BACKUP] replicate %s: read local copy: %v", name, err)
+		loglevel.Infof("[AGENT:BACKUP] replicate %s: read local copy: %v", name, err)
 		return
 	}
 	comment := backup.ReadComment(dataDirPath, name)
 	automated := backup.IsAutomated(dataDirPath, name)
 	token := adminAPIToken(cfg)
 	if token == "" {
-		log.Printf("[AGENT:BACKUP] backup_replicate_to_peers is on but no admin-role api_token is configured — cannot authenticate to peers")
+		loglevel.Warnf("[AGENT:BACKUP] backup_replicate_to_peers is on but no admin-role api_token is configured — cannot authenticate to peers")
 		return
 	}
 	scheme := "http"
@@ -1849,7 +1867,7 @@ func replicateBackupToPeers(cfg *config.Cluster, dataDirPath, name string) {
 		url := fmt.Sprintf("%s://%s/api/v1/backups/%s", scheme, peer, name)
 		req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(data))
 		if err != nil {
-			log.Printf("[AGENT:BACKUP] replicate %s to %s: %v", name, peer, err)
+			loglevel.Infof("[AGENT:BACKUP] replicate %s to %s: %v", name, peer, err)
 			continue
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -1862,18 +1880,18 @@ func replicateBackupToPeers(cfg *config.Cluster, dataDirPath, name string) {
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			log.Printf("[AGENT:BACKUP] replicate %s to %s: %v", name, peer, err)
+			loglevel.Infof("[AGENT:BACKUP] replicate %s to %s: %v", name, peer, err)
 			continue
 		}
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			log.Printf("[AGENT:BACKUP] replicate %s to %s: status %d", name, peer, resp.StatusCode)
+			loglevel.Infof("[AGENT:BACKUP] replicate %s to %s: status %d", name, peer, resp.StatusCode)
 			continue
 		}
 		replicated++
 	}
 	if replicated > 0 {
-		log.Printf("[AGENT:BACKUP] replicated %s to %d/%d peer(s)", name, replicated, len(cfg.Peers))
+		loglevel.Infof("[AGENT:BACKUP] replicated %s to %d/%d peer(s)", name, replicated, len(cfg.Peers))
 	}
 }
 
@@ -1994,6 +2012,9 @@ func applyConfigUpdate(cfgPath string, upd configUpdate, ag *agent.Agent, engine
 		ag.SetDNSRelayCacheSize(current.DNSRelayCacheSize)
 		ag.SetDNSRelayCacheMaxBytes(current.DNSRelayCacheMaxBytes)
 		ag.SetSanityCheckDisabled(current.SanityCheckDisabled)
+		if err := loglevel.Set(current.LogLevel); err != nil {
+			loglevel.Warnf("[CONFIG:WARN] %v", err)
+		}
 		if authMw != nil {
 			authMw.SetTokens(current.APITokens)
 		}
@@ -2022,13 +2043,13 @@ func emergencyCloseAllGates(cfg *config.Cluster) int {
 			sc.Parent = cfg.Platform.ResolveParent(cfg.Role, sc.Parent)
 			err := agent.SetDHCPGateState(helperClient, name, sc, "closed")
 			if err != nil {
-				log.Printf("[EMERGENCY] helper failed for scope %s, falling back to direct: %v", name, err)
+				loglevel.Warnf("[EMERGENCY] helper failed for scope %s, falling back to direct: %v", name, err)
 				err = nftgate.Close(nftgate.InterfaceName(sc.Parent, sc.VLANID))
 			}
 			if err != nil {
-				log.Printf("[EMERGENCY] scope %s: close gate failed: %v", name, err)
+				loglevel.Warnf("[EMERGENCY] scope %s: close gate failed: %v", name, err)
 			} else {
-				log.Printf("[EMERGENCY] scope %s: gate closed", name)
+				loglevel.Infof("[EMERGENCY] scope %s: gate closed", name)
 			}
 		}(name, sc)
 	}

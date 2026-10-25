@@ -5,8 +5,8 @@ package agent
 
 import (
 	"bytes"
+	"dnshived/internal/loglevel"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"text/template"
@@ -89,7 +89,7 @@ func (a *Agent) RenderMgmtVIPConfig(mgmtVIP *config.MgmtVIPConfig, platform *con
 	// A rendered config is useless if nothing is actually running to read it.
 	if !restart {
 		if err := a.ensureMgmtKeepalivedRunning(); err != nil {
-			log.Printf("[AGENT:WARN] ensure dnshived-keepalived-mgmt running: %v", err)
+			loglevel.Warnf("[AGENT:WARN] ensure dnshived-keepalived-mgmt running: %v", err)
 		}
 		return nil
 	}
@@ -98,9 +98,9 @@ func (a *Agent) RenderMgmtVIPConfig(mgmtVIP *config.MgmtVIPConfig, platform *con
 	a.mgmtRestartPending = err != nil
 	a.mu.Unlock()
 	if err != nil {
-		log.Printf("[AGENT:WARN] apply changed management VIP config: %v — retried on the next config save or daemon start", err)
+		loglevel.Warnf("[AGENT:WARN] apply changed management VIP config: %v — retried on the next config save or daemon start", err)
 	} else {
-		log.Printf("[AGENT:MGMT_VIP] management VIP config changed — dnshived-keepalived-mgmt reloaded")
+		loglevel.Infof("[AGENT:MGMT_VIP] management VIP config changed — dnshived-keepalived-mgmt reloaded")
 	}
 	return nil
 }
@@ -131,9 +131,9 @@ func (a *Agent) decommissionMgmtVIP(path string) error {
 	} else if err != nil {
 		return err
 	}
-	log.Printf("[AGENT:DECOMMISSION] management VIP no longer configured — stopping dnshived-keepalived-mgmt and removing %s", path)
+	loglevel.Infof("[AGENT:DECOMMISSION] management VIP no longer configured — stopping dnshived-keepalived-mgmt and removing %s", path)
 	if err := a.stopMgmtKeepalived(); err != nil {
-		log.Printf("[AGENT:WARN] stop dnshived-keepalived-mgmt unit: %v", err)
+		loglevel.Warnf("[AGENT:WARN] stop dnshived-keepalived-mgmt unit: %v", err)
 	}
 	return os.Remove(path)
 }

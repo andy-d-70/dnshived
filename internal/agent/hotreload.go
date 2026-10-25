@@ -4,8 +4,8 @@
 package agent
 
 import (
+	"dnshived/internal/loglevel"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -66,10 +66,10 @@ func (a *Agent) HotReloadScopes(newScopes map[string]config.ScopeConfig) []strin
 	}
 
 	for _, t := range toTearDown {
-		log.Printf("[AGENT:HOT_RELOAD] tearing down %s.%d for scope %s", t.sc.Parent, t.sc.VLANID, t.name)
+		loglevel.Infof("[AGENT:HOT_RELOAD] tearing down %s.%d for scope %s", t.sc.Parent, t.sc.VLANID, t.name)
 		a.deleteInterface(t.name, t.sc)
 		if err := a.stopDnsmasqUnit(t.name); err != nil {
-			log.Printf("[AGENT:WARN] hot-reload scope %s: stop dnsmasq: %v", t.name, err)
+			loglevel.Warnf("[AGENT:WARN] hot-reload scope %s: stop dnsmasq: %v", t.name, err)
 		}
 		os.Remove(filepath.Join(a.dataDir, "dnsmasq-"+t.name+".conf"))
 		os.Remove(filepath.Join(a.dataDir, "reservations-"+t.name+".conf"))
@@ -79,17 +79,17 @@ func (a *Agent) HotReloadScopes(newScopes map[string]config.ScopeConfig) []strin
 	a.publishScopes(newScopes)
 
 	if err := saveKnownScopes(a.dataDir, newScopes); err != nil {
-		log.Printf("[AGENT:WARN] hot-reload: save known scopes: %v", err)
+		loglevel.Warnf("[AGENT:WARN] hot-reload: save known scopes: %v", err)
 	}
 
 	go a.TriggerOrphanCheck("HOT_RELOAD_CHECK")
 
 	if len(report) == 0 {
-		log.Printf("[AGENT:HOT_RELOAD] no scope changes to apply")
+		loglevel.Infof("[AGENT:HOT_RELOAD] no scope changes to apply")
 		return report
 	}
 	for _, line := range report {
-		log.Printf("[AGENT:HOT_RELOAD] %s", line)
+		loglevel.Infof("[AGENT:HOT_RELOAD] %s", line)
 	}
 	return report
 }

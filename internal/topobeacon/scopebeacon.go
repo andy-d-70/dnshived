@@ -6,10 +6,10 @@ package topobeacon
 import (
 	"context"
 	"crypto/rand"
+	"dnshived/internal/loglevel"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -210,7 +210,7 @@ func listenScopeBeaconOnAddr(ctx context.Context, role, addr string, psk []byte)
 	laddr := &net.UDPAddr{IP: net.ParseIP(addr), Port: ScopePort}
 	conn, err := net.ListenUDP("udp4", laddr)
 	if err != nil {
-		log.Printf("[TOPOBEACON:ERROR] bind scope-beacon listen socket on %s: %v", addr, err)
+		loglevel.Warnf("[TOPOBEACON:ERROR] bind scope-beacon listen socket on %s: %v", addr, err)
 		return
 	}
 	defer conn.Close()

@@ -6,6 +6,7 @@ package arbiter
 
 import (
 	"crypto/rand"
+	"dnshived/internal/loglevel"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -62,7 +63,7 @@ func (m *Manager) checkTrustedHost(w http.ResponseWriter, r *http.Request) bool 
 	if m.trustedHosts.Allowed(r.RemoteAddr) {
 		return true
 	}
-	log.Printf("[ARBITER:DENY_UNTRUSTED] request from untrusted host: remote_addr=%s path=%s", r.RemoteAddr, r.URL.Path)
+	loglevel.Warnf("[ARBITER:DENY_UNTRUSTED] request from untrusted host: remote_addr=%s path=%s", r.RemoteAddr, r.URL.Path)
 	http.Error(w, "source address not in trusted_hosts", http.StatusForbidden)
 	return false
 }
@@ -73,7 +74,7 @@ func (m *Manager) AddRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/token/renew", m.handleRenew)
 	mux.HandleFunc("/api/v1/token/status", m.handleStatus)
 	m.startOnce.Do(func() { go m.cleanupLoop() })
-	log.Printf("[ARBITER:INIT] token endpoints registered")
+	loglevel.Infof("[ARBITER:INIT] token endpoints registered")
 }
 
 func (m *Manager) cleanupLoop() {
@@ -85,7 +86,7 @@ func (m *Manager) cleanupLoop() {
 			if now.After(tok.ExpiresAt) {
 				delete(m.tokens, scope)
 				m.dirty = true
-				log.Printf("[ARBITER:EXPIRE] token expired: scope=%s owner=%s", scope, tok.Owner)
+				loglevel.Warnf("[ARBITER:EXPIRE] token expired: scope=%s owner=%s", scope, tok.Owner)
 			}
 		}
 		cutoff := now.Unix() - nonceMaxAge
@@ -108,7 +109,7 @@ func (m *Manager) cleanupLoop() {
 
 		if snapshot != nil {
 			if err := saveTokens(m.dataDir, snapshot); err != nil {
-				log.Printf("[ARBITER:WARN] persist tokens: %v", err)
+				loglevel.Warnf("[ARBITER:WARN] persist tokens: %v", err)
 			}
 		}
 	}
@@ -169,7 +170,7 @@ func (m *Manager) handleRequest(w http.ResponseWriter, r *http.Request) {
 	existing, occupied := m.tokens[req.Scope]
 	if occupied && !existing.Expired() && existing.Owner != req.NodeID {
 		m.mu.Unlock()
-		log.Printf("[ARBITER:DENY] token request denied: scope=%s requester=%s held_by=%s",
+		loglevel.Warnf("[ARBITER:DENY] token request denied: scope=%s requester=%s held_by=%s",
 			req.Scope, req.NodeID, existing.Owner)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -192,7 +193,7 @@ func (m *Manager) handleRequest(w http.ResponseWriter, r *http.Request) {
 	m.dirty = true
 	m.mu.Unlock()
 
-	log.Printf("[ARBITER:GRANT] token granted: scope=%s owner=%s", req.Scope, req.NodeID)
+	loglevel.Infof("[ARBITER:GRANT] token granted: scope=%s owner=%s", req.Scope, req.NodeID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"accepted": true,
@@ -255,7 +256,7 @@ func (m *Manager) handleRenew(w http.ResponseWriter, r *http.Request) {
 		cp := req.Token
 		m.tokens[req.Token.Scope] = &cp
 		existing = &cp
-		log.Printf("[ARBITER:REHEAL] accepted still-valid token with no prior memory: scope=%s owner=%s", req.Token.Scope, req.Token.Owner)
+		loglevel.Infof("[ARBITER:REHEAL] accepted still-valid token with no prior memory: scope=%s owner=%s", req.Token.Scope, req.Token.Owner)
 	} else if existing.Owner != req.Token.Owner || existing.Incarnation != req.Token.Incarnation {
 		m.mu.Unlock()
 		http.Error(w, "token not found or mismatched", http.StatusNotFound)

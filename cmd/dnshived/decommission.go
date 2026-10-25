@@ -5,9 +5,9 @@ package main
 
 import (
 	"bytes"
+	"dnshived/internal/loglevel"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -96,10 +96,10 @@ func deletePath(path string) {
 		return // never existed — nothing to remove, not an error
 	}
 	if err := os.RemoveAll(path); err != nil {
-		log.Printf("[DECOMMISSION] remove %s: %v", path, err)
+		loglevel.Warnf("[DECOMMISSION] remove %s: %v", path, err)
 		return
 	}
-	log.Printf("[DECOMMISSION] removed %s", path)
+	loglevel.Infof("[DECOMMISSION] removed %s", path)
 }
 
 // decommStep is one verified decommission action's own outcome.
@@ -170,7 +170,7 @@ func pushDecommissionReport(cfg *config.Cluster, reason string, steps []decommSt
 	}
 	adminToken, err := findTokenByRole(cfg, "admin")
 	if err != nil {
-		log.Printf("[DECOMMISSION] find admin token for report push: %v", err)
+		loglevel.Warnf("[DECOMMISSION] find admin token for report push: %v", err)
 		return
 	}
 	body, err := json.Marshal(decommissionReportRequest{
@@ -180,7 +180,7 @@ func pushDecommissionReport(cfg *config.Cluster, reason string, steps []decommSt
 		Steps:  steps,
 	})
 	if err != nil {
-		log.Printf("[DECOMMISSION] marshal report: %v", err)
+		loglevel.Warnf("[DECOMMISSION] marshal report: %v", err)
 		return
 	}
 	client, scheme := peerAdminClient(cfg)
@@ -198,19 +198,19 @@ func pushDecommissionReport(cfg *config.Cluster, reason string, steps []decommSt
 		req.Header.Set("Authorization", "Bearer "+adminToken)
 		resp, err := client.Do(req)
 		if err != nil {
-			log.Printf("[DECOMMISSION] push report to %s: %v", peer, err)
+			loglevel.Warnf("[DECOMMISSION] push report to %s: %v", peer, err)
 			continue
 		}
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			log.Printf("[DECOMMISSION] push report to %s: %s", peer, resp.Status)
+			loglevel.Warnf("[DECOMMISSION] push report to %s: %s", peer, resp.Status)
 			continue
 		}
-		log.Printf("[DECOMMISSION] report pushed to %s", peer)
+		loglevel.Infof("[DECOMMISSION] report pushed to %s", peer)
 		pushed = true
 	}
 	if !pushed {
-		log.Printf("[DECOMMISSION] report could not be pushed to any surviving peer — see this node's own log above for the full record")
+		loglevel.Warnf("[DECOMMISSION] report could not be pushed to any surviving peer — see this node's own log above for the full record")
 	}
 }
 
@@ -222,9 +222,9 @@ func decommissionReportHandler(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid report body"})
 		return
 	}
-	log.Printf("[DECOMMISSION:PEER_REPORT] received from %s (%s) — reason=%q, %d step(s):", req.Role, req.Addr, req.Reason, len(req.Steps))
+	loglevel.Infof("[DECOMMISSION:PEER_REPORT] received from %s (%s) — reason=%q, %d step(s):", req.Role, req.Addr, req.Reason, len(req.Steps))
 	for _, s := range req.Steps {
-		log.Printf("[DECOMMISSION:PEER_REPORT]   %s: ok=%v %s", s.Name, s.OK, s.Detail)
+		loglevel.Stepf(s.OK, "[DECOMMISSION:PEER_REPORT]   %s: ok=%v %s", s.Name, s.OK, s.Detail)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -247,7 +247,7 @@ func sweepDir(dir string) {
 func notifyPeersOfSelfRemoval(cfg *config.Cluster) {
 	adminToken, err := findTokenByRole(cfg, "admin")
 	if err != nil {
-		log.Printf("[DECOMMISSION] find admin token for trusted_hosts update: %v", err)
+		loglevel.Warnf("[DECOMMISSION] find admin token for trusted_hosts update: %v", err)
 		return
 	}
 	selfAddr := hostOnly(cfg.ControlAddr)
@@ -262,28 +262,28 @@ func notifyPeersOfSelfRemoval(cfg *config.Cluster) {
 			continue
 		}
 		if err := pushUpdateTrustedHosts(cfg, peer, adminToken, newHosts); err != nil {
-			log.Printf("[DECOMMISSION] remove self from trusted_hosts on %s: %v", peer, err)
+			loglevel.Warnf("[DECOMMISSION] remove self from trusted_hosts on %s: %v", peer, err)
 			continue
 		}
-		log.Printf("[DECOMMISSION] removed self (%s) from trusted_hosts on %s", selfAddr, peer)
+		loglevel.Infof("[DECOMMISSION] removed self (%s) from trusted_hosts on %s", selfAddr, peer)
 
 		if err := pushRemovePeer(cfg, peer, adminToken, cfg.ControlAddr, cfg.Role); err != nil {
-			log.Printf("[DECOMMISSION] remove self (%s) from peers on %s: %v", cfg.ControlAddr, peer, err)
+			loglevel.Warnf("[DECOMMISSION] remove self (%s) from peers on %s: %v", cfg.ControlAddr, peer, err)
 			continue
 		}
-		log.Printf("[DECOMMISSION] removed self (%s) from peers on %s", cfg.ControlAddr, peer)
+		loglevel.Infof("[DECOMMISSION] removed self (%s) from peers on %s", cfg.ControlAddr, peer)
 
 		if err := pushResetRoleAddressing(cfg, peer, adminToken, cfg.Role, "", nil); err != nil {
-			log.Printf("[DECOMMISSION] reset %s's own scope-addressing defaults on %s: %v", cfg.Role, peer, err)
+			loglevel.Warnf("[DECOMMISSION] reset %s's own scope-addressing defaults on %s: %v", cfg.Role, peer, err)
 		} else {
-			log.Printf("[DECOMMISSION] reset %s's own scope-addressing defaults on %s", cfg.Role, peer)
+			loglevel.Infof("[DECOMMISSION] reset %s's own scope-addressing defaults on %s", cfg.Role, peer)
 		}
 	}
 }
 
 func selfDecommission(cfgPath, reason string) {
 	decommissioning.Store(true)
-	log.Printf("[DECOMMISSION] starting: %s", reason)
+	loglevel.Infof("[DECOMMISSION] starting: %s", reason)
 
 	// steps accumulates a verified outcome for every destructive action below.
 	var steps []decommStep
@@ -297,7 +297,7 @@ func selfDecommission(cfgPath, reason string) {
 
 		helperClient := helper.NewClient(helperSocketFor(cfg))
 		if hostIfaces, err := agent.HostOwnedTrunkInterfaces(cfg.Platform, cfg.Role); err != nil {
-			log.Printf("[DECOMMISSION] enumerate host interfaces: %v — falling back to config-driven sweep only", err)
+			loglevel.Warnf("[DECOMMISSION] enumerate host interfaces: %v — falling back to config-driven sweep only", err)
 			for scope, sc := range cfg.Scopes {
 				sc.Parent = cfg.Platform.ResolveParent(cfg.Role, sc.Parent)
 				agent.DeleteInterface(helperClient, scope, sc)
@@ -311,7 +311,7 @@ func selfDecommission(cfgPath, reason string) {
 			for _, name := range names {
 				spec := hostIfaces[name]
 				step := agent.DeleteOrphanInterface(helperClient, name, spec.Parent, spec.VLANID)
-				log.Printf("[DECOMMISSION] interface %s: ok=%v %s", name, step.OK, step.Detail)
+				loglevel.Stepf(step.OK, "[DECOMMISSION] interface %s: ok=%v %s", name, step.OK, step.Detail)
 				steps = append(steps, decommStep{Name: "interface " + name, OK: step.OK, Detail: step.Detail})
 			}
 		}
@@ -320,7 +320,7 @@ func selfDecommission(cfgPath, reason string) {
 			s := verifiedStopUnit(unit)
 			steps = append(steps, s)
 			if !s.OK {
-				log.Printf("[DECOMMISSION] stop %s: %s", unit, s.Detail)
+				loglevel.Warnf("[DECOMMISSION] stop %s: %s", unit, s.Detail)
 			}
 		}
 
@@ -331,14 +331,14 @@ func selfDecommission(cfgPath, reason string) {
 			Detail: fmt.Sprintf("this node's own aux-arbiter instance is leaving — cluster quorum drops from %d-of-%d to %d-of-%d arbiter voices until a replacement joins", before, before, after, after),
 		})
 	} else {
-		log.Printf("[DECOMMISSION] no current config loaded — skipping gate close/interface teardown/per-scope dnsmasq stop")
+		loglevel.Infof("[DECOMMISSION] no current config loaded — skipping gate close/interface teardown/per-scope dnsmasq stop")
 	}
 
 	for _, unit := range listDnsmasqInstances() {
 		s := verifiedStopUnit(unit)
 		steps = append(steps, s)
 		if !s.OK {
-			log.Printf("[DECOMMISSION] stop %s: %s", unit, s.Detail)
+			loglevel.Warnf("[DECOMMISSION] stop %s: %s", unit, s.Detail)
 		}
 	}
 
@@ -346,7 +346,7 @@ func selfDecommission(cfgPath, reason string) {
 		s := verifiedStopUnit(unit)
 		steps = append(steps, s)
 		if !s.OK {
-			log.Printf("[DECOMMISSION] stop %s: %s", unit, s.Detail)
+			loglevel.Warnf("[DECOMMISSION] stop %s: %s", unit, s.Detail)
 		}
 	}
 
@@ -369,22 +369,22 @@ func selfDecommission(cfgPath, reason string) {
 	cfgStep := verifiedDeletePath(cfgPath)
 	steps = append(steps, cfgStep)
 	if !cfgStep.OK {
-		log.Printf("[DECOMMISSION] %s still present after deletion — aborting before touching dnshived-helper", cfgPath)
+		loglevel.Infof("[DECOMMISSION] %s still present after deletion — aborting before touching dnshived-helper", cfgPath)
 		pushDecommissionReport(cfg, reason, steps)
 		return
 	}
 
-	log.Printf("[DECOMMISSION] step report (%d step(s)):", len(steps))
+	loglevel.Infof("[DECOMMISSION] step report (%d step(s)):", len(steps))
 	for _, s := range steps {
-		log.Printf("[DECOMMISSION]   %s: ok=%v %s", s.Name, s.OK, s.Detail)
+		loglevel.Stepf(s.OK, "[DECOMMISSION]   %s: ok=%v %s", s.Name, s.OK, s.Detail)
 	}
 	pushDecommissionReport(cfg, reason, steps)
 
 	if err := finishDecommissionFunc(); err != nil {
-		log.Printf("[DECOMMISSION] helper finish-decommission (restart watchdog + helper stop): %v — node may not come back up on its own", err)
+		loglevel.Warnf("[DECOMMISSION] helper finish-decommission (restart watchdog + helper stop): %v — node may not come back up on its own", err)
 	}
 
-	log.Printf("[DECOMMISSION] re-executing into bootstrap mode")
+	loglevel.Infof("[DECOMMISSION] re-executing into bootstrap mode")
 	reExecFunc()
 }
 
