@@ -4,6 +4,7 @@
 package leasesync
 
 import (
+	"net"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -50,20 +51,35 @@ func TestListenLocal_ReceivesWrittenEvent(t *testing.T) {
 	}
 }
 
-func TestListenLocal_RemovesStaleSocketFile(t *testing.T) {
+func TestListenLocal_RefusesLiveSocket(t *testing.T) {
 	sock := filepath.Join(t.TempDir(), "dhcp-lease.sock")
 
 	ln1, err := ListenLocal(sock, func(LocalEvent) {})
 	if err != nil {
 		t.Fatalf("first ListenLocal() error: %v", err)
 	}
-	_ = ln1
+	defer ln1.Close()
 
-	ln2, err := ListenLocal(sock, func(LocalEvent) {})
-	if err != nil {
-		t.Fatalf("second ListenLocal() over a stale socket file error: %v", err)
+	if ln2, err := ListenLocal(sock, func(LocalEvent) {}); err == nil {
+		ln2.Close()
+		t.Fatal("second ListenLocal() took over a live socket")
 	}
-	defer ln2.Close()
+}
+
+func TestListenLocal_ReplacesStaleSocketFile(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "dhcp-lease.sock")
+	stale, err := net.ListenUnix("unix", &net.UnixAddr{Name: sock, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.SetUnlinkOnClose(false)
+	stale.Close()
+
+	ln, err := ListenLocal(sock, func(LocalEvent) {})
+	if err != nil {
+		t.Fatalf("ListenLocal() over a stale socket file error: %v", err)
+	}
+	defer ln.Close()
 }
 
 func TestWriteLocalEvent_NoListenerReturnsError(t *testing.T) {

@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"dnshived/internal/unixsock"
 )
 
 // localDialTimeout/localIOTimeout bound both sides of the local
@@ -45,7 +47,9 @@ func ListenLocal(socketPath string, onEvent func(LocalEvent)) (net.Listener, err
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0o755); err != nil {
 		return nil, err
 	}
-	os.Remove(socketPath) // best-effort; a missing file is not an error
+	if err := unixsock.RemoveStale(socketPath); err != nil {
+		return nil, err
+	}
 	ln, err := net.Listen("unix", socketPath)
 	if err != nil {
 		return nil, err
