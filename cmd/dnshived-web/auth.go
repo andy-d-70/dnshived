@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -42,11 +44,22 @@ var (
 	verifyCache   = make(map[string]verifyCacheEntry)
 )
 
-// verifyCacheKey hashes the credential pair with a fast, non-PBKDF2 hash
-// purely so this cache's keys aren't plaintext passwords.
+// verifyCacheSecret keys the cache's credential digests. It lives only in
+// this process, so a memory dump gives no offline guessing target: an
+// unkeyed SHA-256 of a password would be one.
+var verifyCacheSecret = func() []byte {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		log.Fatalf("verify cache key: %v", err)
+	}
+	return key
+}()
+
+// verifyCacheKey is an HMAC-SHA256 of the credential pair under verifyCacheSecret.
 func verifyCacheKey(username, password string) string {
-	sum := sha256.Sum256([]byte(username + "\x00" + password))
-	return hex.EncodeToString(sum[:])
+	mac := hmac.New(sha256.New, verifyCacheSecret)
+	mac.Write([]byte(username + "\x00" + password))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // verifyResult tells basicAuth why a check failed.

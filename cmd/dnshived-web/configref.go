@@ -14,7 +14,7 @@ type configRef struct {
 // newConfigRef wraps cfg as the initial live value.
 func newConfigRef(cfg *WebConfig) *configRef {
 	r := &configRef{}
-	r.p.Store(cfg)
+	r.Store(cfg)
 	return r
 }
 
@@ -25,5 +25,6 @@ func (r *configRef) Load() *WebConfig {
 
 // Store atomically publishes cfg as the new live value.
 func (r *configRef) Store(cfg *WebConfig) {
+	probePinTransport.SetPins(probePinsOf(cfg.ProbeHosts))
 	r.p.Store(cfg)
 }

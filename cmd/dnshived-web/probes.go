@@ -617,6 +617,23 @@ probe results right after saving.</p>
 </tr>
 {{end}}
 </table></div>
+{{if .NodeProbeHosts}}<div class="table-wrap"><table border="1" cellpadding="4">
+<tr><th>Probe host</th><th>TLS</th><th>Pin certificate</th></tr>
+{{range .NodeProbeHosts}}
+<tr>
+  <td>{{.Addr}}</td>
+  <td>{{if .TLSFingerprint}}<span class="ok">pinned</span> <code>{{.TLSFingerprint}}</code>{{else}}<span class="warn" title="plain HTTP: traffic to this probe is not encrypted until its certificate is pinned. Type the fingerprint from the probe host's log (journalctl -u dnshived-probe | grep 'TLS API').">not pinned — plain HTTP</span>{{end}}</td>
+  <td><form method="post" action="/probes/pin" style="display:inline">
+    <input type="hidden" name="addr" value="{{.Addr}}">
+    <input type="text" name="tls_fingerprint" size="72" placeholder="sha256:…" pattern="sha256:[0-9a-f]{64}" required title="SHA-256 fingerprint from the probe host's log at start">
+    <button type="submit">Pin</button>
+  </form>{{if .TLSFingerprint}}<form method="post" action="/probes/unpin" style="display:inline">
+    <input type="hidden" name="addr" value="{{.Addr}}">
+    <button type="submit" class="btn-warn" title="go back to plain HTTP for this probe until it is pinned again">Unpin</button>
+  </form>{{end}}</td>
+</tr>
+{{end}}
+</table></div>{{end}}
 <form method="post" action="/config/probe-parallel">
 <p><label><input type="checkbox" name="probe_parallel_enabled" {{if .AllProbeHostsParallel}}checked{{end}}>
 {{if gt (len .ProbeParallelRows) 1}}Enable parallel probing on every probe host listed above{{else}}Enable parallel probing on this probe host{{end}}</label>

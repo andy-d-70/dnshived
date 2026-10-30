@@ -13,6 +13,8 @@ import (
 	"os"
 	"strings"
 
+	"dnshived/internal/cliguard"
+	"dnshived/internal/instlock"
 	"dnshived/internal/tlspin"
 	"dnshived/internal/webauth"
 )
@@ -28,11 +30,22 @@ func main() {
 	resetEmail := flag.String("email", "", "email address for -reset-user (kept unchanged when empty)")
 	resetPassword := flag.String("password", "", "new password for -reset-user (prompted interactively, without echo, if omitted)")
 	usersFileFlag := flag.String("users-file", "", "webui-users.json path for -reset-user (default: read from -config's users_file)")
-	flag.Parse()
+	cliguard.Parse("dnshived-web", false)
 
 	if *showVersion {
 		fmt.Println("dnshived-web", version)
 		os.Exit(0)
+	}
+
+	role := cliguard.Daemon
+	if *resetUser != "" {
+		role = cliguard.RootTool
+	}
+	cliguard.CheckUser("dnshived-web", role, "dnshived")
+	if role == cliguard.Daemon {
+		if err := instlock.Hold("/run/dnshived/web.lock"); err != nil {
+			cliguard.Exit("dnshived-web", err)
+		}
 	}
 
 	if *hashPassword != "" {
@@ -108,6 +121,7 @@ func main() {
 	mux.HandleFunc("POST /paths/reset", requirePermission(store, webauth.PermEditConfig, handleReliabilityResetPost(ref)))
 	mux.HandleFunc("POST /scopes/{name}/config", requirePermission(store, webauth.PermEditScopes, handleScopeConfigPost(ref)))
 	mux.HandleFunc("POST /scopes/{name}/toggle-disabled", requirePermission(store, webauth.PermEditScopes, handleScopeDisableToggle(ref)))
+	mux.HandleFunc("POST /scopes/{name}/move", requirePermission(store, webauth.PermEditScopes, handleScopeMove(ref)))
 	mux.HandleFunc("POST /scopes/{name}/rebalance", requirePermission(store, webauth.PermEditScopes, handleScopeRebalance(ref)))
 	mux.HandleFunc("POST /scopes/rebalance-all", requirePermission(store, webauth.PermEditScopes, handleScopeRebalanceAll(ref)))
 	mux.HandleFunc("POST /scopes/{name}/delete", requirePermission(store, webauth.PermEditScopes, handleScopeDelete(ref)))
@@ -116,6 +130,8 @@ func main() {
 	mux.HandleFunc("POST /probes/{scope}/{worker}/refresh", requirePermission(store, webauth.PermViewStatus, handleProbeRefresh(ref)))
 	mux.HandleFunc("POST /probes/{scope}/toggle-probe", requirePermission(store, webauth.PermEditScopes, handleProbeToggle(ref)))
 	mux.HandleFunc("POST /probes/settings", requirePermission(store, webauth.PermEditConfig, handleProbeSettingsPost(ref)))
+	mux.HandleFunc("POST /probes/pin", requirePermission(store, webauth.PermEditConfig, handleProbePin(*cfgPath, ref)))
+	mux.HandleFunc("POST /probes/unpin", requirePermission(store, webauth.PermEditConfig, handleProbeUnpin(*cfgPath, ref)))
 	mux.HandleFunc("/topology", requirePermission(store, webauth.PermViewStatus, handleTopology(ref)))
 	mux.HandleFunc("/daemons", requirePermission(store, webauth.PermViewStatus, handleDaemons(ref)))
 	mux.HandleFunc("/daemons/{node}/{unit}/restart/confirm", requirePermission(store, webauth.PermEditConfig, handleDaemonRestartConfirm(ref)))

@@ -6,6 +6,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 )
 
@@ -16,6 +17,11 @@ type NodeConfig struct {
 	TLS         bool   `json:"tls"`         // use https:// when true
 	AdminToken  string `json:"admin_token"` // Bearer token, admin role, for POST endpoints
 	DisplayName string `json:"display_name,omitempty"`
+
+	// TLSPort and TLSFingerprint are set for a probe host that has been pinned; a pinned probe is
+	// reached only over HTTPS on TLSPort, and only with the certificate whose fingerprint is TLSFingerprint.
+	TLSPort        string `json:"tls_port,omitempty"`
+	TLSFingerprint string `json:"tls_fingerprint,omitempty"`
 }
 
 // displayName returns n's cosmetic DisplayName when set, falling back to
@@ -92,9 +98,21 @@ func loadWebConfig(path string) (*WebConfig, error) {
 }
 
 func (n NodeConfig) baseURL() string {
+	if n.TLSFingerprint != "" {
+		return "https://" + n.tlsAddr()
+	}
 	scheme := "http"
 	if n.TLS {
 		scheme = "https"
 	}
 	return scheme + "://" + n.Addr
+}
+
+// tlsAddr is the host:port of a pinned probe's TLS API: Addr's host with TLSPort.
+func (n NodeConfig) tlsAddr() string {
+	host, _, err := net.SplitHostPort(n.Addr)
+	if err != nil {
+		host = n.Addr
+	}
+	return net.JoinHostPort(host, n.TLSPort)
 }

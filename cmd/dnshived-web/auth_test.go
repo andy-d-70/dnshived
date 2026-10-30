@@ -4,6 +4,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 	"time"
 
@@ -23,6 +25,26 @@ func resetVerifyCache(t *testing.T) {
 		verifyCache = make(map[string]verifyCacheEntry)
 		verifyCacheMu.Unlock()
 	})
+}
+
+func TestVerifyCacheKey_KeyedBySecret(t *testing.T) {
+	key := verifyCacheKey("admin", "secret")
+	plain := sha256.Sum256([]byte("admin\x00secret"))
+	if key == hex.EncodeToString(plain[:]) {
+		t.Fatal("cache key is an unkeyed SHA-256 of the credentials")
+	}
+	if verifyCacheKey("admin", "secret") != key {
+		t.Fatal("cache key differs between calls with the same credentials")
+	}
+	if verifyCacheKey("admin", "other") == key {
+		t.Fatal("different credentials share a cache key")
+	}
+	saved := verifyCacheSecret
+	defer func() { verifyCacheSecret = saved }()
+	verifyCacheSecret = []byte("another process secret")
+	if verifyCacheKey("admin", "secret") == key {
+		t.Fatal("cache key does not depend on the per-process secret")
+	}
 }
 
 func TestVerifyWithCache_ReusesResultForIdenticalCredentials(t *testing.T) {

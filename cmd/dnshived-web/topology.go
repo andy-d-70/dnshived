@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"dnshived/internal/config"
-	"dnshived/internal/nftgate"
+	"dnshived/internal/ifname"
 )
 
 type topologyVLAN struct {
@@ -129,7 +129,7 @@ func buildTopologyNode(node NodeConfig, st nodeStatus, statErr error, c config.C
 		byParent[sc.Parent] = append(byParent[sc.Parent], topologyVLAN{
 			ScopeName:       name,
 			VLANID:          sc.VLANID,
-			IfaceName:       nftgate.InterfaceName(sc.Parent, sc.VLANID),
+			IfaceName:       ifname.InterfaceName(sc.Parent, sc.VLANID),
 			NodeIP:          sc.NodeIP,
 			VIP:             sc.VIP,
 			VRRPID:          sc.VRRPID,
@@ -478,7 +478,7 @@ func buildProbeTopologyNode(node NodeConfig, trunkParent string, statErr error, 
 		byParent[parent] = append(byParent[parent], topologyVLAN{
 			ScopeName:       name,
 			VLANID:          sc.VLANID,
-			IfaceName:       nftgate.InterfaceName(parent, sc.VLANID),
+			IfaceName:       ifname.InterfaceName(parent, sc.VLANID),
 			VIP:             sc.VIP,
 			VRRPID:          sc.VRRPID,
 			PreferredWorker: sc.PreferredWorker,

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -89,8 +90,18 @@ func (a *authSync) pushTo(cfg *WebConfig, n NodeConfig) error {
 	return err
 }
 
+// minReplicationTokenLen is the shortest shared token replication accepts (F7).
+const minReplicationTokenLen = 32
+
 func (a *authSync) siblingDo(cfg *WebConfig, n NodeConfig, method, path string, body []byte) ([]byte, error) {
-	req, err := http.NewRequest(method, siblingWebURL(n, cfg)+path, bytes.NewReader(body))
+	url := siblingWebURL(n, cfg) + path
+	if !strings.HasPrefix(url, "https://") {
+		return nil, fmt.Errorf("replication refused: %s is not TLS (users and password hashes are only replicated over TLS, F7)", n.Addr)
+	}
+	if token := nodesSharedToken(cfg); len(token) < minReplicationTokenLen {
+		return nil, fmt.Errorf("replication refused: the shared token is shorter than %d characters (F7)", minReplicationTokenLen)
+	}
+	req, err := http.NewRequest(method, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

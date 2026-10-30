@@ -19,7 +19,7 @@ import (
 	"dnshived/internal/dhcpcentralrender"
 	"dnshived/internal/dhcplease"
 	"dnshived/internal/dnscentralrender"
-	"dnshived/internal/nftgate"
+	"dnshived/internal/ifname"
 )
 
 // scopesPerPage matches dnshived-top's own pagination size (15/page).
@@ -151,7 +151,7 @@ func buildScopeRows(rows []statusRow, configScopes map[string]config.ScopeConfig
 		row.PendingDelete = pendingDeletes[name]
 		row.Color = cfgSc.Color
 		row.Disabled = cfgSc.DNSMasqDisabled
-		row.Interface = nftgate.InterfaceName(cfgSc.Parent, cfgSc.VLANID)
+		row.Interface = ifname.InterfaceName(cfgSc.Parent, cfgSc.VLANID)
 		row.ParentInterface = cfgSc.Parent
 		row.VLANID = cfgSc.VLANID
 		row.Subnet = scopeSubnetCIDR(cfgSc.VIP)
@@ -573,6 +573,11 @@ var scopeDetailTmpl = template.Must(template.New("scope-detail").Parse(`<!doctyp
 </form>
 <form method="post" action="/scopes/{{.Scope}}/toggle-disabled" style="display:inline" onsubmit="return confirm('This will stage a pending change on every configured node ({{if .EditScope.DNSMasqDisabled}}enable{{else}}disable{{end}} scope {{.Scope}}) — nothing is applied until you commit from Pending changes. {{if not .EditScope.DNSMasqDisabled}}DHCP, DNS and probing stop for this scope; the VLAN interface and VIP/VRRP stay up.{{end}} Continue?')">
 <button type="submit" class="{{if .EditScope.DNSMasqDisabled}}btn-success{{else}}btn-warn{{end}}">{{if .EditScope.DNSMasqDisabled}}Enable this scope{{else}}Disable this scope (DHCP + DNS + probing off, VLAN/VIP stay up){{end}}</button>
+</form>
+<form method="post" action="/scopes/{{.Scope}}/move" style="display:inline" onsubmit="return confirm('Stage a move of scope {{.Scope}} to the parent and VLAN chosen here? The VIP, node IPs and DHCP pool stay the same. On commit every node rebuilds its VLAN sub-interface, so this scope is interrupted briefly.')">
+<select name="parent" class="js-combo" title="the trunk interface the scope's VLAN sub-interface is created on">{{$curp := .EditScope.Parent}}{{range .PlatformWorkers}}<option value="{{.}}" {{if eq . $curp}}selected{{end}}>{{.}}</option>{{end}}</select>
+<input type="number" name="vlan_id" min="0" max="4094" value="{{.EditScope.VLANID}}" required title="VLAN ID on the chosen parent (0 = untagged)">
+<button type="submit">Move scope to this parent and VLAN</button>
 </form>
 <form method="post" action="/scopes/{{.Scope}}/rebalance" style="display:inline" onsubmit="return confirm('Approve a rebalance to the preferred core ({{.EditScope.PreferredWorker}}) for scope {{.Scope}}? This stages the approval as a pending change on every configured node — nothing moves until you commit from Pending changes, and even then only once {{.EditScope.PreferredWorker}} is confirmed alive and stable. Continue?')" title="a scope never moves back to its preferred core automatically while a different node is already serving it correctly — this explicitly approves doing so now">
 <button type="submit">Rebalance to preferred ({{.EditScope.PreferredWorker}}) now</button>
@@ -1193,6 +1198,86 @@ func handleScopeConfigPost(ref *configRef) http.HandlerFunc {
 		user, _ := userFromContext(r)
 		pushCandidateAndRenderResult(w, cfg, payload, user, "/scopes/"+targetName, "back to scope")
 	}
+}
+
+// handleScopeMove serves POST /scopes/{name}/move. It changes only the scope's parent trunk and VLAN ID;
+// VIP, node IPs and the DHCP pool stay as they are.
+func handleScopeMove(ref *configRef) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cfg := ref.Load()
+		scope := r.PathValue("name")
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		c, _, _, err := currentEditableConfig(nodesIncludingSelf(cfg))
+		if err != nil {
+			http.Error(w, "fetch current config: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		sc, ok := c.Scopes[scope]
+		if !ok {
+			http.Error(w, "scope not present in cluster config: "+scope, http.StatusNotFound)
+			return
+		}
+
+		parent := strings.TrimSpace(r.PostForm.Get("parent"))
+		vlanID, err := strconv.Atoi(strings.TrimSpace(r.PostForm.Get("vlan_id")))
+		if err != nil {
+			http.Error(w, "vlan_id must be a number", http.StatusBadRequest)
+			return
+		}
+		if err := validateScopeMove(c, scope, parent, vlanID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		moved := sc
+		moved.Parent = parent
+		moved.VLANID = vlanID
+		newScopes := make(map[string]config.ScopeConfig, len(c.Scopes))
+		for name, other := range c.Scopes {
+			newScopes[name] = other
+		}
+		newScopes[scope] = moved
+
+		payload := clusterPushPayloadFrom(c)
+		payload.Scopes = newScopes
+
+		user, _ := userFromContext(r)
+		pushCandidateAndRenderResult(w, cfg, payload, user, "/scopes/"+scope, "back to scope")
+	}
+}
+
+// validateScopeMove reports why scope cannot move to parent and vlanID under the cluster's current config.
+func validateScopeMove(c config.Cluster, scope, parent string, vlanID int) error {
+	sc, ok := c.Scopes[scope]
+	if !ok {
+		return fmt.Errorf("scope not present in cluster config: %s", scope)
+	}
+	if vlanID < 0 || vlanID > 4094 {
+		return fmt.Errorf("vlan_id must be between 0 and 4094, got %d", vlanID)
+	}
+	known := false
+	for _, w := range c.Platform.Workers {
+		if w == parent {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return fmt.Errorf("parent %q is not a trunk interface of this cluster", parent)
+	}
+	if parent == sc.Parent && vlanID == sc.VLANID {
+		return fmt.Errorf("scope %s is already on %s, VLAN %d — nothing to move", scope, parent, vlanID)
+	}
+	for name, other := range c.Scopes {
+		if name != scope && other.Parent == parent && other.VLANID == vlanID {
+			return fmt.Errorf("VLAN %d on %s is already used by scope %s", vlanID, parent, name)
+		}
+	}
+	return nil
 }
 
 // scopeRenamePattern mirrors internal/config's own (unexported)

@@ -29,7 +29,7 @@ var rawClusterTransport = &http.Transport{TLSClientConfig: tlspin.Config()}
 
 // clusterTransport wraps the raw transport above with the
 // shared node-reachability belief (reachability.go).
-var clusterTransport http.RoundTripper = reachabilityRoundTripper{inner: rawClusterTransport}
+var clusterTransport http.RoundTripper = reachabilityRoundTripper{inner: probePinTransport}
 
 type reachabilityRoundTripper struct {
 	inner http.RoundTripper
@@ -272,9 +272,8 @@ var clusterSnapshotHTTPClient = &http.Client{Timeout: 10 * time.Second, Transpor
 var coordinatorPushClient = &http.Client{Timeout: 30 * time.Second, Transport: clusterTransport}
 
 // directHTTPClient bypasses the shared reachability belief cache entirely
-// (rawClusterTransport, not the reachability-wrapped one
-// httpClient uses).
-var directHTTPClient = &http.Client{Timeout: 5 * time.Second, Transport: rawClusterTransport}
+// (the pin router, not the reachability-wrapped one httpClient uses).
+var directHTTPClient = &http.Client{Timeout: 5 * time.Second, Transport: probePinTransport}
 
 func doGet(cl *http.Client, node NodeConfig, path string, v interface{}) (status int, err error) {
 	req, err := http.NewRequest(http.MethodGet, node.baseURL()+path, nil)
