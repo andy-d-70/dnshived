@@ -63,5 +63,5 @@ jobs:
           sudo env "PATH=$PATH" "GOCACHE=$(go env GOCACHE)" "GOMODCACHE=$(go env GOMODCACHE)" go test -race -count=1 \
             ./internal/agent ./internal/arbiter ./internal/cluster ./internal/coordplane \
             ./internal/desired ./internal/fencing ./internal/fsm ./internal/leasesync \
-            ./internal/nftgate ./internal/dhcprelay ./internal/state ./internal/tlspin \
+            ./internal/gate ./internal/relaygate ./internal/unixsock ./internal/dhcprelay ./internal/state ./internal/tlspin \
             ./internal/bootstrap ./internal/quorum
