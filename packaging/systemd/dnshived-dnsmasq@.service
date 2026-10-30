@@ -28,6 +28,8 @@ TimeoutStopSec=2s
 # without dac_override (which dnsmasq_t lacks under SELinux) could not
 # read them. No NoNewPrivileges: it blocks the transition to dnsmasq_t.
 User=dnshived
+# Files dnsmasq creates (the lease file) are owner-only.
+UMask=0077
 Group=dnshived
 AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN CAP_NET_RAW
