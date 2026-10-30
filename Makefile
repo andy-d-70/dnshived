@@ -1,4 +1,4 @@
-VERSION=0.9.8.6
+VERSION=0.9.8.7
 GIT_HASH=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 # FULL_VERSION comes from debian/changelog's top entry, so the package and
 # the binaries report the same version: VERSION-N+HASH for a dev-N entry,
