@@ -161,5 +161,12 @@ State and config survive upgrades; only the binaries change.
 
 Stopping `dnshived` closes every DHCP gate it holds (`ExecStopPost`), so
 upgrading the node that currently owns a scope gives that scope a
-bounded gap (~15-20 s) until the new process earns STABLE again. Plan a
-rolling multi-node upgrade with one node at a time.
+bounded gap (~15-20 s) until the new process earns STABLE again.
+
+Upgrade every node, including probe hosts, in one window. Do not roll
+the upgrade one node at a time: a node on this release refuses the
+unsigned pings and beacons of 0.9.8.5, so the upgraded node is isolated
+from the others until they follow (tested on the testlab, 2026-10-30).
+An upgrade from 0.9.8.5 also removes the nftables table that release's
+DHCP gate left behind, through the helper; the helper needs the
+`nftables` tools for that step.

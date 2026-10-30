@@ -1,3 +1,18 @@
+dnshived (0.9.8.6) unstable; urgency=medium
+
+  * Bugfix release. A failed relay close keeps the arbiter token until the
+    relay confirms it; an open whose answer was lost is closed on the relay;
+    the probe helper refuses VLAN-style and default-route trunk names and no
+    longer touches IPv6 addresses; probe hosts serve a TLS API on port 9445
+    that the web UI and dnshived-validate can pin; a scope can be moved to
+    another VLAN from its page; a self-decommission restarts the probe units
+    and removes the legacy nftables table; an upgrade from 0.9.8.5 removes the
+    legacy DHCP rules; every binary checks its arguments and the user it runs
+    as; a second daemon or helper refuses to start; files written as root are
+    owned by dnshived.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Fri, 30 Oct 2026 14:00:00 +0100
+
 dnshived (0.9.8.6~dev-17) unstable; urgency=medium
 
   * Join and probe adopt pushes are encrypted with a key derived from the join

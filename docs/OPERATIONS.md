@@ -105,8 +105,9 @@ dnshived-validate -addr <node-ip>:9443 -out /tmp/violations
 ```
 
 The real DHCP dual-active check (`dhcp_dual_active`) reads the probe
-hosts' results: from `-probe-addr host:9444[,host:9444]`, or else from
-`probe_hosts` in `/etc/dnshived/web.json` when it is readable (run it
+hosts' results: from `-probe-addr host:9444[,host:9444]` (plus any
+`-probe-pin host:port=sha256:...`), or else from `probe_hosts` in
+`/etc/dnshived/web.json` when it is readable (run it
 with sudo on a core). With no probe host known, the check is skipped and
 the startup output says so. The cluster's readonly token works on the
 probe hosts as well.

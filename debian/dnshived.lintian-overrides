@@ -1,0 +1,6 @@
+# Binaries are built with CGO_ENABLED=0 on purpose: they run on any supported distribution.
+dnshived: statically-linked-binary
+# /usr/local is the install path frozen in docs/FREEZE.md (Tier 1).
+dnshived: file-in-usr-local
+dnshived: file-in-unusual-dir
+dnshived: dir-in-usr-local

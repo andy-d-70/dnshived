@@ -114,6 +114,11 @@ getent group dnshived >/dev/null || groupadd -r dnshived
 getent passwd dnshived >/dev/null || \
     useradd -r -g dnshived -d /var/lib/dnshived -s /sbin/nologin \
             -c "dnshived cluster daemon" dnshived
+getent group dnshived-relay >/dev/null || groupadd -r dnshived-relay
+getent passwd dnshived-relay >/dev/null || \
+    useradd -r -g dnshived-relay -d /nonexistent -M -s /sbin/nologin \
+            -c "dnshived relay" dnshived-relay
+usermod -aG dnshived-relay dnshived
 exit 0
 
 %post
@@ -167,14 +172,21 @@ elif [ "$1" -ge 2 ]; then
     if systemctl is-active --quiet dnshived.service; then
         systemctl stop dnshived.service >/dev/null 2>&1 || :
         chown -R dnshived:dnshived /etc/dnshived /var/lib/dnshived
+        chgrp dnshived-relay /etc/dnshived/relay.json 2>/dev/null || :
         rm -f /run/dnshived/dhcp-lease.sock
         systemctl restart dnshived-helper.service >/dev/null 2>&1 || :
         systemctl start dnshived.service >/dev/null 2>&1 || :
     else
         chown -R dnshived:dnshived /etc/dnshived /var/lib/dnshived
+        chgrp dnshived-relay /etc/dnshived/relay.json 2>/dev/null || :
         rm -f /run/dnshived/dhcp-lease.sock
         systemctl restart dnshived-helper.service >/dev/null 2>&1 || :
     fi
+    # The relay runs as dnshived-relay from this version on; a running relay
+    # keeps its old user until it restarts. Track files the old relay left
+    # are owned by dnshived, and systemd cannot re-own them on SELinux hosts.
+    rm -f /run/dnshived-relay/*.track
+    systemctl try-restart dnshived-relay.service >/dev/null 2>&1 || :
     # Restart only what is running: a plain restart also starts the
     # probe pair on core nodes, and left a running web UI on the old
     # binary.

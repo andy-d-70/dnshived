@@ -46,8 +46,11 @@ Three symmetric nodes; any single one can serve 100% of scopes. Every
 node builds every configured scope's VLAN interface.
 
 - **DHCP:** `dnshived-relay` listens on each scope's VLAN and relays to
-  one central DHCP dnsmasq per node on loopback. A per-scope nftables
-  gate decides which node's relay may answer.
+  one central DHCP dnsmasq per node on loopback. Each scope is a gate
+  inside the relay, closed by default. The daemon opens it with the
+  node's witness tokens over a local socket, and the relay closes it
+  again when the authorization's deadline passes, so a daemon that stops
+  renewing loses its scopes by itself.
 - **DNS:** `dnshived-dnsrelay` answers on every node (active-active, no
   gate: DNS cannot dual-conflict the way DHCP can) and forwards what it
   can't answer to the central DNS dnsmasq.

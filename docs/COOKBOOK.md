@@ -38,7 +38,7 @@ removed scope is then torn down at startup
 
 Besides the config diff above, every node compares what actually
 exists on the host (interfaces under the `Platform.Workers` trunks,
-nftables gate rules, `dnshived-dnsmasq@*` units) with what
+`dnshived-dnsmasq@*` units) with what
 `cluster.json` says should exist, and removes the rest. It runs on
 every plane-health tick, on every commit, and when a scope beacon loses
 a peer, so stray interfaces need no manual cleanup. `Platform.Mgmt` is

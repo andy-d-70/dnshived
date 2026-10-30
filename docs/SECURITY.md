@@ -38,7 +38,14 @@ API (9443) and the web UI (8443). To use your own, set
 ```
 
 Client tools support `-tls` and `-tls-skip-verify`. The probe host's
-API (9444) is plain HTTP.
+plain API (9444) stays for probes that are not upgraded yet. Every probe
+also serves its API over HTTPS on 9445 with its own self-signed
+certificate, and that certificate can be pinned by its SHA-256
+fingerprint (`-probe-pin host:port=sha256:...` in `dnshived-top` and
+`dnshived-validate`, or the Pin action on the web UI's Probes page). A
+pinned probe is reached only over HTTPS with that certificate; the
+fingerprint is logged by the probe at start. A regenerated certificate
+(after a self-decommission or a state wipe) must be pinned again.
 
 ## API authentication
 
@@ -204,9 +211,13 @@ added through the API needs no manual allowlist step. Consequence: an
 admin API token alone is enough to get a new scope's interface built;
 it is the same authority that writes `cluster.json`.
 
-`dnshived --emergency-close-gates` (`ExecStopPost=+`, run as root)
-normally uses the helper and falls back to a direct nftables call only
-in that one-shot exit path.
+`dnshived --emergency-close-gates` (`ExecStopPost=+`, run as root) asks
+the relay to revoke every scope over its gate socket. The relay's own
+authorization deadline closes a scope if that call does not arrive.
+
+## Command line and user checks
+
+Every binary parses its flags strictly: an unknown flag or a stray argument prints one line and the usage, and exits 2. The daemons check that they run as their service account and refuse root. The root helpers check that they run as root. Only the tools that can need root may run as root (the list is in the changelog); `dnshived-top` refuses root. A second copy of a daemon or helper refuses to start while the first holds its lock file, and a socket path is replaced only when nothing answers on it. These checks guard against mistakes; they are not a boundary against root.
 
 ## Systemd hardening
 
@@ -268,7 +279,7 @@ management segment as the boundary:
 | Rogue scope injection | helper allowlist; `add-scopes` means an admin token can extend it (same authority as writing `cluster.json`) |
 | Partition-induced dual-active | witness protocol |
 | Stale node serving after a partition | fencing watermark |
-| Broadcast-delivered dual-active DHCP (VIP ownership does not stop broadcasts, `docs/DESIGN_DECISIONS.md`) | per-scope nftables gate, closed by default, old owner closed before new opens |
+| Broadcast-delivered dual-active DHCP (VIP ownership does not stop broadcasts, `docs/DESIGN_DECISIONS.md`) | per-scope relay gate, closed by default, authorized only with a current witness token, old owner closed before new opens |
 | Daemon forcing keepalived reloads | helper rate limits; anti-flap bounds legitimate reloads |
 | Unauthorized config write via the web UI | admin role in `webui-users.json`, admin API token per node |
 | Web UI credential leak on one node | same file on every node: treat as cluster-wide, as sensitive as the PSK |

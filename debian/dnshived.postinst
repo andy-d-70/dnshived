@@ -8,6 +8,14 @@ if ! getent passwd dnshived >/dev/null; then
     adduser --system --home /var/lib/dnshived --shell /usr/sbin/nologin \
             --ingroup dnshived dnshived
 fi
+if ! getent group dnshived-relay >/dev/null; then
+    addgroup --system dnshived-relay
+fi
+if ! getent passwd dnshived-relay >/dev/null; then
+    adduser --system --no-create-home --home /nonexistent --shell /usr/sbin/nologin \
+            --ingroup dnshived-relay dnshived-relay
+fi
+usermod -aG dnshived-relay dnshived
 
 mkdir -p /etc/dnshived
 mkdir -p /var/lib/dnshived
@@ -45,6 +53,9 @@ rm -f /etc/sudoers.d/dnshived-web
 # daemon left in the sticky /run/dnshived would block the new one.
 fix_ownership() {
     chown -R dnshived:dnshived /etc/dnshived /var/lib/dnshived
+    if [ -e /etc/dnshived/relay.json ]; then
+        chgrp dnshived-relay /etc/dnshived/relay.json
+    fi
     rm -f /run/dnshived/dhcp-lease.sock
 }
 
@@ -72,6 +83,13 @@ if [ "$1" = "configure" ]; then
             deb-systemd-invoke restart "$u" >/dev/null 2>&1 || true
         fi
     done
+fi
+
+# The relay runs as dnshived-relay from this version on; a running relay
+# keeps its old user until it restarts.
+if [ "$1" = "configure" ]; then
+    rm -f /run/dnshived-relay/*.track
+    deb-systemd-invoke try-restart dnshived-relay.service >/dev/null 2>&1 || true
 fi
 
 exit 0

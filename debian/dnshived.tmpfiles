@@ -1,3 +1,4 @@
 # Bootstrap join code, shared by dnshived (root) and dnshived-probe (user
 # dnshived) so a fresh host shows one code for either role.
 d /run/dnshived-bootstrap 2770 root dnshived -
+d /run/dnshived-relay 0755 dnshived-relay dnshived-relay -

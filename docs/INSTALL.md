@@ -26,8 +26,10 @@ gotchas).
 - `systemd`, `iproute2` (`iproute` on RHEL-family), `adduser`
   (`shadow-utils` on RHEL-family): always required.
 - `dnsmasq-base` on Debian/Ubuntu (`dnsmasq` on RHEL-family),
-  `keepalived`, `nftables`: recommended, needed only on a core node,
-  not on a probe-only host. Use `dnsmasq-base`, not `dnsmasq`: the full
+  `keepalived`: needed only on a core node, not on a probe-only host.
+  `nftables`: recommended on a core node. The DHCP gate no longer uses
+  it; it is needed only to remove the table a 0.9.8.5 install left
+  behind when upgrading. Use `dnsmasq-base`, not `dnsmasq`: the full
   package enables its own `dnsmasq.service`, which takes port 53.
 - Dependencies are only pulled in by `apt install ../dnshived*.deb` or
   `dnf install`. A plain `dpkg -i`/`rpm -i` skips them;
@@ -39,7 +41,7 @@ gotchas).
 ```sh
 git clone https://github.com/andy-d-70/dnshived.git
 cd dnshived
-git checkout v0.9.8.4    # latest release
+git checkout v0.9.8.6    # latest release
 ```
 
 `main` is ongoing development past the latest tag. Don't use `v0.9.8`

@@ -49,8 +49,11 @@ jobs:
 
       # The tests write files the way a real install does, owned by the
       # dnshived group, which needs root and that group.
-      - name: Create the dnshived service user
-        run: sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin dnshived
+      - name: Create the dnshived service users
+        run: |
+          sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin dnshived
+          sudo useradd --system --user-group --no-create-home --shell /usr/sbin/nologin dnshived-relay
+          sudo usermod -aG dnshived-relay dnshived
 
       - name: Test
         run: sudo env "PATH=$PATH" "GOCACHE=$(go env GOCACHE)" "GOMODCACHE=$(go env GOMODCACHE)" go test -count=1 ./...

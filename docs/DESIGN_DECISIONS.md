@@ -140,10 +140,11 @@ whether or not it holds the VIP; VRRP only controls unicast delivery to
 an address. Reproduced with `tools/dhcp-gate-rig.sh baseline`: two
 servers, one VIP, two offers.
 
-Exclusivity therefore comes from one nftables rule per scope on every
-node that must not answer: `iif <scope-iface> udp dport 67 drop`. With
-the relay architecture the rule gates the relay's client-facing socket
-for that VLAN; the mechanism did not change.
+Exclusivity therefore comes from one gate per scope on every node that
+must not answer. The gate is inside `dnshived-relay`: it refuses to
+forward on the scope's VLAN until the relay has been authorized for that
+scope with a current witness token, and it closes again on revoke or
+when the authorization's deadline passes.
 
 - Closing the old owner before opening the new one produces a short
   silent window, never a dual-answer window, because each node's gate
@@ -173,9 +174,9 @@ ping check.
 ## A stopped daemon closes its gates
 
 `dnshived.service` runs `dnshived --emergency-close-gates` as
-`ExecStopPost`, closing every scope's gate on any stop, clean or crash,
-so a dead daemon never leaves a gate open. It goes through the helper
-and falls back to a direct `nftgate.Close` only in this one-shot path.
+`ExecStopPost`, revoking every scope on the relay on any stop, clean or
+crash, so a dead daemon never leaves a gate open. The relay's own
+deadline is the backstop if that call does not reach it.
 The cost is a short serving gap (~15-20 s) on a routine restart of the
 current owner, accepted as silence over contradiction.
 
@@ -213,8 +214,8 @@ lost from config. Interfaces left over from before a rebuild, never
 recorded there, are invisible to it.
 
 A second, independent sweep compares what is actually on the host
-(interfaces under the `Platform.Workers` trunks, nftables gate rules,
-`dnshived-dnsmasq@*` units) with what `cluster.json` says should exist,
+(interfaces under the `Platform.Workers` trunks, `dnshived-dnsmasq@*`
+units) with what `cluster.json` says should exist,
 and removes the rest. It runs on every `CheckPlaneHealth` tick, on
 every commit, and when a scope beacon loses a peer. `Platform.Mgmt` is
 never touched. See `docs/COOKBOOK.md`, "Host-driven orphan sweep".
