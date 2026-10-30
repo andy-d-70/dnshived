@@ -1212,8 +1212,12 @@ func relabelSELinuxDataDir() {
 	if path == "" {
 		return
 	}
-	cmd := exec.Command(path, "-R", selinuxDataDir)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	// A dry run only reads the tree; the relabel runs only when it would change something.
+	dry, err := exec.Command(path, "-n", "-R", "-v", selinuxDataDir).CombinedOutput()
+	if err != nil || strings.TrimSpace(string(dry)) == "" {
+		return
+	}
+	if out, err := exec.Command(path, "-R", selinuxDataDir).CombinedOutput(); err != nil {
 		log.Printf("[HELPER:SELINUX] restorecon -R %s: %v (%s)", selinuxDataDir, err, strings.TrimSpace(string(out)))
 	}
 }

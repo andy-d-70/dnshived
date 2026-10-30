@@ -9,11 +9,18 @@ import (
 	"testing"
 )
 
-func withStubRestorecon(t *testing.T) (markerFile string) {
+// withStubRestorecon installs a fake restorecon. Every call is recorded in the marker file. A dry run (-n)
+// prints a line only when needsRelabel is set, the way restorecon reports files that would change.
+func withStubRestorecon(t *testing.T, needsRelabel bool) (markerFile string) {
 	t.Helper()
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "invocations")
-	script := "#!/bin/sh\necho \"$@\" >> " + marker + "\n"
+	dryOutput := "echo"
+	if !needsRelabel {
+		dryOutput = ":"
+	}
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + marker + "\n" +
+		"if [ \"$1\" = \"-n\" ]; then " + dryOutput + " relabel-needed; fi\n"
 	stub := filepath.Join(dir, "restorecon")
 	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
 		t.Fatalf("write stub: %v", err)
@@ -47,8 +54,8 @@ func TestRelabelSELinuxDataDir_NoOpWithoutRestorecon(t *testing.T) {
 // TestRelabelSELinuxDataDir_InvokesRestoreconWhenPresent proves the real
 // mechanism actually fires, and against the real, fixed selinuxDataDir
 // path.
-func TestRelabelSELinuxDataDir_InvokesRestoreconWhenPresent(t *testing.T) {
-	marker := withStubRestorecon(t)
+func TestRelabelSELinuxDataDir_RelabelsOnlyWhenDryRunReportsChanges(t *testing.T) {
+	marker := withStubRestorecon(t, true)
 
 	relabelSELinuxDataDir()
 
@@ -56,16 +63,30 @@ func TestRelabelSELinuxDataDir_InvokesRestoreconWhenPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("restorecon was never invoked: %v", err)
 	}
-	got := string(out)
-	if got != "-R "+selinuxDataDir+"\n" {
-		t.Fatalf("unexpected restorecon invocation: %q", got)
+	want := "-n -R -v " + selinuxDataDir + "\n-R " + selinuxDataDir + "\n"
+	if string(out) != want {
+		t.Fatalf("invocations %q, want %q", string(out), want)
+	}
+}
+
+func TestRelabelSELinuxDataDir_SkipsRelabelWhenNothingChanges(t *testing.T) {
+	marker := withStubRestorecon(t, false)
+
+	relabelSELinuxDataDir()
+
+	out, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("restorecon was never invoked: %v", err)
+	}
+	if string(out) != "-n -R -v "+selinuxDataDir+"\n" {
+		t.Fatalf("invocations %q: only the dry run should run when nothing changes", string(out))
 	}
 }
 
 // TestRelabelSELinuxDataDir_CachesLookupAcrossCalls confirms the LookPath
 // result is resolved once, not re-scanned on every call.
 func TestRelabelSELinuxDataDir_CachesLookupAcrossCalls(t *testing.T) {
-	marker := withStubRestorecon(t)
+	marker := withStubRestorecon(t, true)
 
 	relabelSELinuxDataDir()
 	relabelSELinuxDataDir()
@@ -81,8 +102,8 @@ func TestRelabelSELinuxDataDir_CachesLookupAcrossCalls(t *testing.T) {
 			lines++
 		}
 	}
-	if lines != 3 {
-		t.Fatalf("expected 3 real invocations (one per call), got %d: %q", lines, string(out))
+	if lines != 6 {
+		t.Fatalf("expected a dry run and a relabel per call (6 lines), got %d: %q", lines, string(out))
 	}
 }
 
@@ -102,7 +123,7 @@ func TestRun_TriggersRelabelOnlyForStartRestartReload(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			marker := withStubRestorecon(t)
+			marker := withStubRestorecon(t, true)
 
 			run("systemctl", tc.verb, "dnshived-dnsmasq@core-dhcp.service")
 
@@ -118,7 +139,7 @@ func TestRun_TriggersRelabelOnlyForStartRestartReload(t *testing.T) {
 // TestRun_NonSystemctlCommandNeverTriggersRelabel confirms an unrelated
 // command (e.g. "ip") never pays this cost at all.
 func TestRun_NonSystemctlCommandNeverTriggersRelabel(t *testing.T) {
-	marker := withStubRestorecon(t)
+	marker := withStubRestorecon(t, true)
 
 	run("ip", "link", "show", "lo")
 
