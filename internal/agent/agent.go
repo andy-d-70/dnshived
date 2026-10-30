@@ -3803,6 +3803,12 @@ vrrp_instance DNSHIVED_{{.Scope}} {
     version {{.VRRPVersion}}
 {{- end}}
     advert_int {{.AdvertInt}}
+{{- if .AuthPass}}
+    authentication {
+        auth_type PASS
+        auth_pass {{.AuthPass}}
+    }
+{{- end}}
     virtual_ipaddress {
         {{.VIP}}
     }
@@ -3816,6 +3822,7 @@ type keepalivedInstanceData struct {
 	VRRPVersion      int // 0 omits the "version" line (keepalived's own v2 default)
 	AdvertInt        string
 	VIP              string
+	AuthPass         string // empty omits the authentication block
 }
 
 func renderAdvertInt(ms int) string {
@@ -3859,9 +3866,14 @@ func (a *Agent) renderKeepalivedConfigAll(priorities map[string]int, extraReady 
 		if !ok {
 			priority = staticDefaultPriority(sc, a.role)
 		}
+		var authPass string
+		if a.psk != "" {
+			authPass = vrrpPassword(a.psk, fmt.Sprintf("scope:%s:vrid:%d", name, sc.VRRPID))
+		}
 		instances = append(instances, keepalivedInstanceData{
 			Scope: name, Interface: iface, VRRPID: sc.VRRPID, Priority: priority,
 			VRRPVersion: sc.VRRPVersion, AdvertInt: renderAdvertInt(sc.AdvertIntMS), VIP: sc.VIP,
+			AuthPass: authPass,
 		})
 	}
 
@@ -3873,7 +3885,7 @@ func atomicRender(path string, tmpl *template.Template, data interface{}) error 
 	if err := tmpl.Execute(&buf, data); err != nil {
 		return err
 	}
-	return atomicWriteFile(path, buf.Bytes(), 0o644)
+	return atomicWriteFile(path, buf.Bytes(), 0o600)
 }
 
 // atomicWriteFile writes data to path via a temp file + fsync + rename,

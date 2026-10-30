@@ -22,6 +22,7 @@ const (
 )
 
 type mgmtVIPData struct {
+	AuthPass  string // empty omits the authentication block
 	Interface string
 	VRRPID    int
 	Priority  int
@@ -38,6 +39,12 @@ vrrp_instance DNSHIVED_MGMT {
     priority {{.Priority}}
     advert_int 1
     nopreempt
+{{- if .AuthPass}}
+    authentication {
+        auth_type PASS
+        auth_pass {{.AuthPass}}
+    }
+{{- end}}
     virtual_ipaddress {
         {{.VIP}}
     }
@@ -71,6 +78,9 @@ func (a *Agent) RenderMgmtVIPConfig(mgmtVIP *config.MgmtVIPConfig, platform *con
 		Priority:  priority,
 		VIP:       mgmtVIP.VIP,
 	}
+	if a.psk != "" {
+		data.AuthPass = vrrpPassword(a.psk, fmt.Sprintf("mgmt:vrid:%d", mgmtVIP.VRRPID))
+	}
 	var buf bytes.Buffer
 	if err := mgmtVIPTmpl.Execute(&buf, data); err != nil {
 		return err
@@ -79,7 +89,7 @@ func (a *Agent) RenderMgmtVIPConfig(mgmtVIP *config.MgmtVIPConfig, platform *con
 	old, readErr := os.ReadFile(path)
 	changed := readErr != nil || !bytes.Equal(old, buf.Bytes())
 	if changed {
-		if err := atomicWriteFile(path, buf.Bytes(), 0o644); err != nil {
+		if err := atomicWriteFile(path, buf.Bytes(), 0o600); err != nil {
 			return err
 		}
 	}
