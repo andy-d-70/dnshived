@@ -4,7 +4,6 @@
 package agent
 
 import (
-	"dnshived/internal/loglevel"
 	"fmt"
 	"net"
 	"sort"
@@ -13,7 +12,8 @@ import (
 
 	"dnshived/internal/config"
 	"dnshived/internal/helper"
-	"dnshived/internal/nftgate"
+	"dnshived/internal/ifname"
+	"dnshived/internal/loglevel"
 )
 
 // reservedDnsmasqScopes are instance names that are never a real scope, so
@@ -68,7 +68,7 @@ func ConfiguredTrunkInterfaces(platform *config.Platform, role string, scopes ma
 	out := make(map[string]bool, len(scopes))
 	for _, sc := range scopes {
 		local := platform.ResolveParent(role, sc.Parent)
-		out[nftgate.InterfaceName(local, sc.VLANID)] = true
+		out[ifname.InterfaceName(local, sc.VLANID)] = true
 	}
 	return out
 }
@@ -91,12 +91,7 @@ func DeleteOrphanInterface(helperClient *helper.Client, iface, parent string, vl
 	if _, err := net.InterfaceByName(iface); err == nil {
 		return OrphanStep{Name: iface, OK: false, Detail: "ip link delete reported success but interface is still present"}
 	}
-	if closed, derr := helperClient.GetDHCPGateDump(); derr == nil {
-		if _, stillGated := closed[iface]; stillGated {
-			return OrphanStep{Name: iface, OK: false, Detail: "interface removed but its gate rule is still present"}
-		}
-	}
-	return OrphanStep{Name: iface, OK: true, Detail: "interface and gate rule confirmed gone"}
+	return OrphanStep{Name: iface, OK: true, Detail: "interface confirmed gone"}
 }
 
 func StopOrphanDnsmasqUnit(helperClient *helper.Client, scope string) error {
@@ -109,7 +104,7 @@ func StopOrphanDnsmasqUnit(helperClient *helper.Client, scope string) error {
 // TriggerOrphanCheck runs checkOrphans immediately and logs whatever it
 // finds under the given log tag.
 func (a *Agent) TriggerOrphanCheck(logTag string) {
-	for _, f := range a.checkOrphans(nil) {
+	for _, f := range a.checkOrphans() {
 		loglevel.Infof("[AGENT:%s] %s: %s", logTag, f.What, f.Detail)
 	}
 }
@@ -125,9 +120,9 @@ func (a *Agent) configuredTrunkInterfaces() map[string]bool {
 }
 
 // checkOrphans is the host-vs-config sweep behind the
-// "orphan_interface"/"orphan_gate_rule"/"orphan_dnsmasq_unit" PlaneHealth
+// "orphan_interface"/"orphan_dnsmasq_unit" PlaneHealth
 // findings.
-func (a *Agent) checkOrphans(gateClosed map[string]bool) []PlaneHealth {
+func (a *Agent) checkOrphans() []PlaneHealth {
 	a.constructMu.Lock()
 	defer a.constructMu.Unlock()
 
@@ -161,30 +156,6 @@ func (a *Agent) checkOrphans(gateClosed map[string]bool) []PlaneHealth {
 		}
 	}
 
-	gc := gateClosed
-	if gc == nil {
-		if d, derr := a.gateDump(); derr == nil {
-			gc = d
-		}
-	}
-	for iface := range gc {
-		if _, onOurTrunk := hostIfaces[iface]; !onOurTrunk {
-			continue
-		}
-		if configured[iface] {
-			continue // a real, current scope — not an orphan
-		}
-		if err := a.removeOrphanGateRule(iface); err != nil {
-			found = append(found, PlaneHealth{What: "orphan_gate_rule",
-				Detail:   fmt.Sprintf("gate rule for %s (no interface, no configured scope) could not be removed: %v", iface, err),
-				Healable: false})
-			continue
-		}
-		found = append(found, PlaneHealth{What: "orphan_gate_rule",
-			Detail:   fmt.Sprintf("gate rule for %s referenced a nonexistent interface with no configured scope — removed", iface),
-			Healable: false})
-	}
-
 	allScopes := a.allScopes()
 	for unit := range a.unitCache().Prefixed("dnshived-dnsmasq@") {
 		scope := strings.TrimSuffix(strings.TrimPrefix(unit, "dnshived-dnsmasq@"), ".service")
@@ -208,11 +179,4 @@ func (a *Agent) checkOrphans(gateClosed map[string]bool) []PlaneHealth {
 	}
 
 	return found
-}
-
-func (a *Agent) removeOrphanGateRule(iface string) error {
-	if a.helperClient == nil {
-		return errNoHelper
-	}
-	return a.helperClient.RemoveGateRuleUnscoped(iface)
 }

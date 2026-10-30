@@ -8,6 +8,7 @@ package ifname
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -72,4 +73,12 @@ func Resolve(name string) string {
 	}
 	mu.Unlock()
 	return kernel
+}
+
+// InterfaceName is the kernel name of a scope's VLAN interface: the parent itself for VLAN 0, else "<parent>.<vlan>".
+func InterfaceName(parent string, vlanID int) string {
+	if vlanID == 0 {
+		return parent
+	}
+	return fmt.Sprintf("%s.%d", parent, vlanID)
 }

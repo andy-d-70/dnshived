@@ -1,0 +1,240 @@
+{
+  "psk": "test-psk-not-secret",
+  "now": "2026-10-25T12:00:00Z",
+  "vectors": [
+    {
+      "name": "old_form_valid",
+      "token": {
+        "scope": "office",
+        "owner": "core-1",
+        "incarnation": 7,
+        "granted_at": "2026-10-25T11:59:55Z",
+        "expires_at": "2026-10-25T12:00:30Z",
+        "nonce": "0123456789abcdef",
+        "signature": "1b91000db5370b1a83315a35b1aebad4771e3431d73e08513edc27f02c980a18"
+      },
+      "valid": true,
+      "reason": ""
+    },
+    {
+      "name": "new_form_valid",
+      "token": {
+        "scope": "office",
+        "owner": "core-1",
+        "incarnation": 7,
+        "granted_at": "2026-10-25T11:59:55Z",
+        "expires_at": "2026-10-25T12:00:30Z",
+        "nonce": "0123456789abcdef",
+        "signature": "8325ce38c303225480a419e28a8f679937b17110f64b255009f230855500b9aa",
+        "arbiter": "arb-core-2"
+      },
+      "valid": true,
+      "reason": ""
+    },
+    {
+      "name": "wrong_psk",
+      "token": {
+        "scope": "office",
+        "owner": "core-1",
+        "incarnation": 7,
+        "granted_at": "2026-10-25T11:59:55Z",
+        "expires_at": "2026-10-25T12:00:30Z",
+        "nonce": "0123456789abcdef",
+        "signature": "1fea3453ef65bc86e58128d19a051081ec6e16f3ea6fa011d97ff4dcf22b07de",
+        "arbiter": "arb-core-2"
+      },
+      "valid": false,
+      "reason": "signature"
+    },
+    {
+      "name": "tampered_scope",
+      "token": {
+        "scope": "dante-",
+        "owner": "core-1",
+        "incarnation": 7,
+        "granted_at": "2026-10-25T11:59:55Z",
+        "expires_at": "2026-10-25T12:00:30Z",
+        "nonce": "0123456789abcdef",
+        "signature": "8325ce38c303225480a419e28a8f679937b17110f64b255009f230855500b9aa",
+        "arbiter": "arb-core-2"
+      },
+      "valid": false,
+      "reason": "signature"
+    },
+    {
+      "name": "tampered_owner",
+      "token": {
+        "scope": "office",
+        "owner": "core-2",
+        "incarnation": 7,
+        "granted_at": "2026-10-25T11:59:55Z",
+        "expires_at": "2026-10-25T12:00:30Z",
+        "nonce": "0123456789abcdef",
+        "signature": "8325ce38c303225480a419e28a8f679937b17110f64b255009f230855500b9aa",
+        "arbiter": "arb-core-2"
+      },
+      "valid": false,
+      "reason": "signature"
+    },
+    {
+      "name": "tampered_incarnation",
+      "token": {
+        "scope": "office",
+        "owner": "core-1",
+        "incarnation": 8,
+        "granted_at": "2026-10-25T11:59:55Z",
+        "expires_at": "2026-10-25T12:00:30Z",
+        "nonce": "0123456789abcdef",
+        "signature": "8325ce38c303225480a419e28a8f679937b17110f64b255009f230855500b9aa",
+        "arbiter": "arb-core-2"
+      },
+      "valid": false,
+      "reason": "signature"
+    },
+    {
+      "name": "tampered_granted_at",
+      "token": {
+        "scope": "office",
+        "owner": "core-1",
+        "incarnation": 7,
+        "granted_at": "2026-10-25T11:59:56Z",
+        "expires_at": "2026-10-25T12:00:30Z",
+        "nonce": "0123456789abcdef",
+        "signature": "8325ce38c303225480a419e28a8f679937b17110f64b255009f230855500b9aa",
+        "arbiter": "arb-core-2"
+      },
+      "valid": false,
+      "reason": "signature"
+    },
+    {
+      "name": "tampered_expires_at",
+      "token": {
+        "scope": "office",
+        "owner": "core-1",
+        "incarnation": 7,
+        "granted_at": "2026-10-25T11:59:55Z",
+        "expires_at": "2026-10-25T12:00:31Z",
+        "nonce": "0123456789abcdef",
+        "signature": "8325ce38c303225480a419e28a8f679937b17110f64b255009f230855500b9aa",
+        "arbiter": "arb-core-2"
+      },
+      "valid": false,
+      "reason": "signature"
+    },
+    {
+      "name": "tampered_nonce",
+      "token": {
+        "scope": "office",
+        "owner": "core-1",
+        "incarnation": 7,
+        "granted_at": "2026-10-25T11:59:55Z",
+        "expires_at": "2026-10-25T12:00:30Z",
+        "nonce": "fedcba9876543210",
+        "signature": "8325ce38c303225480a419e28a8f679937b17110f64b255009f230855500b9aa",
+        "arbiter": "arb-core-2"
+      },
+      "valid": false,
+      "reason": "signature"
+    },
+    {
+      "name": "tampered_arbiter",
+      "token": {
+        "scope": "office",
+        "owner": "core-1",
+        "incarnation": 7,
+        "granted_at": "2026-10-25T11:59:55Z",
+        "expires_at": "2026-10-25T12:00:30Z",
+        "nonce": "0123456789abcdef",
+        "signature": "8325ce38c303225480a419e28a8f679937b17110f64b255009f230855500b9aa",
+        "arbiter": "arb-core-3"
+      },
+      "valid": false,
+      "reason": "signature"
+    },
+    {
+      "name": "arbiter_stripped",
+      "token": {
+        "scope": "office",
+        "owner": "core-1",
+        "incarnation": 7,
+        "granted_at": "2026-10-25T11:59:55Z",
+        "expires_at": "2026-10-25T12:00:30Z",
+        "nonce": "0123456789abcdef",
+        "signature": "8325ce38c303225480a419e28a8f679937b17110f64b255009f230855500b9aa"
+      },
+      "valid": false,
+      "reason": "signature"
+    },
+    {
+      "name": "expired",
+      "token": {
+        "scope": "office",
+        "owner": "core-1",
+        "incarnation": 7,
+        "granted_at": "2026-10-25T11:59:25Z",
+        "expires_at": "2026-10-25T11:59:59Z",
+        "nonce": "0123456789abcdef",
+        "signature": "e2b4b13935b350857d45f325baa23dd92176bb0b1de9550a1549d804eeab9c70",
+        "arbiter": "arb-core-2"
+      },
+      "valid": false,
+      "reason": "expired"
+    },
+    {
+      "name": "more_than_60s_ahead",
+      "token": {
+        "scope": "office",
+        "owner": "core-1",
+        "incarnation": 7,
+        "granted_at": "2026-10-25T11:59:55Z",
+        "expires_at": "2026-10-25T12:01:01Z",
+        "nonce": "0123456789abcdef",
+        "signature": "99a09fb07f8969be4707402db9b1ded5a2e7f1454414fd939d6052dc98979fee",
+        "arbiter": "arb-core-2"
+      },
+      "valid": false,
+      "reason": "too far ahead"
+    },
+    {
+      "name": "nanoseconds_and_zone_offset",
+      "token": {
+        "scope": "office",
+        "owner": "core-1",
+        "incarnation": 7,
+        "granted_at": "2026-10-25T13:59:55.123456789+02:00",
+        "expires_at": "2026-10-25T14:00:30.987654321+02:00",
+        "nonce": "0123456789abcdef",
+        "signature": "8325ce38c303225480a419e28a8f679937b17110f64b255009f230855500b9aa",
+        "arbiter": "arb-core-2"
+      },
+      "valid": true,
+      "reason": ""
+    }
+  ],
+  "quorum": [
+    {
+      "name": "one_arbiter_two_renewals",
+      "arbiters": [
+        "arb-core-2",
+        "arb-core-2"
+      ],
+      "expect": 1
+    },
+    {
+      "name": "two_arbiters",
+      "arbiters": [
+        "arb-core-2",
+        "arb-core-3"
+      ],
+      "expect": 2
+    },
+    {
+      "name": "old_form_does_not_count",
+      "arbiters": [
+        "",
+        "arb-core-3"
+      ],
+      "expect": 1
+    }
+  ]
+}

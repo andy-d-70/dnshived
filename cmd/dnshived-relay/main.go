@@ -4,16 +4,22 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"dnshived/internal/cliguard"
 	"dnshived/internal/config"
 	"dnshived/internal/dhcprelay"
+	"dnshived/internal/instlock"
 	"dnshived/internal/relayrender"
 )
 
@@ -24,10 +30,31 @@ func main() {
 	showVersion := flag.Bool("version", false, "print version and exit")
 	statusInterval := flag.Duration("status-interval", time.Minute, "how often to log a metrics summary (0 disables)")
 	renderFrom := flag.String("render-from", "", "render relay config from a dnshived cluster.json and write it to --config, instead of starting the relay")
-	flag.Parse()
+	gateSocket := flag.String("gate-socket", "/run/dnshived-relay/relay-gate.sock", "control socket for the authority gate")
+	runtimeDir := flag.String("runtime-dir", "/run/dnshived-relay", "directory for the per-scope track files")
+	showStatus := flag.Bool("status", false, "print the running relay's status (gate socket) and exit")
+	cliguard.Parse("dnshived-relay", false)
 
 	if *showVersion {
 		fmt.Println("dnshived-relay", version)
+		os.Exit(0)
+	}
+
+	role := cliguard.Daemon
+	if *showStatus {
+		role = cliguard.RootTool
+	}
+	cliguard.CheckUser("dnshived-relay", role, "dnshived-relay")
+	if role == cliguard.Daemon {
+		if err := instlock.Hold(*runtimeDir + "/relay.lock"); err != nil {
+			cliguard.Exit("dnshived-relay", err)
+		}
+	}
+
+	if *showStatus {
+		if err := printStatus(*gateSocket); err != nil {
+			log.Fatalf("[RELAY] status: %v", err)
+		}
 		os.Exit(0)
 	}
 
@@ -47,6 +74,9 @@ func main() {
 	r, err := dhcprelay.New(*cfg)
 	if err != nil {
 		log.Fatalf("[RELAY] init: %v", err)
+	}
+	if err := r.ConfigureGate(*gateSocket, *runtimeDir, version); err != nil {
+		log.Fatalf("[RELAY] gate: %v", err)
 	}
 
 	if err := r.Start(); err != nil {
@@ -73,6 +103,29 @@ func main() {
 	log.Print("[RELAY] shutting down")
 	r.Stop()
 	log.Printf("[RELAY] stopped: %+v", r.Snapshot())
+}
+
+// printStatus asks the running relay for its status over the gate socket and prints the reply as indented JSON.
+func printStatus(sockPath string) error {
+	conn, err := net.DialTimeout("unix", sockPath, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Write([]byte(`{"command":"status"}` + "\n")); err != nil {
+		return err
+	}
+	body, err := io.ReadAll(conn)
+	if err != nil {
+		return err
+	}
+	var out bytes.Buffer
+	if err := json.Indent(&out, bytes.TrimSpace(body), "", "  "); err != nil {
+		return fmt.Errorf("reply is not JSON: %w", err)
+	}
+	fmt.Println(out.String())
+	return nil
 }
 
 // reloadConfig re-reads configPath and applies it via r.Reconfigure.

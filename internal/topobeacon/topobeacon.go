@@ -7,12 +7,14 @@ package topobeacon
 
 import (
 	"context"
-	"dnshived/internal/loglevel"
 	"encoding/json"
 	"net"
 	"sync"
 	"syscall"
 	"time"
+
+	"dnshived/internal/loglevel"
+	"dnshived/internal/psksign"
 )
 
 // Port is this package's own dedicated UDP port.
@@ -23,6 +25,9 @@ const Port = 9446
 const Magic = "DNSHIVED-TOPO-BEACON-V1"
 
 const DefaultInterval = 5 * time.Second
+
+// denyLogEvery bounds the log line for refused beacons per listener.
+const denyLogEvery = 30 * time.Second
 
 // staleAfterFactor: a Sighting not refreshed within
 // staleAfterFactor*interval is pruned as stale on the next Snapshot.
@@ -40,6 +45,21 @@ type Beacon struct {
 	Role  string `json:"role"`
 	Iface string `json:"iface"`
 	Kind  string `json:"kind"` // KindTrunk or KindMgmt
+	// Signature is the PSK HMAC over beaconSignData (F6). Empty without a PSK.
+	Signature string `json:"sig,omitempty"`
+}
+
+// beaconSignData is what the beacon signature covers.
+func beaconSignData(b Beacon) string {
+	return b.Magic + ":" + b.Role + ":" + b.Iface + ":" + b.Kind
+}
+
+// verifyBeacon accepts every beacon when no PSK is set, and only a correctly signed one otherwise.
+func verifyBeacon(psk []byte, b Beacon) bool {
+	if len(psk) == 0 {
+		return true
+	}
+	return psksign.Verify(psk, beaconSignData(b), b.Signature)
 }
 
 // IfaceSpec names one of THIS node's own interfaces to beacon on and
@@ -153,9 +173,10 @@ type Runner struct {
 	role     string
 	store    *Store
 	interval time.Duration
+	psk      []byte
 	running  map[string]runningIface // key: name + "|" + kind
 	// start is overridden in tests; it must run until ctx is done.
-	start func(ctx context.Context, role string, spec IfaceSpec, store *Store, interval time.Duration)
+	start func(ctx context.Context, role string, spec IfaceSpec, store *Store, interval time.Duration, psk []byte)
 }
 
 type runningIface struct {
@@ -164,17 +185,17 @@ type runningIface struct {
 }
 
 // NewRunner creates a Runner that records into store.
-func NewRunner(role string, store *Store, interval time.Duration) *Runner {
+func NewRunner(role string, store *Store, interval time.Duration, psk []byte) *Runner {
 	if interval <= 0 {
 		interval = DefaultInterval
 	}
-	return &Runner{role: role, store: store, interval: interval, running: make(map[string]runningIface), start: startIface}
+	return &Runner{role: role, store: store, interval: interval, psk: psk, running: make(map[string]runningIface), start: startIface}
 }
 
 // startIface runs the sender and listener for spec until ctx is done.
-func startIface(ctx context.Context, role string, spec IfaceSpec, store *Store, interval time.Duration) {
-	go untilDone(ctx, func() { SendOnInterface(ctx, role, spec, interval) })
-	untilDone(ctx, func() { listenOnInterface(ctx, spec, store) })
+func startIface(ctx context.Context, role string, spec IfaceSpec, store *Store, interval time.Duration, psk []byte) {
+	go untilDone(ctx, func() { SendOnInterface(ctx, role, spec, interval, psk) })
+	untilDone(ctx, func() { listenOnInterface(ctx, spec, store, psk) })
 }
 
 const ifaceRetryDelay = 30 * time.Second
@@ -214,7 +235,7 @@ func (r *Runner) Update(ctx context.Context, specs []IfaceSpec) (added, removed 
 		}
 		ictx, cancel := context.WithCancel(ctx)
 		r.running[key] = runningIface{spec: sp, cancel: cancel}
-		go r.start(ictx, r.role, sp, r.store, r.interval)
+		go r.start(ictx, r.role, sp, r.store, r.interval, r.psk)
 		added = append(added, sp)
 	}
 	return added, removed
@@ -251,10 +272,14 @@ func bindToDeviceUDP4(iface string) net.ListenConfig {
 	}
 }
 
-func SendOnInterface(ctx context.Context, role string, spec IfaceSpec, interval time.Duration) {
+func SendOnInterface(ctx context.Context, role string, spec IfaceSpec, interval time.Duration, psk []byte) {
 	linkUp(spec.Name)
 
-	payload, err := json.Marshal(Beacon{Magic: Magic, Role: role, Iface: spec.Name, Kind: spec.Kind})
+	beacon := Beacon{Magic: Magic, Role: role, Iface: spec.Name, Kind: spec.Kind}
+	if len(psk) > 0 {
+		beacon.Signature = psksign.Sign(psk, beaconSignData(beacon))
+	}
+	payload, err := json.Marshal(beacon)
 	if err != nil {
 		loglevel.Warnf("[TOPOBEACON:ERROR] marshal beacon for %s: %v", spec.Name, err)
 		return
@@ -295,7 +320,7 @@ func SendOnInterface(ctx context.Context, role string, spec IfaceSpec, interval 
 
 // listenOnInterface binds to spec.Name via SO_BINDTODEVICE and records
 // every valid Beacon heard into store, forever, until ctx is done.
-func listenOnInterface(ctx context.Context, spec IfaceSpec, store *Store) {
+func listenOnInterface(ctx context.Context, spec IfaceSpec, store *Store, psk []byte) {
 	lc := bindToDeviceUDP4(spec.Name)
 	pc, err := lc.ListenPacket(ctx, "udp4", ":"+itoa(Port))
 	if err != nil {
@@ -309,8 +334,9 @@ func listenOnInterface(ctx context.Context, spec IfaceSpec, store *Store) {
 	}()
 
 	buf := make([]byte, 1024)
+	var lastDeny time.Time
 	for {
-		n, _, err := pc.ReadFrom(buf)
+		n, src, err := pc.ReadFrom(buf)
 		if err != nil {
 			return
 		}
@@ -319,6 +345,13 @@ func listenOnInterface(ctx context.Context, spec IfaceSpec, store *Store) {
 			continue
 		}
 		if b.Magic != Magic || b.Iface == "" || b.Role == "" {
+			continue
+		}
+		if !verifyBeacon(psk, b) {
+			if time.Since(lastDeny) >= denyLogEvery {
+				lastDeny = time.Now()
+				loglevel.Warnf("[TOPOBEACON:DENY_UNSIGNED] beacon without a valid cluster signature on %s from %s", spec.Name, src)
+			}
 			continue
 		}
 		store.record(spec.Name, spec.Kind, b)
@@ -357,6 +390,7 @@ func linkUp(iface string) {
 	if LinkUp == nil {
 		return
 	}
+	loglevel.Infof("[TOPOBEACON:LINKUP] bringing %s up before beaconing (F8)", iface)
 	if err := LinkUp(iface); err != nil {
 		loglevel.Warnf("[TOPOBEACON:WARN] bring %s up before beaconing: %v", iface, err)
 	}

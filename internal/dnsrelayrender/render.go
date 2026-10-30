@@ -9,13 +9,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/user"
 	"sort"
-	"strconv"
 
 	"dnshived/internal/config"
 	"dnshived/internal/dnscentralrender"
-	"dnshived/internal/nftgate"
+	"dnshived/internal/ifname"
+	"dnshived/internal/ownership"
 )
 
 // RelayConfig mirrors the subset of cmd/dnshived-dnsrelay's own Config
@@ -49,7 +48,7 @@ func RenderRelayConfig(cluster config.Cluster) (RelayConfig, error) {
 		if sc.DNSMasqDisabled {
 			continue
 		}
-		cfg.AllowedInterfaces = append(cfg.AllowedInterfaces, nftgate.InterfaceName(sc.Parent, sc.VLANID))
+		cfg.AllowedInterfaces = append(cfg.AllowedInterfaces, ifname.InterfaceName(sc.Parent, sc.VLANID))
 	}
 
 	if len(cfg.AllowedInterfaces) == 0 {
@@ -102,15 +101,7 @@ func WriteRelayConfig(path string, cluster config.Cluster) error {
 // system group (created by debian/dnshived.postinst on every real
 // install).
 func chownToDnshivedGroup(path string) error {
-	g, err := user.LookupGroup("dnshived")
-	if err != nil {
-		return fmt.Errorf("lookup dnshived group: %w", err)
-	}
-	gid, err := strconv.Atoi(g.Gid)
-	if err != nil {
-		return fmt.Errorf("parse dnshived group gid %q: %w", g.Gid, err)
-	}
-	return os.Chown(path, -1, gid)
+	return ownership.Dnshived(path)
 }
 
 // atomicWriteFile writes data to path via a temp file + rename.

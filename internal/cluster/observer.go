@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
-	"dnshived/internal/loglevel"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -26,6 +25,7 @@ import (
 	"dnshived/internal/fencing"
 	"dnshived/internal/identity"
 	"dnshived/internal/lease"
+	"dnshived/internal/loglevel"
 	"dnshived/internal/quorum"
 	"dnshived/internal/reliability"
 	"dnshived/internal/tlspin"
@@ -33,6 +33,19 @@ import (
 )
 
 const pingSigHeader = "X-Dnshived-Ping-Sig"
+
+// signedPing POSTs a ping. With a PSK the body is signed, so the responder can verify the caller (F5).
+func signedPing(client *http.Client, url string, body []byte, psk []byte) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if len(psk) > 0 {
+		req.Header.Set(pingSigHeader, signPingBody(psk, body))
+	}
+	return client.Do(req)
+}
 
 // signPingBody returns the hex HMAC-SHA256 of body under psk.
 func signPingBody(psk []byte, body []byte) string {
@@ -486,7 +499,7 @@ func (o *Observer) probe(addr string) {
 
 	body, _ := json.Marshal(selfCopy)
 	url := o.scheme + "://" + addr + "/api/v1/ping"
-	resp, err := o.client.Post(url, "application/json", bytes.NewReader(body))
+	resp, err := signedPing(o.client, url, body, o.psk)
 	rtt := time.Since(start).Milliseconds()
 	now := time.Now().Unix()
 
@@ -656,7 +669,7 @@ func (o *Observer) probeFallbackSweep() {
 
 			body, _ := json.Marshal(selfCopy)
 			url := scheme + "://" + t.addr + "/api/v1/ping"
-			resp, err := o.client.Post(url, "application/json", bytes.NewReader(body))
+			resp, err := signedPing(o.client, url, body, psk)
 			switch {
 			case err != nil:
 				result.LastError = err.Error()
@@ -1153,17 +1166,22 @@ func (o *Observer) HandlePing(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "source address not in trusted_hosts", http.StatusForbidden)
 		return
 	}
-	// Drain/ignore the peer's announced identity for now.
-	if r.Body != nil {
-		r.Body = http.MaxBytesReader(w, r.Body, maxIdentityBodyBytes)
-		var incoming identity.Identity
-		_ = json.NewDecoder(r.Body).Decode(&incoming)
-		r.Body.Close()
-	}
 	o.mu.RLock()
 	self := o.self
 	psk := o.psk
 	o.mu.RUnlock()
+	if len(psk) > 0 {
+		var reqBody []byte
+		if r.Body != nil {
+			reqBody, _ = io.ReadAll(http.MaxBytesReader(w, r.Body, maxIdentityBodyBytes))
+			r.Body.Close()
+		}
+		if sig := r.Header.Get(pingSigHeader); sig == "" || !hmac.Equal([]byte(signPingBody(psk, reqBody)), []byte(sig)) {
+			loglevel.Warnf("[OBSERVER:DENY_UNSIGNED] ping without a valid cluster signature: remote_addr=%s", r.RemoteAddr)
+			http.Error(w, "ping not signed with the cluster PSK", http.StatusForbidden)
+			return
+		}
+	}
 
 	body, err := json.Marshal(self)
 	if err != nil {

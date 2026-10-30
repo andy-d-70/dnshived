@@ -6,7 +6,6 @@ package arbiter
 
 import (
 	"crypto/rand"
-	"dnshived/internal/loglevel"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -15,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"dnshived/internal/loglevel"
 	"dnshived/internal/psksign"
 	"dnshived/internal/timehealth"
 	"dnshived/internal/trustedhosts"
@@ -32,6 +32,7 @@ type Manager struct {
 	mu           sync.Mutex
 	tokens       map[string]*Token // scope → active token
 	psk          []byte
+	nodeID       string
 	quorumFunc   func() bool
 	nonceCache   map[string]int64 // nonce → timestamp (replay protection)
 	startOnce    sync.Once
@@ -64,6 +65,11 @@ func (m *Manager) ResumeGrants() {
 	m.mu.Lock()
 	m.grantsPausedUntil = time.Time{}
 	m.mu.Unlock()
+}
+
+// SetNodeID sets the arbiter's own node ID, signed into every token it issues or renews.
+func (m *Manager) SetNodeID(id string) {
+	m.nodeID = id
 }
 
 func (m *Manager) SetTrustedHosts(hosts []string) {
@@ -211,6 +217,7 @@ func (m *Manager) handleRequest(w http.ResponseWriter, r *http.Request) {
 		GrantedAt:   time.Now(),
 		ExpiresAt:   time.Now().Add(tokenTTL),
 		Nonce:       randomHex(16),
+		Arbiter:     m.nodeID,
 	}
 	tok.Signature = tok.Sign(m.psk)
 	m.tokens[req.Scope] = tok
@@ -290,6 +297,7 @@ func (m *Manager) handleRenew(w http.ResponseWriter, r *http.Request) {
 	// Extend the token.
 	existing.ExpiresAt = time.Now().Add(tokenTTL)
 	existing.Nonce = randomHex(16)
+	existing.Arbiter = m.nodeID
 	existing.Signature = existing.Sign(m.psk)
 	m.dirty = true
 	m.mu.Unlock()

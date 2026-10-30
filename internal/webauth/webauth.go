@@ -13,10 +13,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/user"
 	"strconv"
 	"strings"
 	"sync"
+
+	"dnshived/internal/ownership"
 )
 
 // Tuned for PBKDF2-HMAC-SHA256 per current guidance.
@@ -133,15 +134,7 @@ func (s *Store) Save(path string) error {
 // chownToDnshivedGroup sets path's group ownership to "dnshived" without
 // touching its owner.
 func chownToDnshivedGroup(path string) error {
-	g, err := user.LookupGroup("dnshived")
-	if err != nil {
-		return fmt.Errorf("lookup dnshived group: %w", err)
-	}
-	gid, err := strconv.Atoi(g.Gid)
-	if err != nil {
-		return fmt.Errorf("parse dnshived group gid %q: %w", g.Gid, err)
-	}
-	return os.Chown(path, -1, gid)
+	return ownership.Dnshived(path)
 }
 
 // atomicWriteFile writes data to path via temp file + fsync + rename,

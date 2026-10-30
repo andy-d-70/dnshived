@@ -14,7 +14,7 @@ import (
 
 	"dnshived/internal/config"
 	"dnshived/internal/dhcprelay"
-	"dnshived/internal/nftgate"
+	"dnshived/internal/ifname"
 	"dnshived/internal/trunkaddr"
 )
 
@@ -26,6 +26,11 @@ func RenderRelayConfig(cluster config.Cluster, serverAddr string) (dhcprelay.Con
 	}
 
 	cfg := dhcprelay.Config{ServerAddr: serverAddr, ServerInterface: "lo"}
+	if cluster.NodeID != "" {
+		// The gate needs this node's ID (tokens name their owner) and the core count (quorum = majority).
+		cfg.NodeID = cluster.NodeID
+		cfg.CoreCount = len(cluster.Peers) + 1
+	}
 
 	names := make([]string, 0, len(cluster.Scopes))
 	for name := range cluster.Scopes {
@@ -42,9 +47,10 @@ func RenderRelayConfig(cluster config.Cluster, serverAddr string) (dhcprelay.Con
 		serverIdentifier, _, _ := strings.Cut(sc.VIP, "/")
 
 		cfg.ClientInterfaces = append(cfg.ClientInterfaces, dhcprelay.ClientInterfaceConfig{
-			Name:             nftgate.InterfaceName(sc.Parent, sc.VLANID),
+			Name:             ifname.InterfaceName(sc.Parent, sc.VLANID),
 			GIAddr:           giaddr,
 			ServerIdentifier: serverIdentifier,
+			Scope:            name,
 		})
 	}
 
@@ -58,8 +64,7 @@ func RenderRelayConfig(cluster config.Cluster, serverAddr string) (dhcprelay.Con
 }
 
 // WriteRelayConfig renders cluster and atomically writes the result to
-// path as indented JSON, then hands group-read ownership to the "dnshived"
-// system group.
+// path as indented JSON, then hands group-read ownership to relayGroup.
 func WriteRelayConfig(path string, cluster config.Cluster, serverAddr string) error {
 	cfg, err := RenderRelayConfig(cluster, serverAddr)
 	if err != nil {
@@ -87,6 +92,34 @@ func WriteRelayConfig(path string, cluster config.Cluster, serverAddr string) er
 		}
 	}
 
+	return writeRelayFile(path, cfg)
+}
+
+// ClearRelayConfig empties the client interface list in path, keeping its rate limits. A file that
+// already lists no interfaces is left untouched; a missing one is written empty.
+func ClearRelayConfig(path string) error {
+	cfg := dhcprelay.Config{ServerAddr: DefaultServerAddr, ServerInterface: "lo"}
+	data, err := os.ReadFile(path)
+	if err == nil {
+		var existing dhcprelay.Config
+		if err := json.Unmarshal(data, &existing); err == nil {
+			if len(existing.ClientInterfaces) == 0 {
+				return nil
+			}
+			cfg.ServerAddr = existing.ServerAddr
+			cfg.NodeID = existing.NodeID
+			cfg.CoreCount = existing.CoreCount
+			cfg.RateLimit = existing.RateLimit
+			cfg.RateBurst = existing.RateBurst
+			cfg.PendingPerVLAN = existing.PendingPerVLAN
+			cfg.ClientRateLimit = existing.ClientRateLimit
+			cfg.ClientRateBurst = existing.ClientRateBurst
+		}
+	}
+	return writeRelayFile(path, cfg)
+}
+
+func writeRelayFile(path string, cfg dhcprelay.Config) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal relay config: %w", err)
@@ -94,20 +127,22 @@ func WriteRelayConfig(path string, cluster config.Cluster, serverAddr string) er
 	if err := atomicWriteFile(path, data, 0640); err != nil {
 		return err
 	}
-	return chownToDnshivedGroup(path)
+	return chownToRelayGroup(path)
 }
 
-// chownToDnshivedGroup sets path's group ownership to the "dnshived"
-// system group (created by debian/dnshived.postinst on every real
-// install).
-func chownToDnshivedGroup(path string) error {
-	g, err := user.LookupGroup("dnshived")
+// relayGroup is the system group the relay process runs under; the daemon
+// joins it to reach the relay's gate socket. Created by the packages.
+const relayGroup = "dnshived-relay"
+
+// chownToRelayGroup sets path's group ownership to relayGroup.
+func chownToRelayGroup(path string) error {
+	g, err := user.LookupGroup(relayGroup)
 	if err != nil {
-		return fmt.Errorf("lookup dnshived group: %w", err)
+		return fmt.Errorf("lookup %s group: %w", relayGroup, err)
 	}
 	gid, err := strconv.Atoi(g.Gid)
 	if err != nil {
-		return fmt.Errorf("parse dnshived group gid %q: %w", g.Gid, err)
+		return fmt.Errorf("parse %s group gid %q: %w", relayGroup, g.Gid, err)
 	}
 	return os.Chown(path, -1, gid)
 }

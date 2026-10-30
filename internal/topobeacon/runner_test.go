@@ -19,7 +19,7 @@ type fakeStarts struct {
 	starts int
 }
 
-func (f *fakeStarts) start(ctx context.Context, role string, spec IfaceSpec, store *Store, interval time.Duration) {
+func (f *fakeStarts) start(ctx context.Context, role string, spec IfaceSpec, store *Store, interval time.Duration, _ []byte) {
 	f.mu.Lock()
 	f.active[spec.Name]++
 	f.starts++
@@ -73,7 +73,7 @@ func equalStrings(a, b []string) bool {
 
 func newTestRunner(f *fakeStarts) (*Runner, *Store) {
 	store := NewStore(time.Second, "core-1")
-	r := NewRunner("core-1", store, time.Second)
+	r := NewRunner("core-1", store, time.Second, nil)
 	r.start = f.start
 	return r, store
 }

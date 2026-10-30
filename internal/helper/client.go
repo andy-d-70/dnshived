@@ -13,32 +13,29 @@ import (
 
 // Request matches the helper's expected input.
 type Request struct {
-	Command   string   `json:"command"`
-	Scope     string   `json:"scope"`
-	Parent    string   `json:"parent"`
-	VLANID    int      `json:"vlan_id"`
-	VIP       string   `json:"vip"`
-	NodeIP    string   `json:"node_ip"`
-	GateState string   `json:"gate_state"`
-	Scopes    []string `json:"scopes,omitempty"` // add-scopes only
+	Command string   `json:"command"`
+	Scope   string   `json:"scope"`
+	Parent  string   `json:"parent"`
+	VLANID  int      `json:"vlan_id"`
+	VIP     string   `json:"vip"`
+	NodeIP  string   `json:"node_ip"`
+	Scopes  []string `json:"scopes,omitempty"` // add-scopes only
 	// Unit/Lines (journal-tail only).
 	Unit  string `json:"unit,omitempty"`
 	Lines int    `json:"lines,omitempty"`
-	// Action: manage-unit only. Iface: link-up, remove-gate-rule-unscoped.
+	// Action: manage-unit only. Iface: link-up.
 	Action string `json:"action,omitempty"`
 	Iface  string `json:"iface,omitempty"`
 }
 
 // Response matches the helper's output.
 type Response struct {
-	OK           bool            `json:"ok"`
-	Error        string          `json:"error,omitempty"`
-	GateState    string          `json:"gate_state,omitempty"`
-	GateDump     map[string]bool `json:"gate_dump,omitempty"`
-	VRRPState    string          `json:"vrrp_state,omitempty"`
-	VRRPDump     string          `json:"vrrp_dump,omitempty"`
-	Throttled    bool            `json:"throttled,omitempty"`
-	JournalLines []string        `json:"journal_lines,omitempty"`
+	OK           bool     `json:"ok"`
+	Error        string   `json:"error,omitempty"`
+	VRRPState    string   `json:"vrrp_state,omitempty"`
+	VRRPDump     string   `json:"vrrp_dump,omitempty"`
+	Throttled    bool     `json:"throttled,omitempty"`
+	JournalLines []string `json:"journal_lines,omitempty"`
 }
 
 // Client communicates with dnshived-helper over a Unix socket.
@@ -92,13 +89,16 @@ func (c *Client) send(req Request) error {
 
 // CreateInterface creates a VLAN sub-interface with the node IP only, and
 // ensures the scope's DHCP gate exists and defaults to closed.
-func (c *Client) CreateInterface(scope, parent string, vlanID int, nodeIP string) error {
+// The VIP is sent so the helper keeps keepalived's address on an existing interface (F3: without it the helper
+// deletes the VIP on every daemon start).
+func (c *Client) CreateInterface(scope, parent string, vlanID int, nodeIP, vip string) error {
 	return c.send(Request{
 		Command: "create-interface",
 		Scope:   scope,
 		Parent:  parent,
 		VLANID:  vlanID,
 		NodeIP:  nodeIP,
+		VIP:     vip,
 	})
 }
 
@@ -298,44 +298,10 @@ func (c *Client) ReloadKeepalived() (throttled bool, err error) {
 	return resp.Throttled, nil
 }
 
-// SetDHCPGate opens or closes the DHCP gate for a scope.
-func (c *Client) SetDHCPGate(scope, parent string, vlanID int, state string) error {
-	return c.send(Request{
-		Command:   "set-dhcp-gate",
-		Scope:     scope,
-		Parent:    parent,
-		VLANID:    vlanID,
-		GateState: state,
-	})
-}
-
-func (c *Client) GetDHCPGate(scope, parent string, vlanID int) (string, error) {
-	resp, err := c.roundTrip(Request{
-		Command: "get-dhcp-gate",
-		Scope:   scope,
-		Parent:  parent,
-		VLANID:  vlanID,
-	})
-	if err != nil {
-		return "", err
-	}
-	if !resp.OK {
-		return "", fmt.Errorf("helper: %s", resp.Error)
-	}
-	return resp.GateState, nil
-}
-
-// GetDHCPGateDump returns every gated interface's closed/open state (iface
-// -> true if closed) in one round trip.
-func (c *Client) GetDHCPGateDump() (map[string]bool, error) {
-	resp, err := c.roundTrip(Request{Command: "dhcp-gate-dump"})
-	if err != nil {
-		return nil, err
-	}
-	if !resp.OK {
-		return nil, fmt.Errorf("helper: %s", resp.Error)
-	}
-	return resp.GateDump, nil
+// RemoveLegacyNFT deletes the nftables table the old DHCP gate used. The daemon calls it once at start, before its
+// first relay authorize (upgrade order, plan §13 G7). The helper answers ok when the table is already gone.
+func (c *Client) RemoveLegacyNFT() error {
+	return c.send(Request{Command: "remove-legacy-nft"})
 }
 
 // GetVRRPState reads back a scope's current VRRP state (MASTER/BACKUP/
@@ -487,12 +453,6 @@ func (c *Client) Reachable() bool {
 // LinkUp brings an existing interface up (never down).
 func (c *Client) LinkUp(iface string) error {
 	return c.send(Request{Command: "link-up", Iface: iface})
-}
-
-// RemoveGateRuleUnscoped removes an orphan DHCP gate rule that no
-// configured scope backs.
-func (c *Client) RemoveGateRuleUnscoped(iface string) error {
-	return c.send(Request{Command: "remove-gate-rule-unscoped", Iface: iface})
 }
 
 // unitTimeout covers a systemctl stop that waits for the unit's own stop

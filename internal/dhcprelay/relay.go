@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"dnshived/internal/unixsock"
 )
 
 // udpConn is the subset of *net.UDPConn the relay's read/write paths need.
@@ -21,6 +23,8 @@ type udpConn interface {
 
 type clientInterface struct {
 	name       string
+	scope      string
+	gate       *scopeGate
 	giaddr     net.IP
 	serverAddr *net.UDPAddr
 	conn       udpConn
@@ -37,6 +41,7 @@ type clientInterface struct {
 	limiter   *tokenBucket
 	clients   *clientLimiter
 	pending   atomic.Int64
+	stats     vlanStats
 
 	removing atomic.Bool
 	wg       sync.WaitGroup
@@ -52,6 +57,8 @@ type metrics struct {
 	repliesSeen         atomic.Int64
 	repliesForwarded    atomic.Int64
 	repliesDropped      atomic.Int64
+	gateClosedRequests  atomic.Int64
+	gateClosedReplies   atomic.Int64
 }
 
 // Metrics is a point-in-time snapshot of Relay's counters, safe to log or
@@ -67,6 +74,8 @@ type Metrics struct {
 	RepliesForwarded    int64
 	RepliesDropped      int64
 	Pending             int64
+	GateClosedRequests  int64
+	GateClosedReplies   int64
 }
 
 type Relay struct {
@@ -96,6 +105,13 @@ type Relay struct {
 
 	throttleMu   sync.Mutex
 	throttleSeen map[throttleKey]time.Time
+
+	gates      *gateTable
+	gateSocket string
+	gateServer *unixsock.Server
+	runDir     string
+	version    string
+	startedAt  time.Time
 }
 
 type serverSocket struct{ udpConn }
@@ -173,12 +189,15 @@ func New(cfg Config) (*Relay, error) {
 		pending:      newPendingTable(),
 		stop:         make(chan struct{}),
 		throttleSeen: make(map[throttleKey]time.Time),
+		gates:        newGateTable(),
+		startedAt:    time.Now(),
 	}
+	r.gates.applyConfig(cfg.NodeID, cfg.CoreCount)
 
 	r.applyOptionalLimits(cfg)
 
 	for _, ci := range cfg.ClientInterfaces {
-		newCif, err := newClientInterface(ci, cfg, &r.clientTracked)
+		newCif, err := newClientInterface(ci, cfg, &r.clientTracked, r.gates)
 		if err != nil {
 			return nil, err
 		}
@@ -201,7 +220,7 @@ func (r *Relay) applyOptionalLimits(cfg Config) {
 
 // newClientInterface resolves ci against cfg's cluster-wide defaults; no
 // sockets are opened.
-func newClientInterface(ci ClientInterfaceConfig, cfg Config, tracked *atomic.Int64) (*clientInterface, error) {
+func newClientInterface(ci ClientInterfaceConfig, cfg Config, tracked *atomic.Int64, gates *gateTable) (*clientInterface, error) {
 	giaddr := net.ParseIP(ci.GIAddr).To4()
 	serverAddr, err := resolveServerAddr(ci.ServerAddr, cfg.ServerAddr)
 	if err != nil {
@@ -209,7 +228,10 @@ func newClientInterface(ci ClientInterfaceConfig, cfg Config, tracked *atomic.In
 	}
 	rate := resolveRateLimit(ci.RateLimit, cfg.RateLimit)
 	burst := resolveRateBurst(ci.RateBurst, cfg.RateBurst, rate)
-	cif := &clientInterface{name: ci.Name, giaddr: giaddr, serverAddr: serverAddr, limiter: newTokenBucket(burst), clients: newClientLimiter(tracked)}
+	cif := &clientInterface{name: ci.Name, scope: ci.Scope, giaddr: giaddr, serverAddr: serverAddr, limiter: newTokenBucket(burst), clients: newClientLimiter(tracked)}
+	if ci.Scope != "" {
+		cif.gate = gates.scope(ci.Scope)
+	}
 	cif.rateLimit.Store(int32(rate))
 	cif.rateBurst.Store(int32(burst))
 	sid := resolveServerIdentifier(ci.ServerIdentifier, giaddr)
@@ -218,6 +240,7 @@ func newClientInterface(ci ClientInterfaceConfig, cfg Config, tracked *atomic.In
 }
 
 func (r *Relay) Start() error {
+	r.gates.checkClock(time.Now())
 	serverConn, err := bindServerFacingUDPPort(r.cfg.ServerInterface, dhcpServerPort)
 	if err != nil {
 		return fmt.Errorf("bind server-facing socket: %w", err)
@@ -263,7 +286,34 @@ func (r *Relay) Start() error {
 		r.pending.runSweeper(r.stop)
 	}()
 
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		r.runGateChecks()
+	}()
+
+	if r.gateSocket != "" {
+		if err := r.startGateServer(); err != nil {
+			r.closeAll()
+			return fmt.Errorf("gate socket: %w", err)
+		}
+	}
+
 	return nil
+}
+
+// runGateChecks re-checks the clock and every gate's deadline until the relay stops.
+func (r *Relay) runGateChecks() {
+	ticker := time.NewTicker(gateCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.stop:
+			return
+		case now := <-ticker.C:
+			r.gates.checkClock(now)
+		}
+	}
 }
 
 // diffClientInterfaces is Reconfigure's own pure decision.
@@ -286,7 +336,7 @@ func diffClientInterfaces(old []*clientInterface, newIfaces []ClientInterfaceCon
 		giaddrChanged := !net.ParseIP(newCi.GIAddr).To4().Equal(cif.giaddr)
 		newServerAddr, resolveErr := resolveServerAddr(newCi.ServerAddr, newDefaultServerAddr)
 		serverAddrChanged := resolveErr != nil || cif.serverAddr == nil || cif.serverAddr.String() != newServerAddr.String()
-		if giaddrChanged || serverAddrChanged {
+		if giaddrChanged || serverAddrChanged || newCi.Scope != cif.scope {
 			toRemove = append(toRemove, cif)
 			toAdd = append(toAdd, newCi)
 			continue
@@ -400,6 +450,14 @@ func (r *Relay) Reconfigure(newCfg Config) error {
 
 	r.applyOptionalLimits(newCfg)
 	r.cfg = newCfg
+	r.gates.applyConfig(newCfg.NodeID, newCfg.CoreCount)
+	keep := make(map[string]bool, len(newCfg.ClientInterfaces))
+	for _, ci := range newCfg.ClientInterfaces {
+		if ci.Scope != "" {
+			keep[ci.Scope] = true
+		}
+	}
+	r.gates.retain(keep, time.Now())
 	if rebound > 0 {
 		log.Printf("[RELAY] reconfigure: %d interface(s) rebound due to stale ifindex", rebound)
 	}
@@ -432,7 +490,7 @@ func (r *Relay) removeClientInterface(cif *clientInterface) {
 // addClientInterface binds a fresh socket pair for one new client
 // interface and launches its own two read-loop goroutines.
 func (r *Relay) addClientInterface(ci ClientInterfaceConfig, cfg Config) error {
-	cif, err := newClientInterface(ci, cfg, &r.clientTracked)
+	cif, err := newClientInterface(ci, cfg, &r.clientTracked, r.gates)
 	if err != nil {
 		return err
 	}
@@ -477,6 +535,9 @@ func (r *Relay) Stop() {
 	r.reconfigureMu.Lock()
 	defer r.reconfigureMu.Unlock()
 	close(r.stop)
+	if r.gateServer != nil {
+		r.gateServer.Close()
+	}
 	r.closeAll()
 	r.wg.Wait()
 }
@@ -510,6 +571,8 @@ func (r *Relay) Snapshot() Metrics {
 		RepliesForwarded:    r.metrics.repliesForwarded.Load(),
 		RepliesDropped:      r.metrics.repliesDropped.Load(),
 		Pending:             r.pending.globalCnt.Load(),
+		GateClosedRequests:  r.metrics.gateClosedRequests.Load(),
+		GateClosedReplies:   r.metrics.gateClosedReplies.Load(),
 	}
 }
 

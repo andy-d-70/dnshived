@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 
+	"dnshived/internal/cliguard"
 	"dnshived/internal/config"
 	"dnshived/internal/dnsrelayrender"
 )
@@ -21,7 +22,7 @@ func main() {
 	clusterPath := flag.String("cluster", "/etc/dnshived/cluster.json", "path to a real dnshived cluster.json")
 	outPath := flag.String("config", "/etc/dnshived/dnsrelay.json", "path to the dnshived-dnsrelay config file to update (created if missing)")
 	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
+	cliguard.Parse("dnshived-dnsrelay-render", false)
 
 	if *showVersion {
 		fmt.Println("dnshived-dnsrelay-render", version)

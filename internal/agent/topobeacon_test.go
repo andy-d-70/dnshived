@@ -91,7 +91,7 @@ func TestStartTopoBeacon_RealSocketRoundTrip(t *testing.T) {
 	defer cancel()
 	a.StartTopoBeacon(ctx, "core-1", 100*time.Millisecond)
 
-	go topobeacon.SendOnInterface(ctx, "core-3", topobeacon.IfaceSpec{Name: "lo", Kind: topobeacon.KindTrunk}, 100*time.Millisecond)
+	go topobeacon.SendOnInterface(ctx, "core-3", topobeacon.IfaceSpec{Name: "lo", Kind: topobeacon.KindTrunk}, 100*time.Millisecond, []byte("psk"))
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

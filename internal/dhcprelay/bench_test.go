@@ -32,6 +32,7 @@ func newBenchRelay(b *testing.B) (*Relay, *clientInterface) {
 	ci.limiter = newTokenBucket(1 << 30)
 	r.clientRateLimit.Store(1 << 30)
 	r.clientRateBurst.Store(1 << 30)
+	openTestGates(r)
 	return r, ci
 }
 

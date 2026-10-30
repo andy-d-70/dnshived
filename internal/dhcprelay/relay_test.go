@@ -512,6 +512,7 @@ func newTestRelay(t *testing.T) (*Relay, *fakeUDPConn, *clientInterface) {
 	}
 	serverConn := newFakeUDPConn()
 	r.setServerConn(serverConn)
+	openTestGates(r)
 	ci := r.clientIfaces[0]
 	ci.conn = newFakeUDPConn()
 	ci.reply = newFakeUDPConn()
@@ -535,6 +536,7 @@ func newTestRelayTwoBackends(t *testing.T) (r *Relay, serverConn *fakeUDPConn, c
 	}
 	serverConn = newFakeUDPConn()
 	relay.setServerConn(serverConn)
+	openTestGates(relay)
 	for _, cif := range relay.clientIfaces {
 		cif.conn = newFakeUDPConn()
 		cif.reply = newFakeUDPConn()
@@ -1006,6 +1008,7 @@ func TestHandleServerReply_RewritesServerIdentifierToConfiguredVIP(t *testing.T)
 		t.Fatalf("New: %v", err)
 	}
 	r.setServerConn(newFakeUDPConn())
+	openTestGates(r)
 	ci := r.clientIfaces[0]
 	ci.conn = newFakeUDPConn()
 	ci.reply = newFakeUDPConn()

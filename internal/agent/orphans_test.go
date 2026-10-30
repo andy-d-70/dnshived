@@ -43,8 +43,6 @@ func startIPHelper(t *testing.T) (sock string, requests func() []helper.Request)
 				switch req.Command {
 				case "delete-interface-unscoped":
 					exec.Command("ip", "link", "delete", fmt.Sprintf("%s.%d", req.Parent, req.VLANID)).Run()
-				case "dhcp-gate-dump":
-					resp.GateDump = map[string]bool{}
 				}
 				json.NewEncoder(conn).Encode(resp)
 			}
@@ -106,7 +104,7 @@ func TestCheckOrphans_RemovesUnconfiguredInterfaceKeepsConfiguredOne(t *testing.
 
 	a := New(config.RoleCore1, "test-node", 1, "psk", t.TempDir(), scopes, nil)
 	a.SetPlatform(&config.Platform{Workers: []string{trunk}})
-	sock, requests := startIPHelper(t)
+	sock, _ := startIPHelper(t)
 	a.SetHelper(helper.NewClient(sock))
 
 	if !ifaceExists(trunk + ".99") {
@@ -116,17 +114,7 @@ func TestCheckOrphans_RemovesUnconfiguredInterfaceKeepsConfiguredOne(t *testing.
 		t.Fatalf("test setup: configured-scope interface %s.100 should exist before the sweep", trunk)
 	}
 
-	found := a.checkOrphans(map[string]bool{trunk + ".99": true, trunk + ".100": true})
-
-	var removedGate []string
-	for _, r := range requests() {
-		if r.Command == "remove-gate-rule-unscoped" {
-			removedGate = append(removedGate, r.Iface)
-		}
-	}
-	if len(removedGate) != 1 || removedGate[0] != trunk+".99" {
-		t.Errorf("gate rules removed via helper = %v, want only %s.99", removedGate, trunk)
-	}
+	found := a.checkOrphans()
 
 	if ifaceExists(trunk + ".99") {
 		t.Errorf("%s.99 (orphan, no matching scope) still exists after checkOrphans — should have been removed", trunk)
@@ -163,7 +151,7 @@ func TestCheckOrphans_NeverTouchesMgmtInterface(t *testing.T) {
 	a := New(config.RoleCore1, "test-node", 1, "psk", t.TempDir(), map[string]config.ScopeConfig{}, nil)
 	a.SetPlatform(&config.Platform{Mgmt: mgmt})
 
-	a.checkOrphans(nil)
+	a.checkOrphans()
 
 	if !ifaceExists(mgmt + ".55") {
 		t.Errorf("%s.55 was removed — Platform.Mgmt must never be swept, even when it has no matching scope", mgmt)
@@ -172,7 +160,7 @@ func TestCheckOrphans_NeverTouchesMgmtInterface(t *testing.T) {
 
 func TestCheckOrphans_NilPlatformDoesNotPanic(t *testing.T) {
 	a := New(config.RoleCore1, "test-node", 1, "psk", t.TempDir(), testScopes("office"), nil)
-	found := a.checkOrphans(nil)
+	found := a.checkOrphans()
 	if found != nil {
 		t.Errorf("findings = %+v, want nil with no Platform configured", found)
 	}

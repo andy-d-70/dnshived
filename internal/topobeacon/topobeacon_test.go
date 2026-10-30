@@ -7,6 +7,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"dnshived/internal/psksign"
 )
 
 func TestStore_RecordThenSnapshot_ReturnsCorrelation(t *testing.T) {
@@ -115,10 +117,10 @@ func TestSendAndListen_RealRoundTripOnLoopback(t *testing.T) {
 	defer cancel()
 
 	store := NewStore(200*time.Millisecond, "core-1")
-	go listenOnInterface(ctx, IfaceSpec{Name: "lo", Kind: KindTrunk}, store)
+	go listenOnInterface(ctx, IfaceSpec{Name: "lo", Kind: KindTrunk}, store, nil)
 	time.Sleep(50 * time.Millisecond) // let the listener's own bind land before the first send
 
-	go SendOnInterface(ctx, "core-3", IfaceSpec{Name: "lo", Kind: KindTrunk}, 100*time.Millisecond)
+	go SendOnInterface(ctx, "core-3", IfaceSpec{Name: "lo", Kind: KindTrunk}, 100*time.Millisecond, nil)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -148,5 +150,28 @@ func TestSortSightings_DeterministicOrder(t *testing.T) {
 		if got != want[i] {
 			t.Fatalf("sorted[%d] = %q, want %q", i, got, want[i])
 		}
+	}
+}
+
+// TestVerifyBeacon_SignedWithPSKOnly covers F6: with a PSK only a beacon signed with it is accepted; without a PSK
+// every beacon is accepted, as before.
+func TestVerifyBeacon_SignedWithPSKOnly(t *testing.T) {
+	b := Beacon{Magic: Magic, Role: "core-2", Iface: "ens19", Kind: KindTrunk}
+	if !verifyBeacon(nil, b) {
+		t.Fatal("unsigned beacon refused with no PSK configured")
+	}
+	if verifyBeacon([]byte("psk"), b) {
+		t.Fatal("unsigned beacon accepted with a PSK configured")
+	}
+	b.Signature = psksign.Sign([]byte("psk"), beaconSignData(b))
+	if !verifyBeacon([]byte("psk"), b) {
+		t.Fatal("correctly signed beacon refused")
+	}
+	if verifyBeacon([]byte("other"), b) {
+		t.Fatal("beacon signed with another key accepted")
+	}
+	b.Iface = "ens20"
+	if verifyBeacon([]byte("psk"), b) {
+		t.Fatal("beacon with a changed field still verifies")
 	}
 }

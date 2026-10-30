@@ -35,6 +35,11 @@ type Config struct {
 	PendingPerVLAN  int `json:"pending_per_vlan,omitempty"`
 	ClientRateLimit int `json:"client_rate_limit,omitempty"`
 	ClientRateBurst int `json:"client_rate_burst,omitempty"`
+
+	// NodeID is this node's own ID; tokens must name it as owner. CoreCount is the number of configured cores; the
+	// default quorum is its majority. Both are optional for old files; without them every gate stays closed.
+	NodeID    string `json:"node_id,omitempty"`
+	CoreCount int    `json:"core_count,omitempty"`
 }
 
 type ClientInterfaceConfig struct {
@@ -56,6 +61,10 @@ type ClientInterfaceConfig struct {
 	// client interface.
 	RateLimit int `json:"rate_limit,omitempty"`
 	RateBurst int `json:"rate_burst,omitempty"`
+
+	// Scope is the scope whose authority gates this interface. Empty means the
+	// interface stays closed.
+	Scope string `json:"scope,omitempty"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -94,6 +103,10 @@ func (c *Config) Validate() error {
 		if v < -1 {
 			return fmt.Errorf("%s must be -1 (off), 0 (default) or positive", name)
 		}
+	}
+
+	if c.CoreCount < 0 {
+		return fmt.Errorf("core_count must not be negative")
 	}
 
 	seenNames := make(map[string]bool, len(c.ClientInterfaces))

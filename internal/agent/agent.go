@@ -10,7 +10,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"dnshived/internal/loglevel"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -41,10 +40,13 @@ import (
 	"dnshived/internal/fencing"
 	"dnshived/internal/fsm"
 	"dnshived/internal/helper"
+	"dnshived/internal/ifname"
 	"dnshived/internal/lease"
 	"dnshived/internal/leasesync"
-	"dnshived/internal/nftgate"
+	"dnshived/internal/loglevel"
+	"dnshived/internal/ownership"
 	"dnshived/internal/psksign"
+	"dnshived/internal/relaygate"
 	"dnshived/internal/relayrender"
 	"dnshived/internal/reliability"
 	"dnshived/internal/timehealth"
@@ -284,6 +286,14 @@ func vrrpPriority(serve, allowed bool) int {
 // --- Agent ---
 
 // Agent makes and enacts serve/stop decisions per scope.
+// relayGateway is the part of the relay gate client the agent uses; tests substitute a fake.
+type relayGateway interface {
+	Available() bool
+	SetPSK(psk string) error
+	Authorize(scope string, incarnation uint64, tokens []json.RawMessage, reason string) (string, error)
+	Revoke(scope string) error
+}
+
 type Agent struct {
 	mu          sync.Mutex
 	constructMu sync.Mutex
@@ -457,6 +467,13 @@ type Agent struct {
 	// socket instead of direct execution.
 	helperClient *helper.Client
 
+	// relayGate, when set, is the DHCP relay's authority gate: a scope's gate is
+	// opened on the relay by authorize with the held witness tokens, and closed
+	// by revoke. relayAuthorized records which scopes this agent opened there.
+	relayGate       relayGateway
+	relayAuthorized map[string]bool
+	closePending    map[string]bool // scopes whose relay close has not been confirmed yet
+
 	// units is the per-tick unit-state snapshot (see unitCache).
 	units     *daemonstatus.Cache
 	unitsOnce sync.Once
@@ -558,6 +575,145 @@ func newWitnessClient(useTLS bool) *http.Client {
 // and service operations.
 func (a *Agent) SetHelper(c *helper.Client) {
 	a.helperClient = c
+}
+
+// SetRelayGate points the agent at the DHCP relay's gate socket.
+func (a *Agent) SetRelayGate(c *relaygate.Client) {
+	if c != nil {
+		a.relayGate = c
+	}
+	a.relayAuthorized = make(map[string]bool)
+	a.closePending = make(map[string]bool)
+}
+
+// RemoveLegacyNFT asks the helper to delete the nftables table of the old DHCP gate (see helper.Client).
+func (a *Agent) RemoveLegacyNFT() error {
+	if a.helperClient == nil {
+		return errNoHelper
+	}
+	return a.helperClient.RemoveLegacyNFT()
+}
+
+// tokensFor returns every raw witness token the agent holds for scope.
+func (a *Agent) tokensFor(scope string) []json.RawMessage {
+	a.tokenMu.RLock()
+	defer a.tokenMu.RUnlock()
+	out := make([]json.RawMessage, 0, len(a.tokenRaw[scope]))
+	for _, raw := range a.tokenRaw[scope] {
+		out = append(out, raw)
+	}
+	return out
+}
+
+// errRelayAbsent means this node has no relay gate socket, so the scope cannot be opened here.
+var errRelayAbsent = errors.New("no relay gate socket on this node")
+
+// relayRefused reports whether err is a real refusal from the relay (as opposed to no relay on this node).
+func relayRefused(err error) bool {
+	return err != nil && !errors.Is(err, errRelayAbsent)
+}
+
+// relayCluster is the view the relay config is rendered from: the scopes, this node's ID and the core peers.
+func (a *Agent) relayCluster(relayScopes map[string]config.ScopeConfig) config.Cluster {
+	c := config.Cluster{Scopes: a.resolveScopeParents(relayScopes), NodeID: a.nodeID}
+	if a.observer != nil {
+		c.Peers = a.observer.AllPeerAddrs()
+	}
+	return c
+}
+
+// authorizeRelay gives the relay the PSK and opens scope there with the held tokens.
+func (a *Agent) authorizeRelay(scope string) error {
+	if a.relayGate == nil {
+		return nil
+	}
+	if !a.relayGate.Available() {
+		return errRelayAbsent
+	}
+	if a.psk == "" {
+		return errors.New("no cluster PSK: the relay cannot verify tokens")
+	}
+	tokens := a.tokensFor(scope)
+	if len(tokens) == 0 {
+		return errors.New("no witness token held")
+	}
+	if err := a.relayGate.SetPSK(a.psk); err != nil {
+		return err
+	}
+	if _, err := a.relayGate.Authorize(scope, a.incarnation, tokens, "witness held"); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	a.relayAuthorized[scope] = true
+	a.mu.Unlock()
+	return nil
+}
+
+// revokeRelay closes scope on the relay if this agent opened it there. The scope stays marked as opened
+// until the relay confirms the close, so a failed close can be retried.
+func (a *Agent) revokeRelay(scope string) error {
+	if a.relayGate == nil || !a.relayGate.Available() {
+		return nil
+	}
+	a.mu.Lock()
+	was := a.relayAuthorized[scope]
+	a.mu.Unlock()
+	if !was {
+		return nil
+	}
+	if err := a.relayGate.Revoke(scope); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	delete(a.relayAuthorized, scope)
+	a.mu.Unlock()
+	return nil
+}
+
+// markClosePending records that scope's relay close failed. It reports whether the mark is new.
+func (a *Agent) markClosePending(scope string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closePending == nil {
+		a.closePending = make(map[string]bool)
+	}
+	fresh := !a.closePending[scope]
+	a.closePending[scope] = true
+	return fresh
+}
+
+func (a *Agent) clearClosePending(scope string) {
+	a.mu.Lock()
+	delete(a.closePending, scope)
+	a.mu.Unlock()
+}
+
+// abandonOpen gives up an open whose answer was lost. The relay may already have opened the scope, so it is
+// closed like any other scope: the token goes only once the relay confirms the close.
+func (a *Agent) abandonOpen(scope string) {
+	a.mu.Lock()
+	if a.relayAuthorized != nil {
+		a.relayAuthorized[scope] = true
+	}
+	a.mu.Unlock()
+	a.closeGate(scope, "open failed")
+}
+
+// releaseClosed records scope as closed on the relay and drops its arbiter token.
+func (a *Agent) releaseClosed(scope string) {
+	a.clearClosePending(scope)
+	a.recordAppliedGate(scope, "closed")
+	a.clearWitness(scope)
+}
+
+// retryClosePending tries the relay close again. The token is released only when the relay confirms it.
+func (a *Agent) retryClosePending(scope string) {
+	if err := a.revokeRelay(scope); err != nil {
+		loglevel.InfoOnChange("close-pending:"+scope, err.Error(), "[AGENT:CLOSE_PENDING] scope %s: relay still not closed: %v", scope, err)
+		return
+	}
+	loglevel.Infof("[AGENT:CLOSE_RESOLVED] scope %s: relay closed, arbiter token released", scope)
+	a.releaseClosed(scope)
 }
 
 // SetProbeInterval forwards to the observer's own live ticker-reset.
@@ -675,7 +831,7 @@ func (a *Agent) StartTopoBeacon(ctx context.Context, role string, interval time.
 	store := topobeacon.NewStore(interval, role)
 	a.topoStore = store
 	a.mu.Lock()
-	a.topoRunner = topobeacon.NewRunner(role, store, interval)
+	a.topoRunner = topobeacon.NewRunner(role, store, interval, []byte(a.psk))
 	a.topoCtx = ctx
 	a.mu.Unlock()
 	if !a.RefreshTopoBeacon() {
@@ -996,7 +1152,7 @@ func (a *Agent) servesScopes() bool {
 
 func (a *Agent) constructScope(name string, sc config.ScopeConfig) bool {
 	sc.Parent = a.localParent(sc.Parent)
-	iface := nftgate.InterfaceName(sc.Parent, sc.VLANID)
+	iface := ifname.InterfaceName(sc.Parent, sc.VLANID)
 
 	if !a.shouldSkipInterfaceRebuild(name, iface) {
 		if err := a.createInterface(name, sc); err != nil {
@@ -1069,7 +1225,7 @@ func (a *Agent) constructRelayPlane() bool {
 // relayScopes and restarts dnshived-relay only when the rendered content
 // changed or the unit isn't running.
 func (a *Agent) applyRelayConfig(relayScopes map[string]config.ScopeConfig) (restarted, throttled bool, err error) {
-	cfg, err := relayrender.RenderRelayConfig(config.Cluster{Scopes: a.resolveScopeParents(relayScopes)}, relayrender.DefaultServerAddr)
+	cfg, err := relayrender.RenderRelayConfig(a.relayCluster(relayScopes), relayrender.DefaultServerAddr)
 	if err != nil {
 		return false, false, fmt.Errorf("render relay config: %w", err)
 	}
@@ -1088,7 +1244,7 @@ func (a *Agent) applyRelayConfig(relayScopes map[string]config.ScopeConfig) (res
 		return false, false, nil
 	}
 
-	if err := relayrender.WriteRelayConfig(RelayConfigPath, config.Cluster{Scopes: a.resolveScopeParents(relayScopes)}, relayrender.DefaultServerAddr); err != nil {
+	if err := relayrender.WriteRelayConfig(RelayConfigPath, a.relayCluster(relayScopes), relayrender.DefaultServerAddr); err != nil {
 		return false, false, fmt.Errorf("write relay config: %w", err)
 	}
 
@@ -1117,6 +1273,9 @@ func (a *Agent) refreshRelayConfig() {
 	allScopes := a.allScopes()
 	relayScopes := relayEligibleScopes(allScopes, a.batchedDnsmasqActiveChecker())
 	if len(relayScopes) == 0 {
+		if err := relayrender.ClearRelayConfig(RelayConfigPath); err != nil {
+			loglevel.Warnf("[AGENT:ERROR] clear relay config (zero eligible scopes): %v", err)
+		}
 		if a.unitActive("dnshived-relay.service") {
 			if err := a.stopRelayUnit(); err != nil {
 				loglevel.Warnf("[AGENT:ERROR] stop dnshived-relay (zero eligible scopes): %v", err)
@@ -1383,15 +1542,7 @@ func (a *Agent) ReleaseLease(scope, mac, ip string) error {
 // system group (created by debian/dnshived.postinst on every real
 // install).
 func chownToDnshivedGroup(path string) error {
-	g, err := user.LookupGroup("dnshived")
-	if err != nil {
-		return fmt.Errorf("lookup dnshived group: %w", err)
-	}
-	gid, err := strconv.Atoi(g.Gid)
-	if err != nil {
-		return fmt.Errorf("parse dnshived group gid %q: %w", g.Gid, err)
-	}
-	return os.Chown(path, -1, gid)
+	return ownership.Dnshived(path)
 }
 
 func mergeReservations(real []config.Reservation, local, peer []leasesync.SyncedLease) []config.Reservation {
@@ -2154,12 +2305,6 @@ func (a *Agent) CheckPlaneHealth() []PlaneHealth {
 		}
 	}
 
-	var gateClosed map[string]bool
-	var gateErr error
-	if len(toCheck) > 0 {
-		gateClosed, gateErr = a.gateDump()
-	}
-
 	type checkResult struct {
 		findings []PlaneHealth
 		scope    string
@@ -2174,7 +2319,7 @@ func (a *Agent) CheckPlaneHealth() []PlaneHealth {
 	runConcurrent(indices, maxConcurrentGateOps, func(i int) {
 		rs := toCheck[i]
 		var findings []PlaneHealth
-		iface := nftgate.InterfaceName(a.localParent(rs.sc.Parent), rs.sc.VLANID)
+		iface := ifname.InterfaceName(a.localParent(rs.sc.Parent), rs.sc.VLANID)
 		ifi, err := net.InterfaceByName(iface)
 		if err != nil {
 			results[i] = checkResult{scope: rs.name, findings: []PlaneHealth{{Scope: rs.name, What: "interface",
@@ -2197,20 +2342,10 @@ func (a *Agent) CheckPlaneHealth() []PlaneHealth {
 				Detail: fmt.Sprintf("%s is %s (expected inactive — DHCP/DNS now served by the shared relay/central instances, not per-scope)", unit, st.ActiveState), Healable: true})
 		}
 
-		if gateErr == nil {
-			real := "open"
-			if gateClosed[iface] {
-				real = "closed"
-			}
-			if want, known := a.lastGate(rs.name); known && real != want {
-				findings = append(findings, PlaneHealth{Scope: rs.name, What: "gate",
-					Detail: fmt.Sprintf("nftables gate is %s, this node last set it %s", real, want), Healable: false})
-			}
-			if real == "open" && vDump != nil {
-				if vst, verr := vrrpstate.ParseInstanceState(vDump, "DNSHIVED_"+rs.name); verr == nil && vst != "MASTER" {
-					findings = append(findings, PlaneHealth{Scope: rs.name, What: "gate_vrrp_coherence",
-						Detail: fmt.Sprintf("DHCP gate is open but VRRP state is %s, not MASTER", vst), Healable: false})
-				}
+		if want, known := a.lastGate(rs.name); known && want == "open" && vDump != nil {
+			if vst, verr := vrrpstate.ParseInstanceState(vDump, "DNSHIVED_"+rs.name); verr == nil && vst != "MASTER" {
+				findings = append(findings, PlaneHealth{Scope: rs.name, What: "gate_vrrp_coherence",
+					Detail: fmt.Sprintf("DHCP gate is open but VRRP state is %s, not MASTER", vst), Healable: false})
 			}
 		}
 
@@ -2219,7 +2354,7 @@ func (a *Agent) CheckPlaneHealth() []PlaneHealth {
 
 	ifaceObserved := make(map[string]sanityIfaceObservation, len(results))
 	for i, r := range results {
-		iface := nftgate.InterfaceName(a.localParent(toCheck[i].sc.Parent), toCheck[i].sc.VLANID)
+		iface := ifname.InterfaceName(a.localParent(toCheck[i].sc.Parent), toCheck[i].sc.VLANID)
 		ifaceObserved[iface] = sanityIfaceObservation{scope: r.scope, ifIndex: r.ifIndex}
 	}
 	found := a.checkConfigSanity(ifaceObserved)
@@ -2259,7 +2394,7 @@ func (a *Agent) CheckPlaneHealth() []PlaneHealth {
 
 	found = append(found, a.checkTrunkLinkState()...)
 	found = append(found, a.checkPeerMgmtHealth()...)
-	found = append(found, a.checkOrphans(gateClosed)...)
+	found = append(found, a.checkOrphans()...)
 
 	return found
 }
@@ -2846,17 +2981,20 @@ func (a *Agent) trackUnserved(scope string, servingHere bool, reason string, in 
 
 // closeGate closes the DHCP gate for a scope immediately and
 // unconditionally.
-func (a *Agent) closeGate(scope, reason string) {
-	sc, hasCfg := a.scopeConfig(scope)
-	if !hasCfg {
-		return
+// closeGate closes scope's relay gate. The arbiter token is released only once the relay confirms the close:
+// until then it is kept and renewed, so no other core can open the scope while this relay may still forward.
+func (a *Agent) closeGate(scope, reason string) bool {
+	if _, hasCfg := a.scopeConfig(scope); !hasCfg {
+		return true
 	}
-	if err := a.setDHCPGateState(scope, sc, "closed"); err != nil {
-		loglevel.Warnf("[AGENT:ERROR] scope %s: close gate: %v", scope, err)
-	} else {
-		a.recordAppliedGate(scope, "closed")
+	if err := a.revokeRelay(scope); err != nil {
+		if a.markClosePending(scope) {
+			loglevel.Warnf("[AGENT:CLOSE_PENDING] scope %s (%s): relay did not close (%v) — keeping the arbiter token until it does", scope, reason, err)
+		}
+		return false
 	}
-	a.clearWitness(scope)
+	a.releaseClosed(scope)
+	return true
 }
 
 func (a *Agent) recordAppliedGate(scope, state string) {
@@ -2880,15 +3018,21 @@ func (a *Agent) openGate(scope, reason string) bool {
 		}
 	}
 
-	if err := a.setDHCPGateState(scope, sc, "open"); err != nil {
-		loglevel.Warnf("[AGENT:ERROR] scope %s: open gate: %v", scope, err)
-		a.clearWitness(scope) // don't hold a token for a gate we failed to open
+	if a.relayGate == nil || !a.relayGate.Available() {
+		loglevel.Warnf("[AGENT:ERROR] scope %s: no DHCP relay gate on this node — not serving", scope)
+		a.clearWitness(scope)
 		return false
 	}
+	if err := a.authorizeRelay(scope); err != nil {
+		loglevel.Warnf("[AGENT:TOKEN_DENY] relay did not open scope %s: %v", scope, err)
+		a.abandonOpen(scope)
+		return false
+	}
+	a.clearClosePending(scope)
 	a.recordAppliedGate(scope, "open")
 
-	iface := nftgate.InterfaceName(a.localParent(sc.Parent), sc.VLANID)
-	loglevel.Infof("[AGENT:GATE_OPEN] scope %s (%s) on %s", scope, reason, iface)
+	iface := ifname.InterfaceName(a.localParent(sc.Parent), sc.VLANID)
+	loglevel.Infof("[AGENT:GATE_OPEN] scope %s (%s) on %s, relay authorized", scope, reason, iface)
 	return true
 }
 
@@ -3314,15 +3458,35 @@ func (a *Agent) renewalLoop(ticker *time.Ticker, quit chan struct{}) {
 		select {
 		case <-ticker.C:
 			a.mu.Lock()
-			scopes := make([]string, 0, len(a.serving))
+			pending := make(map[string]bool, len(a.closePending))
+			for s := range a.closePending {
+				pending[s] = true
+			}
+			scopes := make([]string, 0, len(a.serving)+len(pending))
 			for s := range a.serving {
 				scopes = append(scopes, s)
+			}
+			for s := range pending {
+				if !a.serving[s] {
+					scopes = append(scopes, s)
+				}
 			}
 			a.mu.Unlock()
 
 			runConcurrent(scopes, maxConcurrentGateOps, func(scope string) {
+				if pending[scope] {
+					if !a.acquireWitness(scope) {
+						loglevel.Warnf("[AGENT:TOKEN_EXPIRE] renewal failed for scope %s while its relay close is pending", scope)
+					}
+					a.retryClosePending(scope)
+					return
+				}
 				if !a.acquireWitness(scope) {
 					loglevel.Warnf("[AGENT:TOKEN_EXPIRE] renewal failed for scope %s", scope)
+					return
+				}
+				if err := a.authorizeRelay(scope); relayRefused(err) {
+					loglevel.Warnf("[AGENT:TOKEN_EXPIRE] relay did not extend scope %s: %v", scope, err)
 				}
 			})
 		case <-quit:
@@ -3338,7 +3502,7 @@ func (a *Agent) createInterface(scope string, sc config.ScopeConfig) error {
 		if err := a.helperClient.AddScopes([]string{scope}); err != nil {
 			return fmt.Errorf("sync helper allowlist for scope %s: %w", scope, err)
 		}
-		return a.helperClient.CreateInterface(scope, sc.Parent, sc.VLANID, sc.NodeIP)
+		return a.helperClient.CreateInterface(scope, sc.Parent, sc.VLANID, sc.NodeIP, sc.VIP)
 	}
 	return errNoHelper
 }
@@ -3513,11 +3677,6 @@ func (a *Agent) reloadKeepalived() (throttled bool, err error) {
 	return false, errNoHelper
 }
 
-func (a *Agent) setDHCPGateState(scope string, sc config.ScopeConfig, state string) error {
-	sc.Parent = a.localParent(sc.Parent)
-	return SetDHCPGateState(a.helperClient, scope, sc, state)
-}
-
 // restartSelfFunc performs the actual dnshived.service restart.
 var restartSelfFunc = func(helperClient *helper.Client) (bool, error) {
 	if helperClient != nil {
@@ -3577,23 +3736,6 @@ func (a *Agent) RestartDNSRelay() (throttled bool, err error) {
 	return a.restartDNSRelayUnit()
 }
 
-// SetDHCPGateState is the package-level DHCP gate dispatch through the
-// helper.
-func SetDHCPGateState(helperClient *helper.Client, scope string, sc config.ScopeConfig, state string) error {
-	if helperClient == nil {
-		return errNoHelper
-	}
-	return helperClient.SetDHCPGate(scope, sc.Parent, sc.VLANID, state)
-}
-
-func (a *Agent) getDHCPGateStateFor(scope string, sc config.ScopeConfig) (string, error) {
-	sc.Parent = a.localParent(sc.Parent)
-	if a.helperClient != nil {
-		return a.helperClient.GetDHCPGate(scope, sc.Parent, sc.VLANID)
-	}
-	return "", errNoHelper
-}
-
 func (a *Agent) getVRRPStateFor(scope string) (string, error) {
 	if a.helperClient != nil {
 		return a.helperClient.GetVRRPState(scope)
@@ -3634,15 +3776,6 @@ func (a *Agent) CachedMgmtVIPState() string {
 func (a *Agent) vrrpDump() ([]byte, error) {
 	if a.helperClient != nil {
 		return a.helperClient.GetVRRPDump()
-	}
-	return nil, errNoHelper
-}
-
-// gateDump returns one fresh, node-wide DHCP-gate listing (iface -> true
-// if closed).
-func (a *Agent) gateDump() (map[string]bool, error) {
-	if a.helperClient != nil {
-		return a.helperClient.GetDHCPGateDump()
 	}
 	return nil, errNoHelper
 }
@@ -3721,7 +3854,7 @@ func (a *Agent) renderKeepalivedConfigAll(priorities map[string]int, extraReady 
 	instances := make([]keepalivedInstanceData, 0, len(names))
 	for _, name := range names {
 		sc := currentScopes[name]
-		iface := nftgate.InterfaceName(a.localParent(sc.Parent), sc.VLANID)
+		iface := ifname.InterfaceName(a.localParent(sc.Parent), sc.VLANID)
 		priority, ok := priorities[name]
 		if !ok {
 			priority = staticDefaultPriority(sc, a.role)
@@ -3889,7 +4022,7 @@ func (a *Agent) Readiness(scope string) ReadinessCheck {
 	if !ok {
 		return ReadinessCheck{}
 	}
-	iface := nftgate.InterfaceName(a.localParent(sc.Parent), sc.VLANID)
+	iface := ifname.InterfaceName(a.localParent(sc.Parent), sc.VLANID)
 
 	var rc ReadinessCheck
 	if _, err := os.Stat("/sys/class/net/" + iface); err == nil {
@@ -3904,7 +4037,7 @@ func (a *Agent) Readiness(scope string) ReadinessCheck {
 		rc.VRRPOperational = state == "MASTER" || state == "BACKUP"
 	}
 
-	if state, err := a.getDHCPGateStateFor(scope, sc); err == nil {
+	if state, known := a.lastGate(scope); known {
 		rc.DHCPGateClosed = state == "closed"
 	}
 

@@ -275,10 +275,10 @@ func TestWriteRelayConfig_NoExistingFileStartsFresh(t *testing.T) {
 	}
 }
 
-func TestWriteRelayConfig_GroupOwnedByDnshived(t *testing.T) {
-	g, err := user.LookupGroup("dnshived")
+func TestWriteRelayConfig_GroupOwnedByRelayGroup(t *testing.T) {
+	g, err := user.LookupGroup(relayGroup)
 	if err != nil {
-		t.Skipf("no \"dnshived\" group on this host, skipping: %v", err)
+		t.Skipf("no %q group on this host, skipping: %v", relayGroup, err)
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "relay.json")
@@ -296,7 +296,7 @@ func TestWriteRelayConfig_GroupOwnedByDnshived(t *testing.T) {
 	}
 	wantGid, _ := strconv.Atoi(g.Gid)
 	if int(stat.Gid) != wantGid {
-		t.Errorf("relay.json group gid = %d, want %d (dnshived) — the relay process (User=dnshived) must be able to read its own config", stat.Gid, wantGid)
+		t.Errorf("relay.json group gid = %d, want %d (%s) — the relay process (Group=%s) must be able to read its own config", stat.Gid, wantGid, relayGroup, relayGroup)
 	}
 }
 
@@ -341,5 +341,20 @@ func TestLoadConfig_OldRelayJSONWithoutOptionalLimits(t *testing.T) {
 	}
 	if cfg.RateLimit != 50 || cfg.PendingPerVLAN != 0 {
 		t.Errorf("old fields changed meaning: %+v", cfg)
+	}
+}
+
+// TestRender_CarriesNodeIDAndCoreCount covers F2: the gate needs this node's ID (tokens name their owner) and the
+// number of cores (quorum is the majority of them).
+func TestRender_CarriesNodeIDAndCoreCount(t *testing.T) {
+	c := testCluster()
+	c.NodeID = "core-1-701bf1ca87ae"
+	c.Peers = []string{"192.168.0.52:9443", "192.168.0.26:9443"}
+	cfg, err := RenderRelayConfig(c, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NodeID != "core-1-701bf1ca87ae" || cfg.CoreCount != 3 {
+		t.Fatalf("node_id=%q core_count=%d, want the node ID and 3", cfg.NodeID, cfg.CoreCount)
 	}
 }

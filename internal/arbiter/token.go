@@ -19,13 +19,19 @@ type Token struct {
 	ExpiresAt   time.Time `json:"expires_at"`
 	Nonce       string    `json:"nonce"`
 	Signature   string    `json:"signature"`
+	Arbiter     string    `json:"arbiter,omitempty"`
 }
 
-// signData returns the canonical string this token's signature covers.
+// signData returns the canonical string this token's signature covers. The arbiter
+// is appended only when set, so tokens from arbiters that predate the field verify unchanged.
 func (t *Token) signData() string {
-	return fmt.Sprintf("%s:%s:%d:%d:%d:%s",
+	data := fmt.Sprintf("%s:%s:%d:%d:%d:%s",
 		t.Scope, t.Owner, t.Incarnation,
 		t.GrantedAt.Unix(), t.ExpiresAt.Unix(), t.Nonce)
+	if t.Arbiter != "" {
+		data += ":" + t.Arbiter
+	}
+	return data
 }
 
 // Sign computes the HMAC-SHA256 signature over the token's fields.

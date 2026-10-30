@@ -36,6 +36,7 @@ func TestHandlePing_SignsResponseWhenPSKConfigured(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ping", strings.NewReader(`{}`))
+	req.Header.Set(pingSigHeader, signPingBody([]byte("shared-secret"), []byte(`{}`)))
 	o.HandlePing(rr, req)
 
 	sig := rr.Header().Get(pingSigHeader)
@@ -237,5 +238,48 @@ func TestHandlePing_EmptyTrustedHostsFailsOpen(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected fail-open 200 with no trusted_hosts configured, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestHandlePing_RefusesRequestWithoutCorrectSignature confirms the responder
+// does not reply to a caller that cannot prove it holds the cluster PSK (F5).
+func TestHandlePing_RefusesRequestWithoutCorrectSignature(t *testing.T) {
+	self := identity.Identity{ClusterID: "test-cluster", NodeID: "self", Role: "core-1"}
+	o := NewObserver(self, "self-addr", nil, "shared-secret")
+
+	for name, sig := range map[string]string{
+		"unsigned":   "",
+		"wrong key":  signPingBody([]byte("other-secret"), []byte(`{"node_id":"x"}`)),
+		"wrong body": signPingBody([]byte("shared-secret"), []byte(`{"node_id":"y"}`)),
+	} {
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/ping", strings.NewReader(`{"node_id":"x"}`))
+		if sig != "" {
+			req.Header.Set(pingSigHeader, sig)
+		}
+		o.HandlePing(rr, req)
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("%s: status %d, want 403", name, rr.Code)
+		}
+	}
+}
+
+// TestObserver_Probe_SignsItsRequest confirms the caller's request verifies at
+// the responder (F5: the probe and the responder agree on the signed body).
+func TestObserver_Probe_SignsItsRequest(t *testing.T) {
+	const psk = "shared-secret"
+	self := identity.Identity{ClusterID: "test-cluster", NodeID: "self", Role: "core-1"}
+	responder := NewObserver(identity.Identity{ClusterID: "test-cluster", NodeID: "peer-1", Role: "core-2"}, "peer-addr", nil, psk)
+	srv := httptest.NewServer(http.HandlerFunc(responder.HandlePing))
+	defer srv.Close()
+
+	o := NewObserver(self, "self-addr", []string{srv.Listener.Addr().String()}, psk)
+	resp, err := signedPing(o.client, srv.URL+"/api/v1/ping", []byte(`{"node_id":"self"}`), []byte(psk))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("signed ping status %d, want 200", resp.StatusCode)
 	}
 }

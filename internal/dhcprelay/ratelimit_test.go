@@ -139,7 +139,7 @@ func TestReconfigure_ServerIdentifierOnlyChangeUpdatesInPlace(t *testing.T) {
 
 func TestNewClientInterface_UsesTheGivenClusterWideRateLimit(t *testing.T) {
 	cfg := Config{ServerAddr: "127.0.0.21:67", RateLimit: 7, RateBurst: 9}
-	cif, err := newClientInterface(ClientInterfaceConfig{Name: "ens19.300", GIAddr: "192.168.30.22"}, cfg, new(atomic.Int64))
+	cif, err := newClientInterface(ClientInterfaceConfig{Name: "ens19.300", GIAddr: "192.168.30.22"}, cfg, new(atomic.Int64), newGateTable())
 	if err != nil {
 		t.Fatalf("newClientInterface: %v", err)
 	}

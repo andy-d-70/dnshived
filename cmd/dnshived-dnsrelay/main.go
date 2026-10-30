@@ -13,6 +13,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"golang.org/x/sys/unix"
 	"hash/fnv"
 	"io"
 	"log"
@@ -25,8 +26,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 // ------------------------- Configuration -------------------------
@@ -2523,12 +2522,15 @@ var version = "0.9.7-dev"
 func main() {
 	configPath := flag.String("config", "dnsrelay.json", "path to config file")
 	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
+	guardParse("dnshived-dnsrelay")
 
 	if *showVersion {
 		fmt.Println("dnshived-dnsrelay", version)
 		os.Exit(0)
 	}
+
+	guardCheckDaemonUser("dnshived")
+	guardHold("/run/dnshived/dnsrelay.lock")
 
 	if err := loadConfig(*configPath); err != nil {
 		log.Fatalf("load config: %v", err)
