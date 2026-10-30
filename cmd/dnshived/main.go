@@ -323,8 +323,8 @@ func main() {
 	loglevel.Infof("[FENCING:INIT] watermark loaded: %s", watermark.Current())
 
 	ag := agent.New(cfg.Role, self.NodeID, self.Incarnation, cfg.PSK, dataDir(cfg), cfg.Scopes, observer)
-	// The relay gate is used whenever the relay's socket exists on this node; without it the nftables gate
-	// alone decides (checked on every authorize, so a relay that starts later is picked up).
+	// The relay gate is used whenever the relay's socket exists on this node (checked on every authorize, so a
+	// relay that starts later is picked up).
 	ag.SetRelayGate(&relaygate.Client{Path: relaygate.DefaultPath})
 	ag.SetTLS(cfg.TLSEnabled())
 	ag.SetGlobalDNSRecords(cfg.GlobalDNSRecords)
@@ -353,7 +353,7 @@ func main() {
 
 	ag.SetHelper(helper.NewClient(helperSocketFor(cfg)))
 	loglevel.Infof("[AGENT:INIT] privileged operations via %s", helperSocketFor(cfg))
-	// Upgrade order (plan §13 G7): the legacy nftables table of the 0.9.8.5 DHCP gate must go before the
+	// Upgrade order: the legacy nftables table of the 0.9.8.5 DHCP gate must go before the
 	// first relay authorize. It needs the helper, so this runs after SetHelper.
 	if err := ag.RemoveLegacyNFT(); err != nil {
 		loglevel.Warnf("[AGENT:INIT] remove legacy nftables table (its DHCP drop rules stay in force until removed): %v", err)

@@ -299,7 +299,7 @@ func (c *Client) ReloadKeepalived() (throttled bool, err error) {
 }
 
 // RemoveLegacyNFT deletes the nftables table the old DHCP gate used. The daemon calls it once at start, before its
-// first relay authorize (upgrade order, plan §13 G7). The helper answers ok when the table is already gone.
+// first relay authorize. The helper answers ok when the table is already gone.
 func (c *Client) RemoveLegacyNFT() error {
 	return c.send(Request{Command: "remove-legacy-nft"})
 }

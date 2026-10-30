@@ -5,11 +5,14 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+
+	"dnshived/internal/cliguard"
 )
 
 var version = "0.9.8-dev"
@@ -28,7 +31,9 @@ func fixed(name, what string) checkResult  { return checkResult{name: name, ok: 
 func failure(name, why string) checkResult { return checkResult{name: name, ok: false, fail: why} }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--version" {
+	showVersion := flag.Bool("version", false, "print version and exit")
+	cliguard.Parse("dnshived-preflight", false)
+	if *showVersion {
 		fmt.Println(version)
 		return
 	}
