@@ -261,6 +261,9 @@ type authorityCheck struct {
 	} `json:"checks"`
 }
 
+// maxClientBody caps what the web UI reads from one node response.
+const maxClientBody = 8 << 20
+
 var httpClient = &http.Client{Timeout: 5 * time.Second, Transport: clusterTransport}
 
 // clusterSnapshotHTTPClient is fetchClusterSnapshot's own dedicated
@@ -288,7 +291,7 @@ func doGet(cl *http.Client, node NodeConfig, path string, v interface{}) (status
 		return 0, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxClientBody))
 	if err != nil {
 		return resp.StatusCode, err
 	}
@@ -550,7 +553,7 @@ func triggerProbeNow(node NodeConfig, scope string) (probeResult, error) {
 		return pr, fmt.Errorf("a probe for this scope is already running — try again shortly")
 	}
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxClientBody))
 		return pr, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&pr); err != nil {
@@ -581,7 +584,7 @@ func restartUnit(node NodeConfig, unit string, isProbeHost bool) (throttled bool
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxClientBody))
 		return false, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
 	}
 	var result struct {
@@ -628,7 +631,7 @@ func pushProbeHostParallelProbing(node NodeConfig, enabled bool) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxClientBody))
 		return fmt.Errorf("status %d: %s", resp.StatusCode, string(respBody))
 	}
 	return nil
@@ -661,7 +664,7 @@ func pushProbeHostClusterNodes(probe NodeConfig, nodes []probeClusterNodePatch) 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxClientBody))
 		return fmt.Errorf("status %d: %s", resp.StatusCode, string(respBody))
 	}
 	return nil
@@ -900,7 +903,7 @@ func pushConfig(node NodeConfig, payload []byte) (status int, respBody []byte, e
 		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	respBody, err = io.ReadAll(resp.Body)
+	respBody, err = io.ReadAll(io.LimitReader(resp.Body, maxClientBody))
 	return resp.StatusCode, respBody, err
 }
 

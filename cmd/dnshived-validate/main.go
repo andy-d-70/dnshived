@@ -1060,7 +1060,7 @@ func dumpViolation(v Violation, outDir string) string {
 		v.Invariant, v.Snapshot.SampleIndex, v.Snapshot.Timestamp.UnixNano())
 	path := filepath.Join(outDir, filename)
 	data, _ := json.MarshalIndent(v, "", "  ")
-	os.WriteFile(path, data, 0o644)
+	os.WriteFile(path, data, 0o600)
 	return path
 }
 
