@@ -15,12 +15,16 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"dnshived/internal/cliguard"
+	"dnshived/internal/probepin"
 )
 
 var version = "0.9.7-dev"
@@ -807,35 +811,44 @@ const defaultWebConfigPath = "/etc/dnshived/web.json"
 // probeTargets returns each probe host's base URL, from the -probe-addr
 // list or else the web UI's own probe_hosts.
 func probeTargets(flagVal, webConfigPath string) []string {
+	return probeTargetsPinned(flagVal, webConfigPath, nil)
+}
+
+// probeTargetsPinned is probeTargets with -probe-pin: a pinned address is reached over HTTPS, and a pin
+// without a -probe-addr entry adds that probe too.
+func probeTargetsPinned(flagVal, webConfigPath string, flagPins map[string]string) []string {
 	var out []string
 	for _, a := range strings.Split(flagVal, ",") {
 		a = strings.TrimSpace(a)
 		if a == "" {
 			continue
 		}
-		if !strings.Contains(a, "://") {
+		if _, pinned := flagPins[a]; pinned {
+			a = "https://" + a
+		} else if !strings.Contains(a, "://") {
 			a = "http://" + a
 		}
 		out = append(out, strings.TrimSuffix(a, "/"))
 	}
+	pinnedAddrs := make([]string, 0, len(flagPins))
+	for addr := range flagPins {
+		pinnedAddrs = append(pinnedAddrs, addr)
+	}
+	sort.Strings(pinnedAddrs)
+	for _, addr := range pinnedAddrs {
+		if !slices.Contains(out, "https://"+addr) {
+			out = append(out, "https://"+addr)
+		}
+	}
 	if len(out) > 0 {
 		return out
 	}
-	data, err := os.ReadFile(webConfigPath)
-	if err != nil {
-		return nil
-	}
-	var wc struct {
-		ProbeHosts []struct {
-			Addr string `json:"addr"`
-			TLS  bool   `json:"tls"`
-		} `json:"probe_hosts"`
-	}
-	if json.Unmarshal(data, &wc) != nil {
-		return nil
-	}
-	for _, h := range wc.ProbeHosts {
+	for _, h := range loadWebProbeHosts(webConfigPath) {
 		if h.Addr == "" {
+			continue
+		}
+		if h.TLSFingerprint != "" {
+			out = append(out, "https://"+tlsAddrOf(h.Addr, h.TLSPort))
 			continue
 		}
 		sch := "http"
@@ -845,6 +858,62 @@ func probeTargets(flagVal, webConfigPath string) []string {
 		out = append(out, sch+"://"+h.Addr)
 	}
 	return out
+}
+
+// webProbeHost is one entry of the web UI's probe_hosts.
+type webProbeHost struct {
+	Addr           string `json:"addr"`
+	TLS            bool   `json:"tls"`
+	TLSPort        string `json:"tls_port"`
+	TLSFingerprint string `json:"tls_fingerprint"`
+}
+
+func loadWebProbeHosts(webConfigPath string) []webProbeHost {
+	data, err := os.ReadFile(webConfigPath)
+	if err != nil {
+		return nil
+	}
+	var wc struct {
+		ProbeHosts []webProbeHost `json:"probe_hosts"`
+	}
+	if json.Unmarshal(data, &wc) != nil {
+		return nil
+	}
+	return wc.ProbeHosts
+}
+
+// webProbePins maps each pinned probe host in the web UI's config to its TLS address and fingerprint.
+func webProbePins(webConfigPath string) map[string]string {
+	pins := make(map[string]string)
+	for _, h := range loadWebProbeHosts(webConfigPath) {
+		if h.Addr != "" && h.TLSFingerprint != "" {
+			pins[tlsAddrOf(h.Addr, h.TLSPort)] = h.TLSFingerprint
+		}
+	}
+	return pins
+}
+
+// tlsAddrOf is addr's host with port.
+func tlsAddrOf(addr, port string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	return net.JoinHostPort(host, port)
+}
+
+// probePinFlag is -probe-pin: host:port=sha256:<fingerprint>, repeatable.
+type probePinFlag map[string]string
+
+func (p probePinFlag) String() string { return "" }
+
+func (p probePinFlag) Set(v string) error {
+	addr, fp, err := probepin.ParsePin(v)
+	if err != nil {
+		return err
+	}
+	p[addr] = fp
+	return nil
 }
 
 func fetchJSON(url string, v interface{}) error {
@@ -1006,8 +1075,10 @@ func main() {
 	tlsSkipVerify := flag.Bool("tls-skip-verify", false, "skip TLS certificate verification")
 	tokenFile := flag.String("token-file", "", "path to file containing API bearer token")
 	probeAddrs := flag.String("probe-addr", "", "comma-separated probe host addresses (host:port, plain HTTP unless given as https://...); default: probe_hosts from "+defaultWebConfigPath)
+	probePins := probePinFlag{}
+	flag.Var(probePins, "probe-pin", "pin a probe host's TLS API: host:port=sha256:<fingerprint> (repeatable; the probe's log shows the fingerprint)")
 	showVersion := flag.Bool("version", false, "print version")
-	flag.Parse()
+	cliguard.Parse("dnshived-validate", false)
 
 	if *showVersion {
 		fmt.Println("dnshived-validate", version)
@@ -1048,7 +1119,20 @@ func main() {
 		fmt.Printf("  Discovered %d scopes\n", len(preferredMap))
 	}
 
-	probes := probeTargets(*probeAddrs, defaultWebConfigPath)
+	pins := webProbePins(defaultWebConfigPath)
+	for addr, fp := range probePins {
+		pins[addr] = fp
+	}
+	if len(pins) > 0 {
+		next := dhcpProbeClient.Transport
+		if next == nil {
+			next = http.DefaultTransport
+		}
+		router := &probepin.Router{Next: next}
+		router.SetPins(pins)
+		dhcpProbeClient.Transport = router
+	}
+	probes := probeTargetsPinned(*probeAddrs, defaultWebConfigPath, probePins)
 	if len(probes) == 0 {
 		fmt.Println("  ⚠ No probe host known (-probe-addr, or probe_hosts in " + defaultWebConfigPath + ") — dhcp_dual_active will be skipped")
 	} else {

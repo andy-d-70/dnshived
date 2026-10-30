@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"dnshived/internal/auth"
+	"dnshived/internal/cliguard"
 	"dnshived/internal/eventlog"
+	"dnshived/internal/instlock"
 	"dnshived/internal/tlspin"
 )
 
@@ -34,11 +36,16 @@ func main() {
 	dnsTarget := flag.String("dns-target", "", "(with -once) IP address to send the DNS query to — required if -dns-name is set")
 	asJSON := flag.Bool("json", false, "(with -once) machine-readable JSON output on stdout, in addition to the human-readable report")
 	fullWait := flag.Bool("full-wait", false, "(with -once) listen out the full -dhcp-wait window for a real dual-active check, instead of stopping at the first offer (the default, for fast feedback)")
-	flag.Parse()
+	cliguard.Parse("dnshived-probe", false)
 
 	if *showVersion {
 		fmt.Println("dnshived-probe", version)
 		os.Exit(0)
+	}
+
+	cliguard.CheckUser("dnshived-probe", cliguard.Daemon, "dnshived")
+	if err := instlock.Hold("/var/lib/dnshived-probe/probe.lock"); err != nil {
+		cliguard.Exit("dnshived-probe", err)
 	}
 
 	if *once {

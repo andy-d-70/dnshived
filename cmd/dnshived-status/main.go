@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"dnshived/internal/clientrc"
+	"dnshived/internal/cliguard"
 )
 
 var version = "0.9.7-dev"
@@ -705,7 +706,7 @@ func main() {
 		}
 	}
 
-	flag.Parse()
+	cliguard.Parse("dnshived-status", false)
 
 	if *showVersion {
 		fmt.Println("dnshived-status", version)

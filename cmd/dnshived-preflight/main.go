@@ -14,7 +14,7 @@ import (
 
 var version = "0.9.8-dev"
 
-var requiredBinaries = []string{"dnsmasq", "nft", "keepalived"}
+var requiredBinaries = []string{"dnsmasq", "keepalived"}
 
 type checkResult struct {
 	name      string
@@ -93,12 +93,12 @@ func installHint() string {
 	family := id + " " + idLike
 	switch {
 	case strings.Contains(family, "debian") || strings.Contains(family, "ubuntu"):
-		return "apt install dnsmasq-base nftables keepalived"
+		return "apt install dnsmasq-base keepalived"
 	case strings.Contains(family, "rhel") || strings.Contains(family, "centos") ||
 		strings.Contains(family, "rocky") || strings.Contains(family, "fedora"):
-		return "dnf install dnsmasq nftables keepalived"
+		return "dnf install dnsmasq keepalived"
 	default:
-		return "install dnsmasq, nftables, and keepalived using this distro's package manager"
+		return "install dnsmasq and keepalived using this distro's package manager"
 	}
 }
 

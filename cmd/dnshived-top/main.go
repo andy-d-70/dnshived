@@ -14,17 +14,20 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
-
-	"dnshived/internal/clientrc"
-	"dnshived/internal/tlspin"
 	"time"
 	"unicode/utf8"
 	"unsafe"
+
+	"dnshived/internal/clientrc"
+	"dnshived/internal/cliguard"
+	"dnshived/internal/probepin"
+	"dnshived/internal/tlspin"
 )
 
 var version = "0.9.7-dev"
@@ -178,6 +181,35 @@ var (
 	}
 	probeClient = &http.Client{Timeout: 5 * time.Second}
 )
+
+// probePins maps a pinned probe's TLS address (host:port) to its certificate fingerprint, from -probe-pin.
+var probePins = map[string]string{}
+
+// pinnedProbeClients caches one client per fingerprint.
+var pinnedProbeClients sync.Map
+
+func pinnedProbeClient(fp string) *http.Client {
+	if c, ok := pinnedProbeClients.Load(fp); ok {
+		return c.(*http.Client)
+	}
+	c := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: probepin.Config(fp)}}
+	actual, _ := pinnedProbeClients.LoadOrStore(fp, c)
+	return actual.(*http.Client)
+}
+
+// probePinFlag is -probe-pin: host:port=sha256:<fingerprint>, repeatable.
+type probePinFlag struct{}
+
+func (probePinFlag) String() string { return "" }
+
+func (probePinFlag) Set(v string) error {
+	addr, fp, err := probepin.ParsePin(v)
+	if err != nil {
+		return err
+	}
+	probePins[addr] = fp
+	return nil
+}
 
 func fetchJSON(url string, v interface{}) error {
 	return fetchJSONWith(client, url, v)
@@ -561,8 +593,12 @@ func collectProbeHosts(addrs []string) (map[string]nodeStatus, map[string]string
 		wg.Add(1)
 		go func(addr string) {
 			defer wg.Done()
+			base, cl := "http://"+addr, probeClient
+			if fp, ok := probePins[addr]; ok {
+				base, cl = "https://"+addr, pinnedProbeClient(fp)
+			}
 			var st nodeStatus
-			err := fetchJSONWith(probeClient, "http://"+addr+"/api/v1/status", &st)
+			err := fetchJSONWith(cl, base+"/api/v1/status", &st)
 			if err != nil {
 				mu.Lock()
 				errs[addr] = err.Error()
@@ -571,8 +607,8 @@ func collectProbeHosts(addrs []string) (map[string]nodeStatus, map[string]string
 			}
 			var dr daemonsResponse
 			var sys systemInfo
-			daemonErr := fetchJSONWith(probeClient, "http://"+addr+"/api/v1/daemons", &dr)
-			sysErr := fetchJSONWith(probeClient, "http://"+addr+"/api/v1/system", &sys)
+			daemonErr := fetchJSONWith(cl, base+"/api/v1/daemons", &dr)
+			sysErr := fetchJSONWith(cl, base+"/api/v1/system", &sys)
 			mu.Lock()
 			defer mu.Unlock()
 			statuses[addr] = st
@@ -2285,18 +2321,21 @@ func main() {
 
 	addr := flag.String("addr", addrDefault, "address(es) of cluster nodes (comma-separated)")
 	probeAddr := flag.String("probe-addr", rc.ProbeAddr, "address(es) of external dnshived-probe hosts, comma-separated (0.9.7, optional)")
+	flag.Var(probePinFlag{}, "probe-pin", "pin a probe host's TLS API: host:port=sha256:<fingerprint> (repeatable; the probe's log shows the fingerprint)")
 	probeName := flag.String("probe-name", rc.ProbeName, "friendly name(s) for external probe hosts, comma-separated, matching -probe-addr order (0.9.7, optional — falls back to address when unset)")
 	useTLS := flag.Bool("tls", rc.TLS, "use HTTPS")
 	tlsSkipVerify := flag.Bool("tls-skip-verify", rc.TLSSkipVerify, "skip TLS verification")
 	tlsCert := flag.String("tls-cert", rc.TLSCert, "verify the nodes against this cluster certificate (e.g. a copy of /etc/dnshived/tls/cert.pem); implies -tls and overrides -tls-skip-verify")
 	tokenFile := flag.String("token-file", "", "path to bearer token file")
 	showVersion := flag.Bool("version", false, "print version")
-	flag.Parse()
+	cliguard.Parse("dnshived-top", false)
 
 	if *showVersion {
 		fmt.Println("dnshived-top", version)
 		os.Exit(0)
 	}
+
+	cliguard.CheckUser("dnshived-top", cliguard.UserTool, "")
 
 	switch {
 	case *tlsCert != "":
@@ -2340,6 +2379,16 @@ func main() {
 			if a = strings.TrimSpace(a); a != "" {
 				probeHostAddrs = append(probeHostAddrs, a)
 			}
+		}
+	}
+	pinnedAddrs := make([]string, 0, len(probePins))
+	for addr := range probePins {
+		pinnedAddrs = append(pinnedAddrs, addr)
+	}
+	sort.Strings(pinnedAddrs)
+	for _, addr := range pinnedAddrs {
+		if !slices.Contains(probeHostAddrs, addr) {
+			probeHostAddrs = append(probeHostAddrs, addr)
 		}
 	}
 	probeHostNames := make(map[string]string, len(probeHostAddrs))

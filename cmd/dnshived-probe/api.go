@@ -4,6 +4,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -32,6 +33,11 @@ func startAPIServer(cfg *ProbeConfig, cfgPath string, store *resultStore, tracke
 	mux := http.NewServeMux()
 	refresh := newRefreshLimiter()
 
+	tlsCert, tlsFingerprint, err := loadOrCreateProbeCert(probeCertDir)
+	if err != nil {
+		return fmt.Errorf("probe API certificate: %w", err)
+	}
+
 	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		results := store.all()
@@ -51,6 +57,8 @@ func startAPIServer(cfg *ProbeConfig, cfgPath string, store *resultStore, tracke
 			"parallel_probing":  cfg.Parallel(),
 			"started_at":        startedAt.UTC().Format(time.RFC3339),
 			"server_time":       time.Now().UTC().Format(time.RFC3339),
+			"tls_port":          probeTLSPort,
+			"tls_fingerprint":   tlsFingerprint,
 		})
 	})
 
@@ -208,11 +216,30 @@ func startAPIServer(cfg *ProbeConfig, cfgPath string, store *resultStore, tracke
 	if err != nil {
 		return fmt.Errorf("dnshived-probe API listener: %w", err)
 	}
+
+	host, _, err := net.SplitHostPort(cfg.ListenAddr)
+	if err != nil {
+		ln.Close()
+		return fmt.Errorf("dnshived-probe TLS API address: %w", err)
+	}
+	tlsLn, err := net.Listen("tcp", net.JoinHostPort(host, probeTLSPort))
+	if err != nil {
+		ln.Close()
+		return fmt.Errorf("dnshived-probe TLS API listener: %w", err)
+	}
+
 	go func() {
 		if err := http.Serve(ln, handler); err != nil {
 			log.Fatalf("dnshived-probe API server: %v", err)
 		}
 	}()
+	tlsCfg := &tls.Config{Certificates: []tls.Certificate{tlsCert}, MinVersion: tls.VersionTLS12}
+	go func() {
+		if err := http.Serve(tls.NewListener(tlsLn, tlsCfg), handler); err != nil {
+			log.Fatalf("dnshived-probe TLS API server: %v", err)
+		}
+	}()
+	log.Printf("[INIT] TLS API on port %s, certificate %s", probeTLSPort, tlsFingerprint)
 	return nil
 }
 

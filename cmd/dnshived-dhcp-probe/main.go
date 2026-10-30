@@ -12,6 +12,7 @@ import (
 	"os"
 	"time"
 
+	"dnshived/internal/cliguard"
 	"dnshived/internal/dhcpprobe"
 )
 
@@ -23,7 +24,7 @@ func main() {
 	wait := flag.Duration("wait", 5*time.Second, "how long to listen for offers")
 	noBcast := flag.Bool("no-broadcast-flag", false, "clear the BOOTP broadcast flag")
 	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
+	cliguard.Parse("dnshived-dhcp-probe", false)
 
 	if *showVersion {
 		fmt.Println("dnshived-dhcp-probe", version)

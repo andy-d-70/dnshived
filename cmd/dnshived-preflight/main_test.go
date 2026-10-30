@@ -18,7 +18,7 @@ func TestCheckRequiredBinaries_AllPresent(t *testing.T) {
 
 func TestCheckRequiredBinaries_SomeMissing(t *testing.T) {
 	r := checkRequiredBinaries(func(name string) error {
-		if name == "nft" {
+		if name == "keepalived" {
 			return errors.New("not found")
 		}
 		return nil
@@ -26,7 +26,7 @@ func TestCheckRequiredBinaries_SomeMissing(t *testing.T) {
 	if r.ok {
 		t.Fatal("expected failure when a required binary is missing")
 	}
-	if !strings.Contains(r.fail, "nft") {
+	if !strings.Contains(r.fail, "keepalived") {
 		t.Fatalf("expected failure message to name the missing binary, got %q", r.fail)
 	}
 }
