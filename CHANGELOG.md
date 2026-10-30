@@ -1,5 +1,16 @@
 # dnshived Changelog
 
+## 0.9.8.7 — in progress
+
+**Upgrade note:** upgrade every node in one window. The VRRP instances now authenticate their advertisements (see below), so a node on this release and a node on 0.9.8.6 cannot elect a VIP master together.
+
+- VRRP advertisements are authenticated. Each scope's VRRP instance and the management VIP carry an `auth_type PASS` password derived from the cluster PSK with HKDF, so a host on the same segment can no longer take over a VIP by sending higher-priority advertisements. VRRP limits the password to eight characters; the derivation is per instance.
+- The rendered keepalived configs are written `0600` (they carry the VRRP passwords). The lease socket is `0600` instead of `0666`, so only the daemon's own user can send lease events.
+- dnsmasq runs with `UMask=0077`, so the lease file (client MAC and IP records) is owner-only.
+- The web UI caps each response it reads from a core node at 8 MiB.
+- `dnshived-validate` writes its violation snapshots `0600`.
+- The helper runs `restorecon` only when a dry run reports a file whose label is wrong, instead of relabelling on every start.
+
 ## 0.9.8.6 — released
 
 **Upgrade instructions (from 0.9.8.5):**

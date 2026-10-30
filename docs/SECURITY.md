@@ -215,6 +215,10 @@ it is the same authority that writes `cluster.json`.
 the relay to revoke every scope over its gate socket. The relay's own
 authorization deadline closes a scope if that call does not arrive.
 
+## VRRP authentication
+
+Each scope's VRRP instance and the management VIP authenticate their advertisements with keepalived's PASS type. The password is derived from the cluster PSK with HKDF-SHA256, per instance, and is eight characters (the VRRP limit). Without it, any host on a VLAN could take a VIP by sending advertisements with a higher priority. PASS sends the password in clear text on the segment, so it stops casual spoofing; it does not stop a determined attacker who can read the segment. AH is available in keepalived but marked "not recommended" in its manual. The rendered configs are owner-only (`0600`).
+
 ## Command line and user checks
 
 Every binary parses its flags strictly: an unknown flag or a stray argument prints one line and the usage, and exits 2. The daemons check that they run as their service account and refuse root. The root helpers check that they run as root. Only the tools that can need root may run as root (the list is in the changelog); `dnshived-top` refuses root. A second copy of a daemon or helper refuses to start while the first holds its lock file, and a socket path is replaced only when nothing answers on it. These checks guard against mistakes; they are not a boundary against root.
