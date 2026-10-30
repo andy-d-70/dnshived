@@ -5,7 +5,6 @@ package main
 
 import (
 	"bytes"
-	"dnshived/internal/loglevel"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,6 +20,7 @@ import (
 	"dnshived/internal/config"
 	"dnshived/internal/daemonstatus"
 	"dnshived/internal/helper"
+	"dnshived/internal/loglevel"
 )
 
 // decommissioning is set true as the very first action selfDecommission
@@ -43,6 +43,20 @@ var decommissionUnits = []string{
 var stopUnitFunc = func(unit string) error {
 	return helper.NewClient(helperSocketFor(currentConfig.Load())).ManageUnit("disable-now", unit)
 }
+
+// enableUnitFunc starts a unit and enables it at boot, through the helper.
+var enableUnitFunc = func(unit string) error {
+	return helper.NewClient(helperSocketFor(currentConfig.Load())).ManageUnit("enable-now", unit)
+}
+
+// removeLegacyNFTFunc deletes the empty inet dnshived table through the helper.
+var removeLegacyNFTFunc = func() error {
+	return helper.NewClient(helperSocketFor(currentConfig.Load())).RemoveLegacyNFT()
+}
+
+// probeUnitsForAdoption are the probe units a core adoption disables for mutual
+// exclusion; a self-decommission starts them again so the host can be adopted as a probe.
+var probeUnitsForAdoption = []string{"dnshived-probe.service", "dnshived-probe-helper.service"}
 
 // listDnsmasqInstances returns every dnshived-dnsmasq@*.service instance
 // systemd currently knows about on this host.
@@ -120,6 +134,20 @@ func verifiedStopUnit(unit string) decommStep {
 		return decommStep{Name: unit, OK: false, Detail: detail}
 	}
 	return decommStep{Name: unit, OK: true, Detail: fmt.Sprintf("confirmed %s", st.ActiveState)}
+}
+
+func enableUnitStep(unit string) decommStep {
+	if err := enableUnitFunc(unit); err != nil {
+		return decommStep{Name: "enable " + unit, OK: false, Detail: err.Error()}
+	}
+	return decommStep{Name: "enable " + unit, OK: true, Detail: "started and enabled for adoption"}
+}
+
+func legacyNFTStep() decommStep {
+	if err := removeLegacyNFTFunc(); err != nil {
+		return decommStep{Name: "legacy nftables table", OK: false, Detail: err.Error()}
+	}
+	return decommStep{Name: "legacy nftables table", OK: true, Detail: "removed or already absent"}
 }
 
 func verifiedDeletePath(path string) decommStep {
@@ -372,6 +400,11 @@ func selfDecommission(cfgPath, reason string) {
 		loglevel.Infof("[DECOMMISSION] %s still present after deletion — aborting before touching dnshived-helper", cfgPath)
 		pushDecommissionReport(cfg, reason, steps)
 		return
+	}
+
+	steps = append(steps, legacyNFTStep())
+	for _, unit := range probeUnitsForAdoption {
+		steps = append(steps, enableUnitStep(unit))
 	}
 
 	loglevel.Infof("[DECOMMISSION] step report (%d step(s)):", len(steps))

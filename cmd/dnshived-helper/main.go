@@ -23,8 +23,11 @@ import (
 	"syscall"
 	"time"
 
-	"dnshived/internal/nftgate"
+	"dnshived/internal/cliguard"
+	"dnshived/internal/ifname"
+	"dnshived/internal/instlock"
 	"dnshived/internal/rpfilter"
+	"dnshived/internal/unixsock"
 	"dnshived/internal/vrrpstate"
 )
 
@@ -36,30 +39,27 @@ const keepalivedPIDFile = "/run/dnshived/keepalived.pid"
 
 // Request is a command from the daemon.
 type Request struct {
-	Command   string   `json:"command"`
-	Scope     string   `json:"scope"`            // scope name (must be in allowlist) — empty for ensure-keepalived
-	Parent    string   `json:"parent"`           // parent interface (e.g. "ens19")
-	VLANID    int      `json:"vlan_id"`          // VLAN ID
-	VIP       string   `json:"vip"`              // VIP address (CIDR)
-	NodeIP    string   `json:"node_ip"`          // node IP address (CIDR)
-	GateState string   `json:"gate_state"`       // "open" or "closed" — set-dhcp-gate only
-	Scopes    []string `json:"scopes,omitempty"` // add-scopes only — names to grow the allowlist with
-	Unit      string   `json:"unit,omitempty"`   // journal-tail only — must be in allowedJournalUnits
-	Lines     int      `json:"lines,omitempty"`  // journal-tail only — how many recent lines
-	Action    string   `json:"action,omitempty"` // manage-unit only
-	Iface     string   `json:"iface,omitempty"`  // link-up, remove-gate-rule-unscoped
+	Command string   `json:"command"`
+	Scope   string   `json:"scope"`            // scope name (must be in allowlist) — empty for ensure-keepalived
+	Parent  string   `json:"parent"`           // parent interface (e.g. "ens19")
+	VLANID  int      `json:"vlan_id"`          // VLAN ID
+	VIP     string   `json:"vip"`              // VIP address (CIDR)
+	NodeIP  string   `json:"node_ip"`          // node IP address (CIDR)
+	Scopes  []string `json:"scopes,omitempty"` // add-scopes only — names to grow the allowlist with
+	Unit    string   `json:"unit,omitempty"`   // journal-tail only — must be in allowedJournalUnits
+	Lines   int      `json:"lines,omitempty"`  // journal-tail only — how many recent lines
+	Action  string   `json:"action,omitempty"` // manage-unit only
+	Iface   string   `json:"iface,omitempty"`  // link-up
 }
 
 // Response is the result sent back to the daemon.
 type Response struct {
-	OK           bool            `json:"ok"`
-	Error        string          `json:"error,omitempty"`
-	GateState    string          `json:"gate_state,omitempty"`    // get-dhcp-gate only
-	GateDump     map[string]bool `json:"gate_dump,omitempty"`     // dhcp-gate-dump only — iface -> true if closed, every gated iface
-	VRRPState    string          `json:"vrrp_state,omitempty"`    // get-vrrp-state only
-	VRRPDump     string          `json:"vrrp_dump,omitempty"`     // vrrp-dump only — raw SIGDATA text, every instance
-	Throttled    bool            `json:"throttled,omitempty"`     // reload-keepalived/restart-dnsmasq only — rate-limited, NOT applied
-	JournalLines []string        `json:"journal_lines,omitempty"` // journal-tail only
+	OK           bool     `json:"ok"`
+	Error        string   `json:"error,omitempty"`
+	VRRPState    string   `json:"vrrp_state,omitempty"`    // get-vrrp-state only
+	VRRPDump     string   `json:"vrrp_dump,omitempty"`     // vrrp-dump only — raw SIGDATA text, every instance
+	Throttled    bool     `json:"throttled,omitempty"`     // reload-keepalived/restart-dnsmasq only — rate-limited, NOT applied
+	JournalLines []string `json:"journal_lines,omitempty"` // journal-tail only
 }
 
 var (
@@ -94,8 +94,12 @@ var allowedJournalUnits = map[string]bool{
 // at adopt and self-decommission. disable-now also takes any
 // dnshived-dnsmasq@ instance (dnsmasqUnitPattern).
 var manageUnitAllowed = map[string]map[string]bool{
-	"enable-now": {"dnshived-web.service": true},
-	"enable":     {"dnshived-helper.service": true},
+	"enable-now": {
+		"dnshived-web.service":          true,
+		"dnshived-probe.service":        true,
+		"dnshived-probe-helper.service": true,
+	},
+	"enable": {"dnshived-helper.service": true},
 	"disable-now": {
 		"dnshived-probe.service":           true,
 		"dnshived-probe-helper.service":    true,
@@ -236,11 +240,16 @@ func main() {
 	scopeList := flag.String("scopes", "", "comma-separated list of allowed scope names")
 	stateDirFlag := flag.String("state-dir", "/var/lib/dnshived-helper", "directory for this helper's own persisted state (currently: dynamically add-scopes'd names — see addScopes)")
 	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
+	cliguard.Parse("dnshived-helper", false)
 
 	if *showVersion {
 		fmt.Println("dnshived-helper", version)
 		os.Exit(0)
+	}
+
+	cliguard.CheckUser("dnshived-helper", cliguard.RootHelper, "")
+	if err := instlock.Hold("/run/dnshived/helper.lock"); err != nil {
+		cliguard.Exit("dnshived-helper", err)
 	}
 
 	stateDir = *stateDirFlag
@@ -260,126 +269,50 @@ func main() {
 		log.Printf("[HELPER:INIT] allowed scopes (--scopes flag + persisted add-scopes state): %v", names)
 	}
 
-	if err := nftgate.EnsureChain(); err != nil {
-		log.Fatalf("[HELPER:INIT] nftables gate setup failed: %v", err)
-	}
-	log.Printf("[HELPER:INIT] nftables gate ready (table=%s chain=%s)", nftgate.Table, nftgate.Chain)
-
-	if err := prepareSocket(*socketPath); err != nil {
+	srv, err := unixsock.Listen(*socketPath, 0o660, unixsock.Limits{
+		MaxConns:     helperMaxConns,
+		Deadline:     helperConnDeadline,
+		MaxRequest:   helperMaxRequestSize,
+		DrainTimeout: helperDrainTimeout,
+	})
+	if err != nil {
 		log.Fatalf("[HELPER:INIT] %v", err)
 	}
-
-	oldUmask := syscall.Umask(0o117)
-	ln, err := net.Listen("unix", *socketPath)
-	syscall.Umask(oldUmask)
-	if err != nil {
-		log.Fatalf("listen: %v", err)
-	}
-	defer ln.Close()
-
-	if err := os.Chmod(*socketPath, 0o660); err != nil {
-		log.Fatalf("[HELPER:INIT] chmod socket %s: %v", *socketPath, err)
-	}
-
 	log.Printf("[HELPER:INIT] listening on %s", *socketPath)
 
-	sem := make(chan struct{}, helperMaxConns)
-	go func() {
-		for {
-			conn, err := ln.Accept()
-			if err != nil {
-				if strings.Contains(err.Error(), "use of closed") {
-					return
-				}
-				log.Printf("[HELPER:ERROR] accept: %v", err)
-				continue
-			}
-			sem <- struct{}{}
-			connWG.Add(1)
-			go func() {
-				defer connWG.Done()
-				defer func() { <-sem }()
-				handleConn(conn)
-			}()
-		}
-	}()
+	go srv.Serve(handleConn, func(_ unixsock.Peer, err error) {
+		log.Printf("[HELPER:DENY] peer not allowed: %v", err)
+	})
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 	log.Printf("[HELPER] shutting down, draining in-flight requests")
-	ln.Close()
-	drained := make(chan struct{})
-	go func() {
-		connWG.Wait()
-		close(drained)
-	}()
-	select {
-	case <-drained:
-	case <-time.After(helperDrainTimeout):
-		log.Printf("[HELPER:WARN] %v drain timeout reached, exiting with requests still in flight", helperDrainTimeout)
+	if left := srv.Close(); left > 0 {
+		log.Printf("[HELPER:WARN] drain timeout reached, exiting with %d request(s) still in flight", left)
 	}
-	os.Remove(*socketPath)
 	log.Printf("[HELPER] shutdown complete")
 	os.Exit(0)
 }
 
-// connWG tracks handleConn goroutines currently in flight — see the
-// shutdown sequence in main() for why this must be waited on before the
-// process exits.
-var connWG sync.WaitGroup
-
-var (
+const (
 	helperConnDeadline   = 60 * time.Second
 	helperDrainTimeout   = 45 * time.Second
 	helperMaxConns       = 64
 	helperMaxRequestSize = int64(64 << 10)
 )
 
-// prepareSocket removes only a stale socket, never another file at the path.
-func prepareSocket(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("socket directory: %w", err)
-	}
-	fi, err := os.Lstat(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("stat socket %s: %w", path, err)
-	}
-	if fi.Mode()&os.ModeSocket == 0 {
-		return fmt.Errorf("%s exists and is not a socket, refusing to remove it", path)
-	}
-	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("remove stale socket %s: %w", path, err)
-	}
-	return nil
-}
-
 // peerCred is for the log only; the socket's group still gates access.
 func peerCred(conn net.Conn) string {
-	uc, ok := conn.(*net.UnixConn)
-	if !ok {
-		return "unknown"
-	}
-	raw, err := uc.SyscallConn()
+	peer, err := unixsock.PeerCred(conn)
 	if err != nil {
 		return "unknown"
 	}
-	var cred *syscall.Ucred
-	var credErr error
-	if err := raw.Control(func(fd uintptr) {
-		cred, credErr = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
-	}); err != nil || credErr != nil {
-		return "unknown"
-	}
-	return fmt.Sprintf("uid=%d pid=%d", cred.Uid, cred.Pid)
+	return peer.String()
 }
 
 func handleConn(conn net.Conn) {
 	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(helperConnDeadline))
 	caller := peerCred(conn)
 
 	var req Request
@@ -433,8 +366,6 @@ func handleConn(conn net.Conn) {
 
 	var (
 		err          error
-		gate         string
-		gateDump     map[string]bool
 		vrrp         string
 		vrrpDump     string
 		throttled    bool
@@ -477,12 +408,8 @@ func handleConn(conn net.Conn) {
 		throttled, err = reloadCoreDHCP()
 	case "reload-core-dns":
 		throttled, err = reloadCoreDNS()
-	case "set-dhcp-gate":
-		err = setDHCPGate(req)
-	case "get-dhcp-gate":
-		gate, err = getDHCPGate(req)
-	case "dhcp-gate-dump":
-		gateDump, err = getDHCPGateDump()
+	case "remove-legacy-nft":
+		err = removeLegacyNFT()
 	case "get-vrrp-state":
 		vrrp, err = getVRRPState(req)
 	case "vrrp-dump":
@@ -507,8 +434,6 @@ func handleConn(conn net.Conn) {
 		journalLines, err = getJournalTail(req)
 	case "link-up":
 		err = linkUp(req)
-	case "remove-gate-rule-unscoped":
-		err = removeGateRuleUnscoped(req)
 	case "manage-unit":
 		err = manageUnit(req)
 	case "reset-scope-state":
@@ -528,8 +453,6 @@ func handleConn(conn net.Conn) {
 	log.Printf("[HELPER:OK] %s %s", req.Command, requestTarget(req))
 	respond(conn, Response{
 		OK:           true,
-		GateState:    gate,
-		GateDump:     gateDump,
 		VRRPState:    vrrp,
 		VRRPDump:     vrrpDump,
 		Throttled:    throttled,
@@ -555,7 +478,7 @@ func requestTarget(req Request) string {
 
 // linkUp only ever brings an existing interface up, never down.
 func linkUp(req Request) error {
-	if err := nftgate.CheckIfaceName(req.Iface); err != nil {
+	if err := checkIfaceName(req.Iface); err != nil {
 		return err
 	}
 	if _, err := os.Stat("/sys/class/net/" + req.Iface); err != nil {
@@ -589,11 +512,26 @@ func hasIPv4(addrs []net.Addr) bool {
 	return false
 }
 
-func removeGateRuleUnscoped(req Request) error {
-	if err := nftgate.CheckIfaceName(req.Iface); err != nil {
-		return err
+// checkIfaceName is the interface-name rule of the other helpers: ^[a-zA-Z0-9_.-]{1,15}$.
+func checkIfaceName(name string) error {
+	valid := len(name) >= 1 && len(name) <= 15
+	for i := 0; valid && i < len(name); i++ {
+		c := name[i]
+		valid = c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '.' || c == '-'
 	}
-	return nftgate.RemoveRule(req.Iface)
+	if !valid {
+		return fmt.Errorf("invalid interface name %q — refusing to build an ip command from it", name)
+	}
+	return nil
+}
+
+// removeLegacyNFT deletes the nftables table the old DHCP gate used. The table is gone after the first call, so the
+// call is idempotent; it exists only for the upgrade path.
+func removeLegacyNFT() error {
+	if exec.Command("nft", "list", "table", "inet", "dnshived").Run() != nil {
+		return nil
+	}
+	return run("nft", "delete", "table", "inet", "dnshived")
 }
 
 func manageUnit(req Request) error {
@@ -640,6 +578,28 @@ var spawnBootstrapRestart = func() error {
 
 // --- Privileged operations: interfaces ---
 
+// staleIPv4 returns the IPv4 networks in addrs that equal none of keep.
+func staleIPv4(addrs []net.Addr, keep ...net.IP) []*net.IPNet {
+	var stale []*net.IPNet
+	for _, a := range addrs {
+		ipNet, ok := a.(*net.IPNet)
+		if !ok || ipNet.IP.To4() == nil {
+			continue
+		}
+		kept := false
+		for _, k := range keep {
+			if k != nil && ipNet.IP.Equal(k) {
+				kept = true
+				break
+			}
+		}
+		if !kept {
+			stale = append(stale, ipNet)
+		}
+	}
+	return stale
+}
+
 // reconcileInterfaceAddrs ensures iface's only IPv4 addresses are nodeIP
 // and vip (both CIDR strings, either may be empty).
 func reconcileInterfaceAddrs(iface, nodeIP, vip string, untagged bool) {
@@ -658,14 +618,7 @@ func reconcileInterfaceAddrs(iface, nodeIP, vip string, untagged bool) {
 	if !untagged {
 		if link, err := net.InterfaceByName(iface); err == nil {
 			if addrs, err := link.Addrs(); err == nil {
-				for _, a := range addrs {
-					ipNet, ok := a.(*net.IPNet)
-					if !ok || ipNet.IP.To4() == nil {
-						continue // IPv6/not-IPv4 — not this project's concern here
-					}
-					if (wantNode != nil && ipNet.IP.Equal(wantNode)) || (wantVIP != nil && ipNet.IP.Equal(wantVIP)) {
-						continue // wanted — keep
-					}
+				for _, ipNet := range staleIPv4(addrs, wantNode, wantVIP) {
 					log.Printf("[HELPER:RECONCILE] %s: removing stale address %s (neither node_ip nor vip)", iface, ipNet.String())
 					run("ip", "addr", "del", ipNet.String(), "dev", iface)
 				}
@@ -679,7 +632,7 @@ func reconcileInterfaceAddrs(iface, nodeIP, vip string, untagged bool) {
 }
 
 func createInterface(req Request) error {
-	iface := nftgate.InterfaceName(req.Parent, req.VLANID)
+	iface := ifname.InterfaceName(req.Parent, req.VLANID)
 	untagged := req.VLANID == 0
 
 	if !untagged {
@@ -691,9 +644,6 @@ func createInterface(req Request) error {
 
 	// If interface exists, try to bring it up.
 	if _, err := os.Stat("/sys/class/net/" + iface); err == nil {
-		if err := nftgate.EnsureClosed(iface); err != nil {
-			log.Printf("[HELPER:WARN] ensure gate closed for existing interface %s: %v (continuing)", iface, err)
-		}
 		if err := run("ip", "link", "set", iface, "up"); err != nil {
 			if untagged {
 				return fmt.Errorf("bring up untagged parent interface %s: %w (never deleting real hardware to retry)", iface, err)
@@ -702,7 +652,7 @@ func createInterface(req Request) error {
 			run("ip", "link", "delete", iface)
 		} else {
 			reconcileInterfaceAddrs(iface, req.NodeIP, req.VIP, untagged)
-			return nftgate.EnsureClosed(iface)
+			return nil
 		}
 	}
 
@@ -712,9 +662,6 @@ func createInterface(req Request) error {
 
 	if stale := vlanOnParent(req.Parent, req.VLANID); stale != "" && stale != iface {
 		log.Printf("[HELPER:RENAME] %s carries VLAN %d on %s under the old name %s — removing it to recreate as %s", req.Parent, req.VLANID, req.Parent, stale, iface)
-		if err := nftgate.RemoveRule(stale); err != nil {
-			log.Printf("[HELPER:WARN] remove gate rule for %s: %v", stale, err)
-		}
 		if err := run("ip", "link", "delete", stale); err != nil {
 			return fmt.Errorf("remove stale %s: %w", stale, err)
 		}
@@ -723,9 +670,6 @@ func createInterface(req Request) error {
 	// Create fresh — admin-down until "ip link set up" below.
 	if err := run("ip", "link", "add", "link", req.Parent, "name", iface, "type", "vlan", "id", fmt.Sprintf("%d", req.VLANID)); err != nil {
 		return fmt.Errorf("create vlan: %w", err)
-	}
-	if err := nftgate.EnsureClosed(iface); err != nil {
-		return fmt.Errorf("ensure gate closed before interface up: %w", err)
 	}
 	if err := run("ip", "link", "set", iface, "up"); err != nil {
 		return fmt.Errorf("link up: %w", err)
@@ -736,9 +680,7 @@ func createInterface(req Request) error {
 		run("ip", "addr", "add", req.NodeIP, "dev", iface)
 	}
 
-	// Closed by default — never a window where the interface exists but
-	// no gate rule has been created yet.
-	return nftgate.EnsureClosed(iface)
+	return nil
 }
 
 var vlanConfigPath = "/proc/net/vlan/config"
@@ -764,11 +706,7 @@ func vlanOnParent(parent string, id int) string {
 }
 
 func deleteInterface(req Request) error {
-	iface := nftgate.InterfaceName(req.Parent, req.VLANID)
-
-	if err := nftgate.RemoveRule(iface); err != nil {
-		log.Printf("[HELPER:WARN] remove gate rule for %s: %v (continuing with interface deletion)", iface, err)
-	}
+	iface := ifname.InterfaceName(req.Parent, req.VLANID)
 
 	if req.VLANID == 0 {
 		if req.NodeIP != "" {
@@ -1190,40 +1128,6 @@ func reloadRelay() (throttled bool, err error) {
 	}
 	lastRelayReloadAt = time.Now()
 	return false, nil
-}
-
-// --- Privileged operations: DHCP gate (nftables) ---
-
-// setDHCPGate opens or closes the DHCP gate for a scope.
-func setDHCPGate(req Request) error {
-	iface := nftgate.InterfaceName(req.Parent, req.VLANID)
-	switch req.GateState {
-	case "closed":
-		return nftgate.Close(iface)
-	case "open":
-		return nftgate.Open(iface)
-	default:
-		return fmt.Errorf("invalid gate_state %q (want open or closed)", req.GateState)
-	}
-}
-
-// getDHCPGate reads back the current gate state for a scope.
-func getDHCPGate(req Request) (string, error) {
-	iface := nftgate.InterfaceName(req.Parent, req.VLANID)
-	closed, err := nftgate.IsClosed(iface)
-	if err != nil {
-		return "", err
-	}
-	if closed {
-		return "closed", nil
-	}
-	return "open", nil
-}
-
-// getDHCPGateDump reads back every gated interface's closed/open state in
-// one nft round trip.
-func getDHCPGateDump() (map[string]bool, error) {
-	return nftgate.Dump()
 }
 
 // --- Privileged operations: VRRP state (keepalived SIGDATA dump) ---

@@ -98,6 +98,48 @@ func TestSelfDecommission_NoConfigFileStillReExecs(t *testing.T) {
 	}
 }
 
+func TestSelfDecommission_RestoresProbeUnitsAndDropsLegacyNFT(t *testing.T) {
+	t.Cleanup(func() { decommissioning.Store(false) })
+
+	origCfg := currentConfig.Load()
+	t.Cleanup(func() { currentConfig.Store(origCfg) })
+	currentConfig.Store(nil)
+
+	origReExec := reExecFunc
+	reExecFunc = func() {}
+	t.Cleanup(func() { reExecFunc = origReExec })
+
+	var enabled []string
+	origEnable := enableUnitFunc
+	enableUnitFunc = func(unit string) error {
+		enabled = append(enabled, unit)
+		return nil
+	}
+	t.Cleanup(func() { enableUnitFunc = origEnable })
+
+	legacyCalls := 0
+	origLegacy := removeLegacyNFTFunc
+	removeLegacyNFTFunc = func() error {
+		legacyCalls++
+		return nil
+	}
+	t.Cleanup(func() { removeLegacyNFTFunc = origLegacy })
+
+	selfDecommission(filepath.Join(t.TempDir(), "cluster.json"), "test")
+
+	if legacyCalls != 1 {
+		t.Fatalf("removeLegacyNFT called %d times, want 1", legacyCalls)
+	}
+	if len(enabled) != len(probeUnitsForAdoption) {
+		t.Fatalf("enabled %v, want %v", enabled, probeUnitsForAdoption)
+	}
+	for i, unit := range probeUnitsForAdoption {
+		if enabled[i] != unit {
+			t.Fatalf("enabled %v, want %v", enabled, probeUnitsForAdoption)
+		}
+	}
+}
+
 func TestComputeTrustedHosts_SortedThreeAddressSet(t *testing.T) {
 	got := computeTrustedHosts("192.0.2.23:9443", "192.0.2.24:9443", "192.0.2.43:9443")
 	want := []string{"192.0.2.23", "192.0.2.24", "192.0.2.43"}

@@ -15,7 +15,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"os/user"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -23,6 +22,11 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"dnshived/internal/cliguard"
+	"dnshived/internal/instlock"
+	"dnshived/internal/ownership"
+	"dnshived/internal/unixsock"
 )
 
 var version = "0.9.7-dev"
@@ -109,13 +113,52 @@ func trunkParentsFromContent(content []byte) map[string]bool {
 	if len(pc.TrunkParents) == 0 {
 		return nil
 	}
+	mgmt := defaultRouteDevice()
 	set := make(map[string]bool, len(pc.TrunkParents))
 	for _, p := range pc.TrunkParents {
-		if p = strings.TrimSpace(p); p != "" {
+		p = strings.TrimSpace(p)
+		switch {
+		case p == "":
+		case strings.Contains(p, "."):
+			log.Printf("[PROBE-HELPER:DENY] trunk parent %q is a VLAN name, not a trunk — not added to the allowlist", p)
+		case p == mgmt:
+			log.Printf("[PROBE-HELPER:DENY] trunk parent %q carries the default route (management) — not added to the allowlist", p)
+		default:
 			set[p] = true
 		}
 	}
 	return set
+}
+
+// defaultRouteDevice returns the interface of the default route, or "" if there is none.
+var defaultRouteDevice = func() string {
+	out, err := exec.Command("ip", "-o", "route", "show", "default").Output()
+	if err != nil {
+		return ""
+	}
+	fields := strings.Fields(string(out))
+	for i, f := range fields {
+		if f == "dev" && i+1 < len(fields) {
+			return fields[i+1]
+		}
+	}
+	return ""
+}
+
+// staleIPv4Addrs returns the IPv4 addresses on an interface other than want. IPv6, link-local included, is not
+// this helper's to change.
+func staleIPv4Addrs(addrs []net.Addr, want string) []string {
+	var stale []string
+	for _, a := range addrs {
+		ipNet, ok := a.(*net.IPNet)
+		if !ok || ipNet.IP.To4() == nil {
+			continue
+		}
+		if cidr := a.String(); cidr != want {
+			stale = append(stale, cidr)
+		}
+	}
+	return stale
 }
 
 // trunkParentsFromConfigFile reads probeConfigPath and extracts
@@ -151,11 +194,16 @@ func main() {
 	socketPath := flag.String("socket", "/run/dnshived/probe-helper.sock", "Unix socket path")
 	trunkParentList := flag.String("trunk-parents", "", "comma-separated list of trunk parent interfaces create-interface/delete-interface may touch (e.g. ens19,ens20)")
 	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
+	cliguard.Parse("dnshived-probe-helper", false)
 
 	if *showVersion {
 		fmt.Println("dnshived-probe-helper", version)
 		os.Exit(0)
+	}
+
+	cliguard.CheckUser("dnshived-probe-helper", cliguard.RootHelper, "")
+	if err := instlock.Hold("/run/dnshived/probe-helper.lock"); err != nil {
+		cliguard.Exit("dnshived-probe-helper", err)
 	}
 
 	flagTrunkParents = parseTrunkParents(*trunkParentList)
@@ -167,7 +215,9 @@ func main() {
 
 	socketDir := filepath.Dir(*socketPath)
 	os.MkdirAll(socketDir, 0o755)
-	os.Remove(*socketPath)
+	if err := unixsock.RemoveStale(*socketPath); err != nil {
+		cliguard.Exit("dnshived-probe-helper", err)
+	}
 
 	ln, err := net.Listen("unix", *socketPath)
 	if err != nil {
@@ -311,15 +361,7 @@ func writeConfig(content []byte) error {
 }
 
 func chownToDnshivedGroup(path string) error {
-	g, err := user.LookupGroup("dnshived")
-	if err != nil {
-		return fmt.Errorf("lookup dnshived group: %w", err)
-	}
-	gid, err := strconv.Atoi(g.Gid)
-	if err != nil {
-		return fmt.Errorf("parse dnshived group gid %q: %w", g.Gid, err)
-	}
-	return os.Chown(path, -1, gid)
+	return ownership.Dnshived(path)
 }
 
 func stopCoreDaemons() {
@@ -361,12 +403,7 @@ func createInterface(req Request) error {
 		} else {
 			if link, err := net.InterfaceByName(iface); err == nil {
 				if addrs, aerr := link.Addrs(); aerr == nil {
-					want := req.Addr
-					for _, a := range addrs {
-						cidr := a.String()
-						if cidr == want {
-							continue
-						}
+					for _, cidr := range staleIPv4Addrs(addrs, req.Addr) {
 						run("ip", "addr", "del", cidr, "dev", iface)
 					}
 				}

@@ -6,7 +6,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"dnshived/internal/loglevel"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -17,7 +16,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/user"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -32,6 +30,7 @@ import (
 	"dnshived/internal/auditlog"
 	"dnshived/internal/auth"
 	"dnshived/internal/backup"
+	"dnshived/internal/cliguard"
 	"dnshived/internal/cluster"
 	"dnshived/internal/config"
 	"dnshived/internal/coordplane"
@@ -51,7 +50,8 @@ import (
 	"dnshived/internal/ifname"
 	"dnshived/internal/lease"
 	"dnshived/internal/leasesync"
-	"dnshived/internal/nftgate"
+	"dnshived/internal/loglevel"
+	"dnshived/internal/relaygate"
 	"dnshived/internal/state"
 	"dnshived/internal/sysinfo"
 	"dnshived/internal/tlspin"
@@ -191,12 +191,7 @@ func main() {
 		"data_dir bootstrap mode checks for prior configuration — only used when no config file exists yet; production deploys should never need this, it exists for running multiple bootstrap-mode instances on one host during testing")
 	bootstrapOTPPath := flag.String("bootstrap-otp-path", defaultBootstrapOTPPath,
 		"where bootstrap mode persists its join code — only used when no config file exists yet; same testing-only rationale as --bootstrap-data-dir")
-	flag.Parse()
-	if flag.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "dnshived: unexpected argument %q\n", flag.Arg(0))
-		flag.Usage()
-		os.Exit(2)
-	}
+	cliguard.Parse("dnshived", false)
 
 	if *showVersion {
 		fmt.Println("dnshived", version)
@@ -256,9 +251,7 @@ func main() {
 		os.Exit(emergencyCloseAllGates(cfg))
 	}
 
-	if err := refuseRootStart(os.Geteuid(), user.Lookup); err != nil {
-		log.Fatalf("start: %v", err)
-	}
+	cliguard.CheckUser("dnshived", cliguard.Daemon, serviceUser)
 
 	daemonLock, err = acquireInstanceLock(filepath.Join(dataDir(cfg), "daemon.lock"))
 	if errors.Is(err, errInstanceRunning) {
@@ -330,6 +323,9 @@ func main() {
 	loglevel.Infof("[FENCING:INIT] watermark loaded: %s", watermark.Current())
 
 	ag := agent.New(cfg.Role, self.NodeID, self.Incarnation, cfg.PSK, dataDir(cfg), cfg.Scopes, observer)
+	// The relay gate is used whenever the relay's socket exists on this node; without it the nftables gate
+	// alone decides (checked on every authorize, so a relay that starts later is picked up).
+	ag.SetRelayGate(&relaygate.Client{Path: relaygate.DefaultPath})
 	ag.SetTLS(cfg.TLSEnabled())
 	ag.SetGlobalDNSRecords(cfg.GlobalDNSRecords)
 	ag.SetLocalDomains(cfg.LocalDomains)
@@ -357,6 +353,11 @@ func main() {
 
 	ag.SetHelper(helper.NewClient(helperSocketFor(cfg)))
 	loglevel.Infof("[AGENT:INIT] privileged operations via %s", helperSocketFor(cfg))
+	// Upgrade order (plan §13 G7): the legacy nftables table of the 0.9.8.5 DHCP gate must go before the
+	// first relay authorize. It needs the helper, so this runs after SetHelper.
+	if err := ag.RemoveLegacyNFT(); err != nil {
+		loglevel.Warnf("[AGENT:INIT] remove legacy nftables table (its DHCP drop rules stay in force until removed): %v", err)
+	}
 
 	if isCoreRole(cfg.Role) {
 		ag.SetLeasePersistDir(dataDir(cfg))
@@ -657,6 +658,7 @@ func main() {
 			return observer.EffectiveQuorum().HasQuorum
 		}, dataDir(cfg))
 		arbiterMgr.SetTrustedHosts(trustedHostsWithFallback)
+		arbiterMgr.SetNodeID(self.NodeID)
 		arbiterMgr.AddRoutes(mux)
 	}
 
@@ -1661,8 +1663,7 @@ func dataDir(cfg *config.Cluster) string {
 // mgmtIfaceFromConfig is the mgmt interface name to pass to
 // Agent.SetMgmtIface.
 // relayStatusEntries counts the enabled scopes and labels the relay's
-// client interfaces that still belong to one; relay.json is not rewritten
-// when no scope is eligible, so its own list can be stale.
+// client interfaces that still belong to one.
 func relayStatusEntries(cfg *config.Cluster, relayCfg *dhcprelay.Config) (enabledScopes int, labels []string) {
 	ifaceToScope := make(map[string]string, len(cfg.Scopes))
 	for name, sc := range cfg.Scopes {
@@ -1671,7 +1672,7 @@ func relayStatusEntries(cfg *config.Cluster, relayCfg *dhcprelay.Config) (enable
 		}
 		enabledScopes++
 		local := cfg.Platform.ResolveParent(cfg.Role, sc.Parent)
-		ifaceToScope[nftgate.InterfaceName(local, sc.VLANID)] = name
+		ifaceToScope[ifname.InterfaceName(local, sc.VLANID)] = name
 	}
 	if relayCfg == nil {
 		return enabledScopes, nil
@@ -2038,27 +2039,17 @@ func clusterIdentityFieldsChanged(c *config.Cluster, upd configUpdate) bool {
 // emergencyCloseAllGates closes every configured scope's DHCP gate and
 // returns an exit code; it never blocks.
 func emergencyCloseAllGates(cfg *config.Cluster) int {
-	helperClient := helper.NewClient(helperSocketFor(cfg))
-
-	var wg sync.WaitGroup
-	for name, sc := range cfg.Scopes {
-		wg.Add(1)
-		go func(name string, sc config.ScopeConfig) {
-			defer wg.Done()
-			sc.Parent = cfg.Platform.ResolveParent(cfg.Role, sc.Parent)
-			err := agent.SetDHCPGateState(helperClient, name, sc, "closed")
-			if err != nil {
-				loglevel.Warnf("[EMERGENCY] helper failed for scope %s, falling back to direct: %v", name, err)
-				err = nftgate.Close(nftgate.InterfaceName(sc.Parent, sc.VLANID))
-			}
-			if err != nil {
-				loglevel.Warnf("[EMERGENCY] scope %s: close gate failed: %v", name, err)
-			} else {
-				loglevel.Infof("[EMERGENCY] scope %s: gate closed", name)
-			}
-		}(name, sc)
+	// The relay is the gate: revoke every scope there. Its own deadline is the backstop if this does not reach it.
+	relayClient := &relaygate.Client{Path: relaygate.DefaultPath}
+	if !relayClient.Available() {
+		loglevel.Infof("[EMERGENCY] no relay gate socket on this node: nothing to revoke")
+		return 0
 	}
-	wg.Wait()
+	if err := relayClient.RevokeAll(); err != nil {
+		loglevel.Warnf("[EMERGENCY] relay revoke-all failed: %v (the relay deadline still closes every scope)", err)
+		return 0
+	}
+	loglevel.Infof("[EMERGENCY] relay: every scope revoked")
 	return 0
 }
 

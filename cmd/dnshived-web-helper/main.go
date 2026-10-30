@@ -19,6 +19,10 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"dnshived/internal/cliguard"
+	"dnshived/internal/instlock"
+	"dnshived/internal/unixsock"
 )
 
 var version = "0.9.7-dev"
@@ -40,16 +44,23 @@ var connWG sync.WaitGroup
 func main() {
 	socketPath := flag.String("socket", "/run/dnshived/web-helper.sock", "Unix socket path")
 	showVersion := flag.Bool("version", false, "print version and exit")
-	flag.Parse()
+	cliguard.Parse("dnshived-web-helper", false)
 
 	if *showVersion {
 		fmt.Println("dnshived-web-helper", version)
 		os.Exit(0)
 	}
 
+	cliguard.CheckUser("dnshived-web-helper", cliguard.RootHelper, "")
+	if err := instlock.Hold("/run/dnshived/web-helper.lock"); err != nil {
+		cliguard.Exit("dnshived-web-helper", err)
+	}
+
 	socketDir := filepath.Dir(*socketPath)
 	os.MkdirAll(socketDir, 0o755)
-	os.Remove(*socketPath)
+	if err := unixsock.RemoveStale(*socketPath); err != nil {
+		cliguard.Exit("dnshived-web-helper", err)
+	}
 
 	ln, err := net.Listen("unix", *socketPath)
 	if err != nil {

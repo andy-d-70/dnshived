@@ -90,9 +90,9 @@ func testScopes(n int) map[string]config.ScopeConfig {
 	return scopes
 }
 
-// TestEmergencyCloseAllGates_AllScopesAttempted verifies every configured
-// scope gets a close attempt, not just the first.
-func TestEmergencyCloseAllGates_AllScopesAttempted(t *testing.T) {
+// TestEmergencyCloseAllGates_RelayOnly verifies the close never goes through
+// the helper: the relay gate is the only gate.
+func TestEmergencyCloseAllGates_RelayOnly(t *testing.T) {
 	sock, received, stop := startFakeHelper(t, fakeHelperOK, 0)
 	defer stop()
 
@@ -101,7 +101,7 @@ func TestEmergencyCloseAllGates_AllScopesAttempted(t *testing.T) {
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0 (must never block/delay the stop sequence)", code)
 	}
-	if got := atomic.LoadInt64(received); got != 5 {
-		t.Errorf("helper received %d requests, want 5 — every configured scope must be attempted", got)
+	if got := atomic.LoadInt64(received); got != 0 {
+		t.Errorf("helper received %d requests, want 0 — the close is relay-only", got)
 	}
 }

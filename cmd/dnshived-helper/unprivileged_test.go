@@ -66,9 +66,12 @@ func TestLinkUp_RejectsInvalidAndMissingInterfaces(t *testing.T) {
 	}
 }
 
-func TestRemoveGateRuleUnscoped_RejectsInvalidName(t *testing.T) {
-	if err := removeGateRuleUnscoped(Request{Iface: "a/b"}); err == nil {
+func TestCheckIfaceName_RejectsInvalidNames(t *testing.T) {
+	if err := checkIfaceName("a/b"); err == nil {
 		t.Error("invalid interface name accepted")
+	}
+	if err := checkIfaceName("ens19.200"); err != nil {
+		t.Errorf("valid interface name refused: %v", err)
 	}
 }
 
@@ -164,7 +167,7 @@ func TestFinishDecommission_SpawnFailureKeepsHelperRunning(t *testing.T) {
 }
 
 func TestHandleConn_NewCommandsAreKnown(t *testing.T) {
-	for _, cmd := range []string{"link-up", "remove-gate-rule-unscoped", "manage-unit"} {
+	for _, cmd := range []string{"link-up", "manage-unit"} {
 		resp := roundTripCommand(t, Request{Command: cmd})
 		if strings.Contains(resp.Error, "unknown command") {
 			t.Errorf("%s: helper reports unknown command", cmd)
@@ -172,5 +175,16 @@ func TestHandleConn_NewCommandsAreKnown(t *testing.T) {
 		if resp.OK {
 			t.Errorf("%s with empty arguments succeeded, want a validation error", cmd)
 		}
+	}
+}
+
+// TestRemoveLegacyNFT_IsKnownAndIdempotent: the cleanup verb answers ok when the legacy table is already gone.
+func TestRemoveLegacyNFT_IsKnownAndIdempotent(t *testing.T) {
+	resp := roundTripCommand(t, Request{Command: "remove-legacy-nft"})
+	if strings.Contains(resp.Error, "unknown command") {
+		t.Fatal("remove-legacy-nft is not a known command")
+	}
+	if !resp.OK {
+		t.Fatalf("remove-legacy-nft with no legacy table = %+v, want ok", resp)
 	}
 }
