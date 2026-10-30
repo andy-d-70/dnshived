@@ -5,6 +5,7 @@ package leasesync
 
 import (
 	"net"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -86,5 +87,21 @@ func TestWriteLocalEvent_NoListenerReturnsError(t *testing.T) {
 	sock := filepath.Join(t.TempDir(), "nothing-here.sock")
 	if err := WriteLocalEvent(sock, LocalEvent{Action: "add", MAC: "aa:bb"}); err == nil {
 		t.Fatal("WriteLocalEvent() succeeded against a socket with nothing listening, want an error")
+	}
+}
+
+func TestListenLocal_SocketIsOwnerOnly(t *testing.T) {
+	sock := filepath.Join(t.TempDir(), "dhcp-lease.sock")
+	ln, err := ListenLocal(sock, func(LocalEvent) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	st, err := os.Stat(sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := st.Mode().Perm(); mode != 0o600 {
+		t.Fatalf("lease socket mode %v, want 0600", mode)
 	}
 }

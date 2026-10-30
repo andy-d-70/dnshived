@@ -54,7 +54,7 @@ func ListenLocal(socketPath string, onEvent func(LocalEvent)) (net.Listener, err
 	if err != nil {
 		return nil, err
 	}
-	os.Chmod(socketPath, 0o666)
+	os.Chmod(socketPath, 0o600)
 
 	go func() {
 		for {
