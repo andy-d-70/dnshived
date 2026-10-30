@@ -1,6 +1,6 @@
 # dnshived Changelog
 
-## 0.9.8.7 — in progress
+## 0.9.8.7 — released
 
 **Upgrade note:** upgrade every node in one window. The VRRP instances now authenticate their advertisements (see below), so a node on this release and a node on 0.9.8.6 cannot elect a VIP master together.
 
