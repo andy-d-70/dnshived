@@ -340,6 +340,9 @@ type Agent struct {
 
 	nodeIPSuffixes map[string]string
 
+	// vrrpUnicast is the cluster-wide default for scopes without vrrp_unicast.
+	vrrpUnicast *bool
+
 	// coreDNSAddress/coreDHCPAddress are the two core instances' own loopback
 	// bind addresses.
 	coreDNSAddress  string
@@ -756,6 +759,10 @@ func (a *Agent) SetNodeIPSuffixes(suffixes map[string]string) {
 	a.nodeIPSuffixes = suffixes
 }
 
+func (a *Agent) SetVRRPUnicast(on *bool) {
+	a.vrrpUnicast = on
+}
+
 func (a *Agent) SetCoreDNSAddress(address string) {
 	a.coreDNSAddress = address
 }
@@ -957,6 +964,52 @@ func (a *Agent) resolveScopePeerAddr(sc config.ScopeConfig, role string) string 
 		return ""
 	}
 	return subnetBase + suffix
+}
+
+// configScopeAddr is role's VLAN address from sc's live overrides, or "" if it is not an IP.
+func configScopeAddr(sc config.ScopeConfig, role string) string {
+	host, _, _ := strings.Cut(sc.NodeIPOverrides[role], "/")
+	if net.ParseIP(host) == nil {
+		return ""
+	}
+	return host
+}
+
+// unicastOn is the scope's vrrp_unicast, else the cluster default, else false (multicast).
+func (a *Agent) unicastOn(sc config.ScopeConfig) bool {
+	on := a.vrrpUnicast
+	if sc.VRRPUnicast != nil {
+		on = sc.VRRPUnicast
+	}
+	return on != nil && *on
+}
+
+// unicastPeers returns this node's unicast source and the other cores' VLAN
+// addresses for sc; ok is false when any of them is missing, invalid or repeated.
+func (a *Agent) unicastPeers(sc config.ScopeConfig) (src string, peers []string, ok bool) {
+	if !a.unicastOn(sc) {
+		return "", nil, false
+	}
+	src = configScopeAddr(sc, a.role)
+	if src == "" {
+		src, _, _ = strings.Cut(sc.NodeIP, "/")
+	}
+	if net.ParseIP(src) == nil {
+		return "", nil, false
+	}
+	seen := map[string]bool{src: true}
+	for _, role := range coreRoles {
+		if role == a.role {
+			continue
+		}
+		addr := configScopeAddr(sc, role)
+		if addr == "" || seen[addr] {
+			return "", nil, false
+		}
+		seen[addr] = true
+		peers = append(peers, addr)
+	}
+	return src, peers, true
 }
 
 // scopeBeaconTargets derives every (scope, peer) liveness check this node
@@ -3803,6 +3856,14 @@ vrrp_instance DNSHIVED_{{.Scope}} {
     version {{.VRRPVersion}}
 {{- end}}
     advert_int {{.AdvertInt}}
+{{- if .UnicastSrc}}
+    unicast_src_ip {{.UnicastSrc}}
+    unicast_peer {
+{{- range .UnicastPeers}}
+        {{.}}
+{{- end}}
+    }
+{{- end}}
 {{- if .AuthPass}}
     authentication {
         auth_type PASS
@@ -3822,7 +3883,9 @@ type keepalivedInstanceData struct {
 	VRRPVersion      int // 0 omits the "version" line (keepalived's own v2 default)
 	AdvertInt        string
 	VIP              string
-	AuthPass         string // empty omits the authentication block
+	AuthPass         string   // empty omits the authentication block
+	UnicastSrc       string   // empty keeps multicast
+	UnicastPeers     []string // set only together with UnicastSrc
 }
 
 func renderAdvertInt(ms int) string {
@@ -3870,10 +3933,11 @@ func (a *Agent) renderKeepalivedConfigAll(priorities map[string]int, extraReady 
 		if a.psk != "" {
 			authPass = vrrpPassword(a.psk, fmt.Sprintf("scope:%s:vrid:%d", name, sc.VRRPID))
 		}
+		unicastSrc, unicastPeers, _ := a.unicastPeers(sc)
 		instances = append(instances, keepalivedInstanceData{
 			Scope: name, Interface: iface, VRRPID: sc.VRRPID, Priority: priority,
 			VRRPVersion: sc.VRRPVersion, AdvertInt: renderAdvertInt(sc.AdvertIntMS), VIP: sc.VIP,
-			AuthPass: authPass,
+			AuthPass: authPass, UnicastSrc: unicastSrc, UnicastPeers: unicastPeers,
 		})
 	}
 

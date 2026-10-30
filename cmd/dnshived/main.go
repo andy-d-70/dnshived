@@ -333,6 +333,7 @@ func main() {
 	if cfg.ScopeDefaults != nil {
 		ag.SetCentralDNSUpstream(cfg.ScopeDefaults.Upstream)
 		ag.SetNodeIPSuffixes(cfg.ScopeDefaults.NodeIPSuffixes)
+		ag.SetVRRPUnicast(cfg.ScopeDefaults.VRRPUnicast)
 	}
 	ag.SetCoreDNSAddress(cfg.CoreDNSAddress)
 	ag.SetCoreDHCPAddress(cfg.CoreDHCPAddress)

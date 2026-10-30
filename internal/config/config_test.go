@@ -2018,3 +2018,19 @@ func TestDisabledScopeNames(t *testing.T) {
 		t.Errorf("DisabledScopeNames() = %v, want [a b]", names)
 	}
 }
+
+func TestNodeIPSuffixesOutOfRange_Errors(t *testing.T) {
+	for _, bad := range []string{"0", "255", "x", "22.1"} {
+		c := &Cluster{ScopeDefaults: &ScopeDefaults{NodeIPSuffixes: map[string]string{"core-1": bad}}}
+		res := c.ValidateExtended()
+		found := false
+		for _, e := range res.Errors {
+			if strings.Contains(e, "must be a host number from 1 to 254") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("suffix %q: expected a range error, got: %v", bad, res.Errors)
+		}
+	}
+}

@@ -424,8 +424,10 @@ func applyAgentAddressing(ag *agent.Agent, c *config.Cluster) {
 	}
 	if c.ScopeDefaults != nil {
 		ag.SetNodeIPSuffixes(c.ScopeDefaults.NodeIPSuffixes)
+		ag.SetVRRPUnicast(c.ScopeDefaults.VRRPUnicast)
 	} else {
 		ag.SetNodeIPSuffixes(nil)
+		ag.SetVRRPUnicast(nil)
 	}
 	ag.HotReloadScopes(c.Scopes)
 }

@@ -116,6 +116,8 @@ type ScopeConfig struct {
 	AdvertIntMS int `json:"advert_int_ms,omitempty"` // milliseconds
 	VRRPVersion int `json:"vrrp_version,omitempty"`  // 2 (default) or 3
 
+	VRRPUnicast *bool `json:"vrrp_unicast,omitempty"` // nil or true: unicast adverts; false: multicast
+
 	// DHCPNoPing disables dnsmasq's default duplicate-address ARP-ping check
 	// before offering a NEW (never-before-leased-to-this-client) address.
 	DHCPNoPing bool `json:"dhcp_no_ping,omitempty"`
@@ -659,6 +661,8 @@ type ScopeDefaults struct {
 	// AdvertIntMS/VRRPVersion pre-fill a new scope's own VRRP tuning fields.
 	AdvertIntMS int `json:"advert_int_ms,omitempty"`
 	VRRPVersion int `json:"vrrp_version,omitempty"`
+	// VRRPUnicast is the cluster-wide default for vrrp_unicast; a scope's own setting wins.
+	VRRPUnicast *bool `json:"vrrp_unicast,omitempty"`
 }
 
 // MgmtVIPConfig defines the management-plane VIP.
@@ -1157,6 +1161,18 @@ func (c *Cluster) ValidateExtended() ValidationResult {
 					other, name, suffix))
 			}
 			seen[suffix] = name
+		}
+	}
+
+	if c.ScopeDefaults != nil {
+		for name, suffix := range c.ScopeDefaults.NodeIPSuffixes {
+			if suffix == "" {
+				continue
+			}
+			if n, err := strconv.Atoi(suffix); err != nil || n < 1 || n > 254 {
+				r.Errors = append(r.Errors, fmt.Sprintf(
+					"scope_defaults.node_ip_suffixes: %q for %q must be a host number from 1 to 254", suffix, name))
+			}
 		}
 	}
 
