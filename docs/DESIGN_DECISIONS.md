@@ -132,7 +132,7 @@ A node is READY for a scope once the interface exists, the node IP is
 assigned, VRRP is operational, the gate is closed, the config is
 rendered and validated, and the helper is reachable.
 
-## Why a packet-filter gate for DHCP
+## Why a gate for DHCP
 
 VIP ownership alone does not make DHCP exclusive. A DHCP server bound
 to a VLAN interface answers broadcast `DHCPDISCOVER`s on that segment
@@ -149,11 +149,10 @@ when the authorization's deadline passes.
 - Closing the old owner before opening the new one produces a short
   silent window, never a dual-answer window, because each node's gate
   is its own local default. Opening first would be a code mistake, not
-  something nftables prevents, so the order is a frozen rule
+  something the gate itself prevents, so the order is a frozen rule
   (`docs/FREEZE.md`) and verified with `dhcp-gate-rig.sh handoff`.
-- A rule toggle costs ~11-12 ms through the `nft` CLI, almost all of it
-  process start; irrelevant next to the reconcile tick, so no netlink
-  dependency.
+- Opening or closing the gate is a message over the relay's local
+  socket, with no firewall rule involved.
 - dnsmasq's own `dhcp-relay=` was evaluated first and rejected: relay
   and server cannot share a host (both need port 67, and replies to a
   local `giaddr` are not relayed back out). `dnshived-relay` is a

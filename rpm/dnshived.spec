@@ -130,6 +130,7 @@ systemd-tmpfiles --create %{_tmpfilesdir}/dnshived.conf || :
 # bootstrap mode); cluster.json.example ships as schema reference.
 # probe.json is written only by dnshived-probe-helper.
 chown dnshived:dnshived /etc/dnshived
+chmod 0755 /etc/dnshived
 chown dnshived:dnshived /etc/dnshived/cluster.json 2>/dev/null || true
 chmod 0640 /etc/dnshived/cluster.json 2>/dev/null || true
 

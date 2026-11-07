@@ -95,3 +95,7 @@ sudo journalctl -u dnshived -n 50 | grep -E 'AGENT:(HOT_RELOAD|PLANE|DECOMMISSIO
 Both directions are safe to repeat: construction is idempotent and
 retried until it succeeds; tearing down something already gone does
 nothing.
+
+## Disabling a scope
+
+Disabling a scope (scope detail page, or the list) stops DHCP, DNS and probing for it on every node and releases its VIP: the scope's VRRP instance is no longer rendered, so no node holds the gateway address. The VLAN interface and each node's own address stay, and the scope keeps its VRRP ID and VIP in the configuration, so imports and copies still treat them as taken. Enabling the scope brings the VIP back. A scope that was already disabled before 0.9.8.8 loses its VIP at the first reconcile after the upgrade.

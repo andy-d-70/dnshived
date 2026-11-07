@@ -123,6 +123,7 @@ Main read endpoints:
 | `/api/v1/status` | node state, serving, configured and disabled scopes, epoch, generation, version |
 | `/api/v1/cluster` | peers and reachability |
 | `/api/v1/cluster/snapshot` | status, system, events, daemons of every node in one call |
+| `/api/v1/cluster/activation` | whether every configured core runs at least the version a later feature needs, and which nodes do not (nothing uses it yet) |
 | `/api/v1/authority/<scope>` | predicate evaluation (all five checks) |
 | `/api/v1/readiness/<scope>` | network-plane state for a scope |
 | `/api/v1/events?n=100`, `?since_id=42` | event ring buffer |

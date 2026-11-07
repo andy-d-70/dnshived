@@ -29,6 +29,7 @@ chown dnshived:dnshived /var/lib/dnshived /var/log/dnshived
 # the node boots into bootstrap mode (setup wizard and join code).
 # cluster.json.example ships as schema reference only.
 chown dnshived:dnshived /etc/dnshived
+chmod 0755 /etc/dnshived
 chown dnshived:dnshived /etc/dnshived/cluster.json 2>/dev/null || true
 chmod 0640 /etc/dnshived/cluster.json 2>/dev/null || true
 

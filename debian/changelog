@@ -1,3 +1,10 @@
+dnshived (0.9.8.8~dev-1) unstable; urgency=medium
+
+  * Lab build of the 0.9.8.8 work: password policy, unknown config keys kept,
+    cluster-wide version check, disabled scopes release their VIP.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Sat, 07 Nov 2026 15:30:00 +0100
+
 dnshived (0.9.8.7) unstable; urgency=medium
 
   * Security fixes. VRRP advertisements are authenticated per scope and for
