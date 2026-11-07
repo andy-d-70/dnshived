@@ -73,7 +73,7 @@ See [INSTALL.md](docs/INSTALL.md) for the full walkthrough.
 ```sh
 git clone https://github.com/andy-d-70/dnshived.git
 cd dnshived
-git checkout v0.9.8.7    # latest release
+git checkout v0.9.8.8    # latest release
 
 # Debian/Ubuntu
 sudo apt install debhelper golang-go && make deb && sudo apt install ../dnshived*.deb

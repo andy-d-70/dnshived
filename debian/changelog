@@ -1,9 +1,14 @@
-dnshived (0.9.8.8~dev-1) unstable; urgency=medium
+dnshived (0.9.8.8) unstable; urgency=medium
 
-  * Lab build of the 0.9.8.8 work: password policy, unknown config keys kept,
-    cluster-wide version check, disabled scopes release their VIP.
+  * Password policy with a strength bar for web-UI, backup and API-token
+    secrets. Harder password reset and restore (no Host-header links, a
+    restore attempt limiter, bounds on stored hashes). Scope edits keep the
+    fields the form does not show. cluster.json keeps keys a node does not
+    know, and GET /api/v1/cluster/activation compares versions across the
+    cores. A disabled scope releases its VIP. /etc/dnshived is set to 0755 on
+    install and upgrade.
 
- -- Andreas Dunkl <andreas@dunkl.net>  Sat, 07 Nov 2026 15:30:00 +0100
+ -- Andreas Dunkl <andreas@dunkl.net>  Sat, 07 Nov 2026 16:00:00 +0100
 
 dnshived (0.9.8.7) unstable; urgency=medium
 

@@ -1,6 +1,6 @@
 # dnshived Changelog
 
-## 0.9.8.8 — unreleased
+## 0.9.8.8 — released
 
 - One password policy for web-UI passwords, `dnshived-web -reset-user` and `dnshived-web -hash-password`. A password needs at least 12 characters (an admin can change this between 8 and 64 on the Users page), an uppercase letter, a digit and a special character, at least five different characters, no simple sequence (`abcd`, `1234`, `qwer`), no block repeated over the whole password, and must not contain the user name, the local part of the mail address or the host name. The password forms show a strength bar with the unmet requirements in its tooltip, and the console tools print the same bar. Before, the only rule was a length of 10. Existing passwords keep working: a login with a password that does not meet the policy only logs a line. The strength is judged by length and variety; there is no check against lists of known passwords. **Upgrade note:** scripts that call `-hash-password` or `-reset-user -password` with a weaker password are now refused.
 - The same policy applies to the backup password when it is set or changed in the web UI (backup settings, and a manual backup). A backup password that is already set keeps working. API tokens typed on the Security page must be at least 32 characters with at least 10 different characters, no whitespace and no simple sequence or repeated block (for example from `openssl rand -base64 32`); tokens that already exist are only checked when they are changed. The mail server password is not checked, because it belongs to the mail server.
