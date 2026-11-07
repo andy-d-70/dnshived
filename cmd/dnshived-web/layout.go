@@ -358,7 +358,7 @@ button:hover,input[type=submit]:hover{opacity:.9}
 /* btn-success for commit-shaped actions, btn-danger for discard/delete. */
 button.btn-success{background:var(--ok);border-color:var(--ok)}
 button.btn-danger{background:var(--crit);border-color:var(--crit)}
-/* btn-warn for disable (reversible, keeps VLAN/VIP up). */
+/* btn-warn for disable (reversible, VIP released, VLAN stays). */
 button.btn-warn{background:var(--warn);border-color:var(--warn)}
 /* loading-dots: pure-CSS animated dots, static under prefers-reduced-motion. */
 .loading-dots span{animation:loading-dots-pulse 1.4s ease-in-out infinite}

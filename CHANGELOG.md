@@ -15,6 +15,7 @@
 
 - Preparation for later releases (nothing new is written yet). `cluster.json` and the scope definitions in it now keep keys this version does not know: they are read, carried through every edit, commit and candidate save, and written back unchanged. Before, a node on this version that saved the file would silently drop fields written by a newer version, which would have made a rolling upgrade lose data. The removed `dry_run` key is still dropped.
 - `GET /api/v1/cluster/activation` reports whether every configured core member runs at least a given version (the version a later feature will need), and names the nodes that do not. Nothing depends on it yet; the arbiter and probe hosts do not count.
+- A disabled scope now releases its VIP. Before, disabling a scope stopped its DHCP, DNS and probing but its VRRP instance kept running and the gateway VIP stayed up, so clients still reached a gateway that served nothing. The scope's keepalived instance is no longer rendered while it is disabled; the VLAN interface and the node addresses stay, and the scope's VRRP ID and VIP stay in the configuration (so the import and copy checks still count them). Enabling the scope brings the VIP back. **Upgrade note:** a scope that is already disabled loses its VIP on the first reconcile after the upgrade. The web UI texts that said "VLAN/VIP stay up" now say the VIP is released.
 
 ## 0.9.8.7 — released
 

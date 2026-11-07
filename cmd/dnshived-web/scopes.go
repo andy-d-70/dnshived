@@ -106,7 +106,7 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
   <td style="white-space:nowrap">{{if gt .PoolSize 0}}<span class="pool-bar"><span class="pool-fill {{.PoolClass}}" style="width:{{.PoolUsagePct}}%"></span></span><span class="{{.PoolClass}}">{{.PoolUsed}} of {{.PoolSize}} used</span>{{else}}<span class="dim">—</span>{{end}}</td>
   {{if $.HasProbeHosts}}<td style="white-space:nowrap">{{range .ProbeCells}}{{template "probecell" .}}<br>{{end}}</td>{{end}}
   <td>
-  <form method="post" action="/scopes/{{.Name}}/toggle-disabled" style="display:inline" onsubmit="return confirm('This will stage a pending change on every configured node ({{if .Disabled}}enable{{else}}disable{{end}} scope {{.Name}}) — nothing is applied until you commit from Pending changes. {{if not .Disabled}}DHCP, DNS and probing stop for this scope; the VLAN interface and VIP/VRRP stay up.{{end}} Continue?')"><button type="submit" class="{{if .Disabled}}btn-success{{else}}btn-warn{{end}}">{{if .Disabled}}enable{{else}}disable{{end}}</button></form>
+  <form method="post" action="/scopes/{{.Name}}/toggle-disabled" style="display:inline" onsubmit="return confirm('This will stage a pending change on every configured node ({{if .Disabled}}enable{{else}}disable{{end}} scope {{.Name}}) — nothing is applied until you commit from Pending changes. {{if not .Disabled}}DHCP, DNS and probing stop for this scope; the VIP and VRRP are released; the VLAN interface and node addresses stay up.{{end}} Continue?')"><button type="submit" class="{{if .Disabled}}btn-success{{else}}btn-warn{{end}}">{{if .Disabled}}enable{{else}}disable{{end}}</button></form>
   <form method="post" action="/scopes/{{.Name}}/delete" style="display:inline" onsubmit="return confirm('Really delete scope {{.Name}}? This stages its removal as a pending change on every configured node — nothing is torn down until you commit from Pending changes. Continue?')"><button type="submit" class="btn-danger">delete</button></form>
   </td>
 </tr>
@@ -178,7 +178,7 @@ func buildScopeRows(rows []statusRow, configScopes map[string]config.ScopeConfig
 		}
 		if row.Disabled {
 			row.Status, row.Class = "disabled", "warn"
-			row.StatusTitle = "this scope is disabled: DHCP and DNS stopped, probing off; VLAN interface and VIP/VRRP stay up — enable to serve again"
+			row.StatusTitle = "this scope is disabled: DHCP and DNS stopped, probing off; the VIP and VRRP are released, the VLAN interface and node addresses stay up — enable to serve again"
 		}
 		scopes = append(scopes, row)
 	}
@@ -506,7 +506,7 @@ var scopeDetailTmpl = template.Must(template.New("scope-detail").Parse(`<!doctyp
 <tr><th>Gateway</th><td>{{.Gateway}}</td></tr>
 <tr><th>DHCP pool</th><td>{{.DHCPStart}} &ndash; {{.DHCPEnd}}</td></tr>
 <tr><th>Pool usage</th><td>{{.PoolUsed}} / {{.PoolSize}} ({{.PoolUsagePct}}%)</td></tr>
-{{if .EditScope.DNSMasqDisabled}}<tr><th>Status</th><td class="warn">DISABLED — DHCP and DNS stopped for this scope (not relayed on any node), probing off; VLAN interface and VIP/VRRP stay up</td></tr>{{end}}
+{{if .EditScope.DNSMasqDisabled}}<tr><th>Status</th><td class="warn">DISABLED — DHCP and DNS stopped for this scope (not relayed on any node), probing off; the VIP and VRRP are released (clients cannot reach the gateway VIP); the VLAN interface and node addresses stay up</td></tr>{{end}}
 </table>
 {{else}}
 <p class="crit">Cannot fetch scope config{{if .ConfigError}}: {{.ConfigError}}{{end}}</p>
@@ -571,8 +571,8 @@ var scopeDetailTmpl = template.Must(template.New("scope-detail").Parse(`<!doctyp
 </table>
 <p><input type="submit" value="Stage as pending change"></p>
 </form>
-<form method="post" action="/scopes/{{.Scope}}/toggle-disabled" style="display:inline" onsubmit="return confirm('This will stage a pending change on every configured node ({{if .EditScope.DNSMasqDisabled}}enable{{else}}disable{{end}} scope {{.Scope}}) — nothing is applied until you commit from Pending changes. {{if not .EditScope.DNSMasqDisabled}}DHCP, DNS and probing stop for this scope; the VLAN interface and VIP/VRRP stay up.{{end}} Continue?')">
-<button type="submit" class="{{if .EditScope.DNSMasqDisabled}}btn-success{{else}}btn-warn{{end}}">{{if .EditScope.DNSMasqDisabled}}Enable this scope{{else}}Disable this scope (DHCP + DNS + probing off, VLAN/VIP stay up){{end}}</button>
+<form method="post" action="/scopes/{{.Scope}}/toggle-disabled" style="display:inline" onsubmit="return confirm('This will stage a pending change on every configured node ({{if .EditScope.DNSMasqDisabled}}enable{{else}}disable{{end}} scope {{.Scope}}) — nothing is applied until you commit from Pending changes. {{if not .EditScope.DNSMasqDisabled}}DHCP, DNS and probing stop for this scope; the VIP and VRRP are released; the VLAN interface and node addresses stay up.{{end}} Continue?')">
+<button type="submit" class="{{if .EditScope.DNSMasqDisabled}}btn-success{{else}}btn-warn{{end}}">{{if .EditScope.DNSMasqDisabled}}Enable this scope{{else}}Disable this scope (DHCP + DNS + probing off, VIP released){{end}}</button>
 </form>
 <form method="post" action="/scopes/{{.Scope}}/move" style="display:inline" onsubmit="return confirm('Stage a move of scope {{.Scope}} to the parent and VLAN chosen here? The VIP, node IPs and DHCP pool stay the same. On commit every node rebuilds its VLAN sub-interface, so this scope is interrupted briefly.')">
 <select name="parent" class="js-combo" title="the trunk interface the scope's VLAN sub-interface is created on">{{$curp := .EditScope.Parent}}{{range .PlatformWorkers}}<option value="{{.}}" {{if eq . $curp}}selected{{end}}>{{.}}</option>{{end}}</select>

@@ -1219,7 +1219,7 @@ func (a *Agent) constructScope(name string, sc config.ScopeConfig) bool {
 	}
 
 	if sc.DNSMasqDisabled {
-		loglevel.Infof("[AGENT:PLANE] scope %s constructed on %s (disabled by operator — excluded from DHCP relay and DNS relay, VLAN/VIP still active)", name, iface)
+		loglevel.Infof("[AGENT:PLANE] scope %s constructed on %s (disabled by operator — excluded from DHCP relay, DNS relay and VRRP, so its VIP is down; the VLAN and node address stay)", name, iface)
 	} else {
 		loglevel.Infof("[AGENT:PLANE] scope %s constructed on %s (DNS via dnshived-dnsrelay, DHCP via relay once eligible, gate closed)", name, iface)
 	}
@@ -3110,7 +3110,7 @@ func (a *Agent) reconcileVRRPPriorities(decisions []gateDecision, last map[strin
 	allCurrentScopes := a.allScopes()
 	currentScopes := make(map[string]config.ScopeConfig, len(allCurrentScopes))
 	for scope, sc := range allCurrentScopes {
-		if ready[scope] {
+		if ready[scope] && !sc.DNSMasqDisabled {
 			currentScopes[scope] = sc
 		}
 	}
@@ -3908,13 +3908,14 @@ func staticDefaultPriority(sc config.ScopeConfig, role string) int {
 }
 
 // renderKeepalivedConfigAll renders every KNOWN-CONSTRUCTED configured
-// scope's vrrp_instance into one consolidated keepalived.conf.
+// scope's vrrp_instance into one consolidated keepalived.conf. A disabled
+// scope gets no instance, so its VIP is not held.
 func (a *Agent) renderKeepalivedConfigAll(priorities map[string]int, extraReady map[string]bool) error {
 	currentScopes := a.allScopes()
 	ready := a.readyScopeSet(extraReady)
 	names := make([]string, 0, len(currentScopes))
-	for name := range currentScopes {
-		if !ready[name] {
+	for name, sc := range currentScopes {
+		if !ready[name] || sc.DNSMasqDisabled {
 			continue
 		}
 		names = append(names, name)
