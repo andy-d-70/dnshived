@@ -814,6 +814,7 @@ func main() {
 			"scope_paths":       ag.ScopeBeaconSnapshot(),
 			"scopes_hash":       scopesHash,
 			"config_hash":       configHash,
+			"config_revision":   fresh.ConfigRevision,
 			"configured_scopes": configuredScopes,
 			"iot_scopes":        iotScopes,
 			"disabled_scopes":   disabledScopes,
@@ -1943,6 +1944,15 @@ type configUpdate struct {
 	BackupRetentionCount   int    `json:"backup_retention_count"`
 	BackupPassword         string `json:"backup_password"`
 	BackupReplicateToPeers bool   `json:"backup_replicate_to_peers"`
+
+	// ConfigRevision and the two fields after it are set by the committing web UI; a missing
+	// or lower revision makes the node count up by itself.
+	ConfigRevision       int64  `json:"config_revision"`
+	ConfigRevisionAt     string `json:"config_revision_at"`
+	ConfigRevisionOrigin string `json:"config_revision_origin"`
+	// ConfigCatchUp marks a push that only repairs a node which missed a commit: it is applied
+	// only if its revision is strictly higher than this node's own.
+	ConfigCatchUp bool `json:"config_catchup"`
 }
 
 // applyTo overwrites every editable field on c with u's values.
@@ -1981,6 +1991,9 @@ func applyConfigUpdate(cfgPath string, upd configUpdate, ag *agent.Agent, engine
 	if err != nil {
 		return http.StatusInternalServerError, map[string]string{"error": "load current config: " + err.Error()}
 	}
+	if upd.ConfigCatchUp && upd.ConfigRevision <= current.ConfigRevision {
+		return http.StatusConflict, map[string]string{"error": fmt.Sprintf("catch-up refused: revision %d is not newer than this node's revision %d", upd.ConfigRevision, current.ConfigRevision)}
+	}
 	clusterChanged := clusterIdentityFieldsChanged(current, upd)
 
 	upd.applyTo(current)
@@ -1990,6 +2003,7 @@ func applyConfigUpdate(cfgPath string, upd configUpdate, ag *agent.Agent, engine
 		return http.StatusBadRequest, result
 	}
 
+	current.StampRevision(upd.ConfigRevision, upd.ConfigRevisionAt, upd.ConfigRevisionOrigin, time.Now)
 	if err := config.Save(cfgPath, current); err != nil {
 		return http.StatusInternalServerError, map[string]string{"error": "save: " + err.Error()}
 	}

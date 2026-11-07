@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 const extraFixture = `{
@@ -169,5 +171,46 @@ func TestUnmarshalMergesIntoExistingValue(t *testing.T) {
 	}
 	if sc.Parent != "eth1" || sc.VLANID != 5 || sc.Gateway != "192.0.2.1" {
 		t.Errorf("scope not merged: %+v", sc)
+	}
+}
+
+func TestStampRevision(t *testing.T) {
+	fixed := func() time.Time { return time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC) }
+	tests := []struct {
+		name       string
+		start      int64
+		rev        int64
+		at, origin string
+		wantRev    int64
+		wantAt     string
+		wantOrigin string
+	}{
+		{"no revision supplied counts up", 4, 0, "", "", 5, "2026-11-07T12:00:00Z", ""},
+		{"supplied higher is used", 4, 9, "2026-11-07T10:00:00Z", "core-2", 9, "2026-11-07T10:00:00Z", "core-2"},
+		{"supplied exactly next is used", 4, 5, "2026-11-07T10:00:00Z", "core-1", 5, "2026-11-07T10:00:00Z", "core-1"},
+		{"supplied lower never goes down", 7, 3, "2026-01-01T00:00:00Z", "core-2", 8, "2026-11-07T12:00:00Z", "core-2"},
+		{"supplied equal to current never repeats", 7, 7, "2026-01-01T00:00:00Z", "core-2", 8, "2026-11-07T12:00:00Z", "core-2"},
+		{"huge supplied is ignored", 2, 1 << 60, "x", "core-2", 3, "2026-11-07T12:00:00Z", "core-2"},
+		{"negative supplied is ignored", 2, -5, "x", "core-2", 3, "2026-11-07T12:00:00Z", "core-2"},
+		{"supplied without a time gets one", 2, 6, "", "core-2", 6, "2026-11-07T12:00:00Z", "core-2"},
+		{"oversized origin is dropped", 2, 0, "", strings.Repeat("o", 200), 3, "2026-11-07T12:00:00Z", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := Cluster{ConfigRevision: tt.start}
+			c.StampRevision(tt.rev, tt.at, tt.origin, fixed)
+			if c.ConfigRevision != tt.wantRev || c.ConfigRevisionAt != tt.wantAt || c.ConfigRevisionOrigin != tt.wantOrigin {
+				t.Errorf("got %d %q %q, want %d %q %q", c.ConfigRevision, c.ConfigRevisionAt, c.ConfigRevisionOrigin, tt.wantRev, tt.wantAt, tt.wantOrigin)
+			}
+		})
+	}
+}
+
+func TestConfigRevisionIsNotPartOfTheDocumentHash(t *testing.T) {
+	a := Cluster{ClusterID: "c1", LogLevel: "info"}
+	b := a
+	b.ConfigRevision, b.ConfigRevisionAt, b.ConfigRevisionOrigin = 9, "t", "core-2"
+	if a.ConfigDocumentHash() != b.ConfigDocumentHash() {
+		t.Error("the revision changed the content hash")
 	}
 }

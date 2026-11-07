@@ -1,3 +1,10 @@
+dnshived (0.9.8.9~dev-2) unstable; urgency=medium
+
+  * Lab build: config revision on cluster.json, catch-up of a node that missed
+    a commit, replicated documents for the web instances.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Sat, 07 Nov 2026 18:00:00 +0100
+
 dnshived (0.9.8.9~dev-1) unstable; urgency=medium
 
   * Lab build of the 0.9.8.9 work: replicated documents for the web instances

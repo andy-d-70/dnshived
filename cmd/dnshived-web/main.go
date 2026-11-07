@@ -105,6 +105,8 @@ func main() {
 	probeSync := newProbeHostsSyncer(ref, probeDoc, repl.selfName)
 	runProbeHostsSync(context.Background(), probeSync)
 	probeDocHandlers := probeDoc.handlers(probeSync.PushAll)
+	selfNameFn = repl.selfName
+	newCatchUp(ref).run(context.Background())
 
 	startPendingSummaryTicker(ref)
 	startVerifyCacheCleanup()

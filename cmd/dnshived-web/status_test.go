@@ -1371,3 +1371,36 @@ func TestStatusTmpl_RendersCollapsedVLANPathsUnderTrunk(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigRevisionWarnings(t *testing.T) {
+	row := func(role string, rev *int64, hash string) statusRow {
+		return statusRow{Status: nodeStatus{Role: role, ConfigRevision: rev, ConfigHash: hash}}
+	}
+	tests := []struct {
+		name string
+		rows []statusRow
+		want []string
+	}{
+		{"all equal", []statusRow{row("core-1", rev(4), "h"), row("core-2", rev(4), "h")}, nil},
+		{"same content, lower count is fine", []statusRow{row("core-1", rev(5), "h"), row("core-2", rev(4), "h")}, nil},
+		{"a node behind", []statusRow{row("core-1", rev(5), "h5"), row("core-2", rev(5), "h5"), row("core-3", rev(3), "h3")}, []string{"core-3 (revision 3) missed a commit; the cluster is at revision 5"}},
+		{"hand edit at the same revision", []statusRow{row("core-1", rev(5), "h5"), row("core-2", rev(5), "hx")}, []string{"core-2 differs from the other nodes at the same revision 5"}},
+		{"old daemon next to new ones", []statusRow{row("core-1", rev(5), "h"), row("core-2", nil, "h")}, []string{"core-2 does not report a revision"}},
+		{"nobody reports", []statusRow{row("core-1", nil, "h"), row("core-2", nil, "h")}, nil},
+		{"unreachable rows are ignored", []statusRow{row("core-1", rev(5), "h"), {FetchError: "down", Status: nodeStatus{Role: "core-2"}}}, nil},
+		{"nothing committed yet", []statusRow{row("core-1", rev(0), "a"), row("core-2", rev(0), "b")}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := configRevisionWarnings(tt.rows)
+			if len(got) != len(tt.want) {
+				t.Fatalf("warnings = %v, want %d", got, len(tt.want))
+			}
+			for i := range got {
+				if !strings.Contains(got[i], tt.want[i]) {
+					t.Errorf("warning %d = %q, want it to contain %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}

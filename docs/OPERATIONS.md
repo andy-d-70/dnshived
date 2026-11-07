@@ -17,6 +17,16 @@ changes button.
   change on all nodes; nothing applies until you commit it on Pending
   changes, which shows a diff and warns if a change needs a restart.
   Scope changes hot-reload; see `docs/SCOPE_LIFECYCLE.md`.
+- **Config revision.** Every commit raises the cluster's config
+  revision (`config_revision` in `cluster.json` and in
+  `/api/v1/status`). A node that was down during a commit comes back
+  with a lower revision; the web UI on the node holding the highest
+  revision then pushes the current configuration to it within about two
+  minutes (audit entry `config.catchup`; a node's own `node_ip` values
+  are kept, never the leader's). Only a strictly lower revision with
+  different content is repaired. A node at the same revision with
+  different content (a hand edit) and a node that reports no revision
+  (0.9.8.8 and older) are listed on the Overview page and left alone.
 - **Nodes** are onboarded, replaced or offboarded from Cluster Config
   (also staged); a new host's join code is required.
 - **Backups:** Back up now, automated encrypted backups replicated to
@@ -120,7 +130,7 @@ Main read endpoints:
 
 | Endpoint | Description |
 |----------|-------------|
-| `/api/v1/status` | node state, serving, configured and disabled scopes, epoch, generation, version |
+| `/api/v1/status` | node state, serving, configured and disabled scopes, epoch, generation, version, config revision |
 | `/api/v1/cluster` | peers and reachability |
 | `/api/v1/cluster/snapshot` | status, system, events, daemons of every node in one call |
 | `/api/v1/cluster/activation` | whether every configured core runs at least the version a later feature needs, and which nodes do not (nothing uses it yet) |

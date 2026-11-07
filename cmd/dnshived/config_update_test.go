@@ -503,3 +503,72 @@ func TestApplyConfigUpdate_GracefulFieldsLiveApplyToRealAgent(t *testing.T) {
 		t.Errorf("request with the newly-saved API token: status = %d, want 200 — SetTokens was not actually called live", rr.Code)
 	}
 }
+
+func TestApplyConfigUpdate_StampsTheRevision(t *testing.T) {
+	path := writeBaseConfig(t)
+	apply := func(rev int64, origin string) *config.Cluster {
+		t.Helper()
+		upd := configUpdate{PSK: testPSK, Platform: testPlatform(), ConfigRevision: rev, ConfigRevisionAt: "2026-11-07T10:00:00Z", ConfigRevisionOrigin: origin}
+		if status, body := applyConfigUpdate(path, upd, nil, nil, nil); status != http.StatusOK {
+			t.Fatalf("status = %d, body = %+v", status, body)
+		}
+		c, err := config.Load(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	if c := apply(0, ""); c.ConfigRevision != 1 {
+		t.Errorf("an update without a revision must count up from 0 to 1, got %d", c.ConfigRevision)
+	}
+	if c := apply(7, "core-2"); c.ConfigRevision != 7 || c.ConfigRevisionOrigin != "core-2" || c.ConfigRevisionAt != "2026-11-07T10:00:00Z" {
+		t.Errorf("a supplied higher revision was not used: %d %q %q", c.ConfigRevision, c.ConfigRevisionOrigin, c.ConfigRevisionAt)
+	}
+	if c := apply(3, "core-1"); c.ConfigRevision != 8 {
+		t.Errorf("a lower revision must never lower the node's revision, got %d", c.ConfigRevision)
+	}
+}
+
+func TestApplyConfigUpdate_RevisionIsNotChangedByAFailedUpdate(t *testing.T) {
+	path := writeBaseConfig(t)
+	bad := configUpdate{PSK: "", Platform: testPlatform(), ConfigRevision: 5}
+	if status, _ := applyConfigUpdate(path, bad, nil, nil, nil); status == http.StatusOK {
+		t.Fatal("an update without a PSK was accepted")
+	}
+	c, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ConfigRevision != 0 {
+		t.Errorf("a refused update changed the revision to %d", c.ConfigRevision)
+	}
+}
+
+func TestApplyConfigUpdate_CatchUpOnlyAppliesANewerRevision(t *testing.T) {
+	path := writeBaseConfig(t)
+	seed := configUpdate{PSK: testPSK, Platform: testPlatform(), LogLevel: "info", ConfigRevision: 6}
+	if status, body := applyConfigUpdate(path, seed, nil, nil, nil); status != http.StatusOK {
+		t.Fatalf("seed: %d %+v", status, body)
+	}
+	for _, rev := range []int64{5, 6} {
+		stale := configUpdate{PSK: testPSK, Platform: testPlatform(), LogLevel: "debug", ConfigRevision: rev, ConfigCatchUp: true}
+		if status, _ := applyConfigUpdate(path, stale, nil, nil, nil); status != http.StatusConflict {
+			t.Errorf("catch-up with revision %d: status %d, want 409", rev, status)
+		}
+	}
+	c, err := config.Load(path)
+	if err != nil || c.LogLevel != "info" || c.ConfigRevision != 6 {
+		t.Fatalf("a refused catch-up changed the node: %v %q %d", err, c.LogLevel, c.ConfigRevision)
+	}
+	newer := configUpdate{PSK: testPSK, Platform: testPlatform(), LogLevel: "debug", ConfigRevision: 9, ConfigCatchUp: true}
+	if status, body := applyConfigUpdate(path, newer, nil, nil, nil); status != http.StatusOK {
+		t.Fatalf("newer catch-up: %d %+v", status, body)
+	}
+	if c, _ := config.Load(path); c.LogLevel != "debug" || c.ConfigRevision != 9 {
+		t.Errorf("newer catch-up not applied: %q %d", c.LogLevel, c.ConfigRevision)
+	}
+	plain := configUpdate{PSK: testPSK, Platform: testPlatform(), LogLevel: "info", ConfigRevision: 2}
+	if status, _ := applyConfigUpdate(path, plain, nil, nil, nil); status != http.StatusOK {
+		t.Errorf("a normal commit must still be applied whatever its revision: %d", status)
+	}
+}

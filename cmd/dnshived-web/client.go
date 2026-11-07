@@ -75,7 +75,9 @@ type nodeStatus struct {
 	ServerTime  string            `json:"server_time"`
 	ScopesHash  string            `json:"scopes_hash"`
 	// ConfigHash mirrors Cluster.ConfigDocumentHash().
-	ConfigHash       string            `json:"config_hash"`
+	ConfigHash string `json:"config_hash"`
+	// ConfigRevision is nil for a daemon too old to report one.
+	ConfigRevision   *int64            `json:"config_revision"`
 	PeersVisible     []string          `json:"peers_visible"`
 	PeersUnreachable []string          `json:"peers_unreachable"`
 	FallbackPeers    map[string]string `json:"fallback_peers"`

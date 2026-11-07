@@ -62,6 +62,13 @@ type configPushPayload struct {
 	BackupRetentionCount   int    `json:"backup_retention_count"`
 	BackupPassword         string `json:"backup_password"`
 	BackupReplicateToPeers bool   `json:"backup_replicate_to_peers"`
+
+	// The revision this push creates (see withNextRevision); omitted when no node reports one.
+	ConfigRevision       int64  `json:"config_revision,omitempty"`
+	ConfigRevisionAt     string `json:"config_revision_at,omitempty"`
+	ConfigRevisionOrigin string `json:"config_revision_origin,omitempty"`
+	// ConfigCatchUp makes the daemon accept this push only if it is newer than the node's own.
+	ConfigCatchUp bool `json:"config_catchup,omitempty"`
 }
 
 // fetchConfig reads the full current config from one node's GET
@@ -537,6 +544,7 @@ const saveDoneMarkerHTML = `<span id="save-done" hidden></span>
 // pushConfigAndRenderResult is the shared concurrent push-to-every-node +
 // per-node audit entry + result-page rendering logic.
 func pushConfigAndRenderResult(w http.ResponseWriter, cfg *WebConfig, payload configPushPayload, user webauth.User, backLink, backText string, onFullSuccess func()) {
+	payload = withNextRevision(nodesIncludingSelf(cfg), payload)
 	if cfg.CoordinatorNode != nil {
 		pushConfigViaCoordinator(w, cfg, payload, user, backLink, backText, onFullSuccess)
 		return

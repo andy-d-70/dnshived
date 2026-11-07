@@ -583,15 +583,23 @@ type Cluster struct {
 	// unchanged (see extra.go).
 	Extra map[string]json.RawMessage `json:"-"`
 
-	SchemaVersion int      `json:"schema_version,omitempty"`
-	ClusterID     string   `json:"cluster_id"`
-	NodeID        string   `json:"node_id"`
-	Role          string   `json:"role"`
-	ControlAddr   string   `json:"control_addr"`
-	BindAddr      string   `json:"bind_addr"`
-	DataDir       string   `json:"data_dir"`
-	PSK           string   `json:"psk,omitempty"`
-	Peers         []string `json:"peers"`
+	SchemaVersion int `json:"schema_version,omitempty"`
+
+	// ConfigRevision counts committed changes of the cluster-wide settings; the
+	// two fields after it say when and from which node the last one came. They
+	// are not part of ConfigDocumentHash.
+	ConfigRevision       int64  `json:"config_revision,omitempty"`
+	ConfigRevisionAt     string `json:"config_revision_at,omitempty"`
+	ConfigRevisionOrigin string `json:"config_revision_origin,omitempty"`
+
+	ClusterID   string   `json:"cluster_id"`
+	NodeID      string   `json:"node_id"`
+	Role        string   `json:"role"`
+	ControlAddr string   `json:"control_addr"`
+	BindAddr    string   `json:"bind_addr"`
+	DataDir     string   `json:"data_dir"`
+	PSK         string   `json:"psk,omitempty"`
+	Peers       []string `json:"peers"`
 
 	TrustedHosts []string `json:"trusted_hosts,omitempty"`
 
@@ -726,6 +734,29 @@ func (c *Cluster) ScopesHash() string {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])[:12]
+}
+
+// maxConfigRevision bounds a revision received from another instance.
+const maxConfigRevision = 1 << 53
+
+// StampRevision records a committed change. A revision supplied by the
+// committing side is used when it is higher than the current one; otherwise
+// (older callers, a stale value) the revision becomes current+1, so it never
+// goes down.
+func (c *Cluster) StampRevision(rev int64, at, origin string, now func() time.Time) {
+	next := c.ConfigRevision + 1
+	if rev > next && rev <= maxConfigRevision {
+		next = rev
+	}
+	if rev == next && len(at) <= 128 && len(origin) <= 128 && at != "" {
+		c.ConfigRevisionAt, c.ConfigRevisionOrigin = at, origin
+	} else {
+		c.ConfigRevisionAt, c.ConfigRevisionOrigin = now().UTC().Format(time.RFC3339), origin
+		if len(c.ConfigRevisionOrigin) > 128 {
+			c.ConfigRevisionOrigin = ""
+		}
+	}
+	c.ConfigRevision = next
 }
 
 // ConfigDocumentHash returns a stable, truncated SHA-256 digest over every

@@ -591,6 +591,8 @@ func coherenceWarningTitle(w string) string {
 		return "This node's own peer list (cluster.json peers) disagrees with the cluster's current core nodes. A stale entry usually means a decommission never reached this node; a missing one means it was never told about a node that joined. Either way the nodes are no longer working from the same membership: quorum sizing, peer probing and trusted_hosts can all differ between them. Fix the node's peer list rather than waiting, it does not heal on its own."
 	case strings.HasPrefix(w, "TRUNK PATH:"):
 		return "This node sends topology beacons on this trunk but has heard none from any other core node on it, so the cluster cannot use this trunk as a path between nodes. Most common cause on Debian 13: reverse-path filtering (net.ipv4.conf.<trunk>.rp_filter, default 2) drops beacons on a trunk with no IPv4 address; dnshived sets it to 0 when it brings the trunk up, but a non-zero net.ipv4.conf.all.rp_filter still overrides that (the daemon log names it). Otherwise check cabling, switch/bridge VLAN config, and that the peers actually sit on this trunk."
+	case strings.HasPrefix(w, "CONFIG REVISION:"):
+		return "Every committed change raises the cluster's config revision. A node behind it missed a commit (it was down or unreachable) and is brought up to date by the web UI; a node at the same revision with different content was changed outside a commit and is left alone; a node that reports no revision runs an older version."
 	case strings.HasPrefix(w, "PARTITION:"):
 		return "\"This page\" is the node whose web UI you are looking at (named in the message). Both nodes named here answer to it, yet at least one of them reports the other unreachable on its mgmt path, and no working fallback path is confirmed between them — an asymmetric partition between two nodes, not a problem with the page's own node. A node that still reaches its peer over the fallback path is not listed (that is a mgmt-only loss, shown on the State and Interfaces rows). Can affect that pair's own quorum/failover timing until it clears."
 	default:
@@ -731,7 +733,58 @@ func checkCoherence(rows []statusRow, tokens map[string]tokenInfo, observerName 
 
 	warnings = append(warnings, membershipWarnings(rows)...)
 	warnings = append(warnings, trunkPathWarnings(rows)...)
+	warnings = append(warnings, configRevisionWarnings(rows)...)
 
+	return warnings
+}
+
+// configRevisionWarnings compares the config revision of the core nodes: a
+// node behind the highest one, a node at the same revision with different
+// content (a hand edit; never changed automatically), and nodes that do not
+// report a revision yet (older versions).
+func configRevisionWarnings(rows []statusRow) []string {
+	var highest int64
+	var highestHash string
+	var behind, noRev []string
+	type seen struct {
+		role string
+		rev  int64
+		hash string
+	}
+	var reporting []seen
+	for _, row := range rows {
+		if row.FetchError != "" || !isCoreRole(row.Status.Role) {
+			continue
+		}
+		if row.Status.ConfigRevision == nil {
+			noRev = append(noRev, row.Status.Role)
+			continue
+		}
+		r := *row.Status.ConfigRevision
+		reporting = append(reporting, seen{row.Status.Role, r, row.Status.ConfigHash})
+		if r > highest {
+			highest, highestHash = r, row.Status.ConfigHash
+		}
+	}
+	var warnings []string
+	var differs []string
+	for _, s := range reporting {
+		switch {
+		case s.rev < highest && s.hash != highestHash:
+			behind = append(behind, fmt.Sprintf("%s (revision %d)", s.role, s.rev))
+		case s.rev == highest && highest > 0 && s.hash != highestHash:
+			differs = append(differs, s.role)
+		}
+	}
+	if len(behind) > 0 {
+		warnings = append(warnings, fmt.Sprintf("CONFIG REVISION: %s missed a commit; the cluster is at revision %d. The web UI brings it up to date within about two minutes", strings.Join(behind, ", "), highest))
+	}
+	if len(differs) > 0 {
+		warnings = append(warnings, fmt.Sprintf("CONFIG REVISION: %s differs from the other nodes at the same revision %d (a hand edit?) and is not changed automatically", strings.Join(differs, ", "), highest))
+	}
+	if len(noRev) > 0 && len(reporting) > 0 {
+		warnings = append(warnings, fmt.Sprintf("CONFIG REVISION: %s does not report a revision (older version) and is not brought up to date automatically", strings.Join(noRev, ", ")))
+	}
 	return warnings
 }
 
