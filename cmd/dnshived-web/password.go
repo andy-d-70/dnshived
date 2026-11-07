@@ -140,6 +140,11 @@ func applyPasswordChangeHandler(ref *configRef, repl *authSync) http.HandlerFunc
 			writeJSONWeb(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
+		if !webauth.ValidPasswordHash(req.PasswordHash) {
+			log.Printf("[PASSWORD] refused a password hash for %q from %s: outside the allowed sizes", req.Name, clientAddr(r))
+			writeJSONWeb(w, http.StatusBadRequest, map[string]string{"error": "invalid password hash"})
+			return
+		}
 		if err := setPasswordHash(repl, req.Name, req.PasswordHash); err != nil {
 			writeJSONWeb(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return

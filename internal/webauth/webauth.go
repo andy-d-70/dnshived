@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -25,6 +26,10 @@ const (
 	pbkdf2SaltBytes  = 16
 	pbkdf2Iterations = 600_000
 	pbkdf2KeyBytes   = 32
+
+	maxPBKDF2Iterations = 2 * pbkdf2Iterations
+	maxPBKDF2SaltBytes  = 64
+	maxPBKDF2KeyBytes   = 64
 )
 
 // User is one web-UI credential.
@@ -75,7 +80,13 @@ func (s *Store) Verify(username, password string) (User, bool) {
 		if u.Name != username {
 			continue
 		}
-		if verifyPassword(password, u.PasswordHash) && !u.Disabled {
+		hash := u.PasswordHash
+		outOfBounds := hash != "" && !ValidPasswordHash(hash)
+		if outOfBounds {
+			log.Printf("[AUTH] the stored password hash of %q is out of bounds; the user cannot log in until the password is set again", u.Name)
+			hash = dummyHash()
+		}
+		if verifyPassword(password, hash) && !outOfBounds && !u.Disabled {
 			return u, true
 		}
 		return User{}, false
@@ -203,21 +214,37 @@ func (s *Store) UpsertHash(name, hash, role string) {
 	s.Users = append(s.Users, User{Name: name, PasswordHash: hash, Role: role})
 }
 
-func VerifyPassword(password, stored string) bool {
+// parsePasswordHash splits "salt:iterations:key" and refuses sizes outside what HashPassword
+// could have written, so a stored value cannot make a login run PBKDF2 for hours.
+func parsePasswordHash(stored string) (salt []byte, iterations int, key []byte, ok bool) {
 	parts := strings.SplitN(stored, ":", 3)
 	if len(parts) != 3 {
-		return false
+		return nil, 0, nil, false
 	}
 	salt, err := hex.DecodeString(parts[0])
-	if err != nil {
-		return false
+	if err != nil || len(salt) < pbkdf2SaltBytes || len(salt) > maxPBKDF2SaltBytes {
+		return nil, 0, nil, false
 	}
-	iterations, err := strconv.Atoi(parts[1])
-	if err != nil || iterations <= 0 {
-		return false
+	iterations, err = strconv.Atoi(parts[1])
+	if err != nil || iterations < 1 || iterations > maxPBKDF2Iterations {
+		return nil, 0, nil, false
 	}
-	wantKey, err := hex.DecodeString(parts[2])
-	if err != nil || len(wantKey) == 0 {
+	key, err = hex.DecodeString(parts[2])
+	if err != nil || len(key) < 1 || len(key) > maxPBKDF2KeyBytes {
+		return nil, 0, nil, false
+	}
+	return salt, iterations, key, true
+}
+
+// ValidPasswordHash reports whether stored has the shape VerifyPassword accepts.
+func ValidPasswordHash(stored string) bool {
+	_, _, _, ok := parsePasswordHash(stored)
+	return ok
+}
+
+func VerifyPassword(password, stored string) bool {
+	salt, iterations, wantKey, ok := parsePasswordHash(stored)
+	if !ok {
 		return false
 	}
 	gotKey, err := pbkdf2.Key(sha256.New, password, salt, iterations, len(wantKey))

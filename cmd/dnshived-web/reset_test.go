@@ -88,6 +88,7 @@ func TestPasswordReset_EndToEnd(t *testing.T) {
 	form := url.Values{"login": {"OPS@example.org"}}
 	r := httptest.NewRequest(http.MethodPost, "/forgot", strings.NewReader(form.Encode()))
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Host = "attacker.example"
 	w := httptest.NewRecorder()
 	handleForgotPost(store, repl, ref)(w, r)
 	if !strings.Contains(w.Body.String(), "If that account exists") {
@@ -142,6 +143,7 @@ func TestForgot_UnknownUserSameAnswerNoMail(t *testing.T) {
 	host, port, mails := fakeSMTP(t)
 	store, repl, ref := usersFixture(t, webauth.User{Name: "nomail", Role: webauth.RoleReadonly})
 	store.SMTP = &webauth.SMTPSettings{Host: host, Port: port, Security: "none", From: "dnshived@example.org"}
+	store.PublicURL = "https://dnshived.example.org:8443"
 	resetRequests = &resetLimiter{hits: map[string][]time.Time{}}
 	for _, login := range []string{"ghost", "nomail"} {
 		r := httptest.NewRequest(http.MethodPost, "/forgot", strings.NewReader("login="+login))
@@ -172,6 +174,123 @@ func TestResetLimiter(t *testing.T) {
 	}
 	if !l.allow("k", now.Add(resetLimitWindow+time.Second)) {
 		t.Error("limit never expires")
+	}
+}
+
+func TestResetBaseURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		public string
+		cfg    WebConfig
+		want   string
+		wantOK bool
+	}{
+		{"public URL wins over the VIP", "https://dnshived.example.org", WebConfig{VIPHost: "10.0.0.9", ListenAddr: "0.0.0.0:8443"}, "https://dnshived.example.org", true},
+		{"VIP over plain HTTP", "", WebConfig{VIPHost: "10.0.0.9", ListenAddr: "0.0.0.0:8080"}, "http://10.0.0.9:8080", true},
+		{"VIP over TLS", "", WebConfig{VIPHost: "10.0.0.9", ListenAddr: "0.0.0.0:8443", TLSCert: "c.pem", TLSKey: "k.pem"}, "https://10.0.0.9:8443", true},
+		{"neither Public URL nor VIP", "", WebConfig{ListenAddr: "0.0.0.0:8443"}, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := resetBaseURL(&webauth.Store{PublicURL: tt.public}, &tt.cfg)
+			if got != tt.want || ok != tt.wantOK {
+				t.Errorf("resetBaseURL = %q, %v; want %q, %v", got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
+func TestForgotGet_FormOnlyWithABase(t *testing.T) {
+	tests := []struct {
+		name     string
+		public   string
+		vip      string
+		wantForm bool
+	}{
+		{"neither Public URL nor VIP hides the form", "", "", false},
+		{"Public URL shows the form", "https://dnshived.example.org", "", true},
+		{"VIP shows the form", "", "10.0.0.9", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, _, ref := usersFixture(t)
+			store.PublicURL = tt.public
+			ref.Load().VIPHost = tt.vip
+			w := httptest.NewRecorder()
+			handleForgotGet(store, ref)(w, httptest.NewRequest(http.MethodGet, "/forgot", nil))
+			body := w.Body.String()
+			if hasForm := strings.Contains(body, `name="login"`); hasForm != tt.wantForm {
+				t.Errorf("form shown = %v, want %v", hasForm, tt.wantForm)
+			}
+			if off := strings.Contains(body, resetOffText); off == tt.wantForm {
+				t.Errorf("off text shown = %v, want %v", off, !tt.wantForm)
+			}
+		})
+	}
+}
+
+func postForgot(h http.HandlerFunc, login, host string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodPost, "/forgot", strings.NewReader(url.Values{"login": {login}}.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.Host = host
+	w := httptest.NewRecorder()
+	h(w, r)
+	return w
+}
+
+func TestForgot_NoBaseSendsNoMailAndStoresNoToken(t *testing.T) {
+	host, port, mails := fakeSMTP(t)
+	hash, _ := webauth.HashPassword("old-password-1")
+	store, repl, ref := usersFixture(t, webauth.User{Name: "ops", Role: webauth.RoleScopeAdmin, Email: "ops@example.org", PasswordHash: hash})
+	store.SMTP = &webauth.SMTPSettings{Host: host, Port: port, Security: "none", From: "dnshived@example.org"}
+	resetRequests = &resetLimiter{hits: map[string][]time.Time{}}
+
+	bodies := map[string]string{}
+	for _, login := range []string{"ops", "ghost"} {
+		t.Run(login, func(t *testing.T) {
+			body := postForgot(handleForgotPost(store, repl, ref), login, "attacker.example").Body.String()
+			if !strings.Contains(body, resetOffText) {
+				t.Errorf("off text missing: %s", body)
+			}
+			if strings.Contains(body, forgotAnswer) || strings.Contains(body, "attacker.example") {
+				t.Errorf("unexpected content in the answer: %s", body)
+			}
+			bodies[login] = body
+		})
+	}
+	if bodies["ops"] != bodies["ghost"] {
+		t.Error("the answer differs between a known and an unknown login")
+	}
+	select {
+	case m := <-mails:
+		t.Errorf("mail sent without a Public URL or VIP:\n%s", m)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if len(store.Resets) != 0 {
+		t.Errorf("reset tokens stored without a link base: %d", len(store.Resets))
+	}
+}
+
+func TestForgot_LinkUsesVIPWhateverTheHostHeaderSays(t *testing.T) {
+	host, port, mails := fakeSMTP(t)
+	hash, _ := webauth.HashPassword("old-password-1")
+	store, repl, ref := usersFixture(t, webauth.User{Name: "ops", Role: webauth.RoleScopeAdmin, Email: "ops@example.org", PasswordHash: hash})
+	store.SMTP = &webauth.SMTPSettings{Host: host, Port: port, Security: "none", From: "dnshived@example.org"}
+	ref.Load().VIPHost = "10.0.0.9"
+	ref.Load().ListenAddr = "0.0.0.0:8080"
+	resetRequests = &resetLimiter{hits: map[string][]time.Time{}}
+
+	postForgot(handleForgotPost(store, repl, ref), "ops", "attacker.example")
+	select {
+	case m := <-mails:
+		if !strings.Contains(m, "http://10.0.0.9:8080/reset?token=") {
+			t.Errorf("link does not use the VIP:\n%s", m)
+		}
+		if strings.Contains(m, "attacker.example") {
+			t.Errorf("the Host header reached the mail:\n%s", m)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no reset mail sent")
 	}
 }
 

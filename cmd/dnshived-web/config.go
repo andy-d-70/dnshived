@@ -366,6 +366,14 @@ func handleScopesConfigPost(ref *configRef) http.HandlerFunc {
 			http.Error(w, "could not read current config: "+err.Error(), http.StatusBadGateway)
 			return
 		}
+		for name, sc := range scopes {
+			if stored, ok := current.Scopes[name]; ok {
+				sc = keepUnshownScopeFields(sc, stored)
+				sc.NodeIPOverrides = stored.NodeIPOverrides
+				sc.ClientDNSServer = stored.ClientDNSServer
+				scopes[name] = sc
+			}
+		}
 		payload := clusterPushPayloadFrom(current)
 		payload.Scopes = scopes
 

@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -664,12 +665,36 @@ func handleBackupRestoreGet(ref *configRef) http.HandlerFunc {
 	}
 }
 
+const restoreLockedText = "too many failed restore attempts — try again later"
+
+// restoreSlot lets one restore decrypt at a time. A waiting restore is cancelled only by its
+// client leaving, never by a timer; one at a time is also what makes the failure count hold
+// against a burst of parallel guesses.
+var restoreSlot = make(chan struct{}, 1)
+
+func restoreLocked(w http.ResponseWriter, key string) bool {
+	wait := restoreLimiter.retryAfter(key, time.Now())
+	if wait <= 0 {
+		return false
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
+	w.WriteHeader(http.StatusTooManyRequests)
+	renderTemplate(w, restoreTmpl, restorePageData{DecryptError: restoreLockedText}, "restore")
+	return true
+}
+
 // handleBackupRestorePost decrypts a backup blob.
 func handleBackupRestorePost(ref *configRef) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := ref.Load()
 		var blob []byte
 		var password, nodeName, name string
+
+		user, _ := userFromContext(r)
+		key := user.Name + "|" + clientAddr(r)
+		if restoreLocked(w, key) {
+			return
+		}
 
 		if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
 			if err := r.ParseMultipartForm(32 << 20); err != nil {
@@ -718,8 +743,21 @@ func handleBackupRestorePost(ref *configRef) http.HandlerFunc {
 			blob = fetched
 		}
 
+		select {
+		case restoreSlot <- struct{}{}:
+		case <-r.Context().Done():
+			return
+		}
+		if restoreLocked(w, key) {
+			<-restoreSlot
+			return
+		}
 		compressed, err := backupcrypt.Decrypt(password, blob)
+		<-restoreSlot
 		if err != nil {
+			if errors.Is(err, backupcrypt.ErrWrongPasswordOrCorrupt) {
+				restoreLimiter.fail(key, time.Now())
+			}
 			renderTemplate(w, restoreTmpl, restorePageData{DecryptError: err.Error(), Node: nodeName, Name: name}, "restore")
 			return
 		}
@@ -753,7 +791,6 @@ func handleBackupRestorePost(ref *configRef) http.HandlerFunc {
 			}
 		}
 
-		user, _ := userFromContext(r)
 		pushCandidateAndRenderResult(w, cfg, payload, user, "/backup", "back to config management")
 	}
 }

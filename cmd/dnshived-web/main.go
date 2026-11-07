@@ -105,7 +105,7 @@ func main() {
 	mux.HandleFunc("GET /login", handleLoginGet(store))
 	mux.HandleFunc("POST /login", handleLoginPost(store, ref))
 	mux.HandleFunc("POST /logout", handleLogout)
-	mux.HandleFunc("GET /forgot", handleForgotGet)
+	mux.HandleFunc("GET /forgot", handleForgotGet(store, ref))
 	mux.HandleFunc("POST /forgot", handleForgotPost(store, repl, ref))
 	mux.HandleFunc("GET /reset", handleResetGet(store))
 	mux.HandleFunc("POST /reset", handleResetPost(store, repl, ref))

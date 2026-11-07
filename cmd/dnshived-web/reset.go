@@ -52,29 +52,32 @@ func (l *resetLimiter) allow(key string, now time.Time) bool {
 }
 
 // resetBaseURL is the public URL, else the mgmt VIP on this listener's port.
-func resetBaseURL(store *webauth.Store, cfg *WebConfig, r *http.Request) string {
+// It never falls back to the request's Host header: the requester controls it.
+func resetBaseURL(store *webauth.Store, cfg *WebConfig) (string, bool) {
 	if _, public := store.MailSettings(); public != "" {
-		return public
+		return public, true
+	}
+	if cfg.VIPHost == "" {
+		return "", false
 	}
 	scheme := "http"
 	if cfg.TLSCert != "" && cfg.TLSKey != "" {
 		scheme = "https"
 	}
-	host := r.Host
-	if cfg.VIPHost != "" {
-		_, port, err := net.SplitHostPort(cfg.ListenAddr)
-		if err != nil {
-			port = cfg.ListenAddr
-		}
-		host = net.JoinHostPort(cfg.VIPHost, port)
+	_, port, err := net.SplitHostPort(cfg.ListenAddr)
+	if err != nil {
+		port = cfg.ListenAddr
 	}
-	return scheme + "://" + host
+	return scheme + "://" + net.JoinHostPort(cfg.VIPHost, port), true
 }
+
+const resetOffText = "Reset by mail is off until an administrator sets a Public URL or a management VIP in the cluster settings."
 
 type resetPageData struct {
 	Token  string
 	Error  string
 	Notice string
+	Off    string
 	Done   bool
 }
 
@@ -83,7 +86,7 @@ var forgotTmpl = template.Must(template.New("forgot").Parse(`<!doctype html>
 ` + styleHTML + `
 <h1>Forgot password</h1>
 <div style="max-width:28rem">
-{{if .Notice}}<p class="ok">{{.Notice}}</p><p><a href="/login">&larr; log in</a></p>{{else}}
+{{if .Notice}}<p class="ok">{{.Notice}}</p><p><a href="/login">&larr; log in</a></p>{{else if .Off}}<p class="dim">{{.Off}}</p><p><a href="/login">&larr; log in</a></p>{{else}}
 <p class="dim">Enter your user name or email address. If the account has an email address, a reset link valid for 30 minutes is sent to it.</p>
 <form method="post" action="/forgot">
 <p><label>User name or email<br><input name="login" autocomplete="username" required autofocus style="width:100%"></label></p>
@@ -111,8 +114,14 @@ var resetTmpl = template.Must(template.New("reset").Parse(`<!doctype html>
 
 const forgotAnswer = "If that account exists and has an email address, a reset link is on its way. Check your inbox (and spam folder)."
 
-func handleForgotGet(w http.ResponseWriter, r *http.Request) {
-	renderTemplate(w, forgotTmpl, resetPageData{}, "forgot")
+func handleForgotGet(store *webauth.Store, ref *configRef) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data := resetPageData{}
+		if _, ok := resetBaseURL(store, ref.Load()); !ok {
+			data.Off = resetOffText
+		}
+		renderTemplate(w, forgotTmpl, data, "forgot")
+	}
 }
 
 // handleForgotPost answers the same way whether or not the account exists;
@@ -121,7 +130,12 @@ func handleForgotPost(store *webauth.Store, repl *authSync, ref *configRef) http
 	return func(w http.ResponseWriter, r *http.Request) {
 		login := strings.TrimSpace(r.FormValue("login"))
 		client := clientAddr(r)
-		base := resetBaseURL(store, ref.Load(), r)
+		base, ok := resetBaseURL(store, ref.Load())
+		if !ok {
+			log.Printf("[RESET] reset requested from %s — refused: neither a Public URL nor a management VIP is set, so no safe link can be built", client)
+			renderTemplate(w, forgotTmpl, resetPageData{Off: resetOffText}, "forgot")
+			return
+		}
 		if login != "" && resetRequests.allow("client:"+client, time.Now()) {
 			go requestReset(store, repl, ref, login, client, base)
 		}

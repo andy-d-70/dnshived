@@ -19,6 +19,9 @@ const (
 	nonceBytes       = 12 // AES-GCM's own standard nonce size
 	keyBytes         = 32 // AES-256
 	pbkdf2Iterations = 600_000
+	// maxIterations bounds the count read from a blob, so a crafted file cannot hold a
+	// key derivation for hours; it is twice what Encrypt writes.
+	maxIterations = 2 * pbkdf2Iterations
 
 	// blobVersion is the first byte of every blob this package writes.
 	blobVersion = 1
@@ -76,6 +79,9 @@ func Decrypt(password string, blob []byte) ([]byte, error) {
 	}
 	pos := 1
 	iterations := binary.BigEndian.Uint32(blob[pos : pos+4])
+	if iterations == 0 || iterations > maxIterations {
+		return nil, fmt.Errorf("backupcrypt: key derivation count %d is outside 1 to %d", iterations, maxIterations)
+	}
 	pos += 4
 	salt := blob[pos : pos+saltBytes]
 	pos += saltBytes

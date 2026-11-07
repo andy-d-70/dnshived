@@ -564,7 +564,7 @@ var scopeDetailTmpl = template.Must(template.New("scope-detail").Parse(`<!doctyp
 </td></tr>
 {{if .HasProbeHost}}
 <tr><td>probing</td><td>
-  <label><input type="checkbox" name="probe_enabled" {{if not .EditScope.ProbeDisabled}}checked{{end}}> external DHCP/DNS probing enabled for this scope</label>
+  <label><input type="checkbox" name="probe_enabled" {{if not .EditScope.ProbeDisabled}}checked{{end}}{{if .EditScope.DNSMasqDisabled}} disabled title="Probing follows the scope: enable the scope first."{{end}}> external DHCP/DNS probing enabled for this scope</label>
   <span class="dim">(new scopes are probed by default; uncheck to opt this one out)</span>
 </td></tr>
 {{end}}
@@ -1117,6 +1117,25 @@ func parseScopeEditForm(r *http.Request) (config.ScopeConfig, error) {
 	}, nil
 }
 
+// keepUnshownScopeFields copies onto edited the stored scope's fields that the edit forms have
+// no input for, so a save cannot reset them. A disabled scope keeps its stored probing flag.
+func keepUnshownScopeFields(edited, stored config.ScopeConfig) config.ScopeConfig {
+	edited.Reservations = stored.Reservations
+	edited.VRRPUnicast = stored.VRRPUnicast
+	edited.DHCPNoPing = stored.DHCPNoPing
+	edited.DHCPIoTDefaults = stored.DHCPIoTDefaults
+	edited.DHCPBroadcast = stored.DHCPBroadcast
+	edited.DHCPAuthoritative = stored.DHCPAuthoritative
+	edited.DHCPLeaseTime = stored.DHCPLeaseTime
+	edited.DNSMasqDisabled = stored.DNSMasqDisabled
+	edited.RebalanceApprovedAt = stored.RebalanceApprovedAt
+	edited.ContentLinks = stored.ContentLinks
+	if stored.DNSMasqDisabled {
+		edited.ProbeDisabled = stored.ProbeDisabled
+	}
+	return edited
+}
+
 // clientDNSServerFromForm resolves parseScopeEditForm's own
 // client_dns_choice/client_dns_server pair.
 func clientDNSServerFromForm(f map[string][]string) string {
@@ -1156,7 +1175,7 @@ func handleScopeConfigPost(ref *configRef) http.HandlerFunc {
 			http.Error(w, "bad input: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		edited.Reservations = c.Scopes[scope].Reservations
+		edited = keepUnshownScopeFields(edited, c.Scopes[scope])
 
 		targetName := scope
 		if newName := strings.TrimSpace(first(r.PostForm["new_name"])); newName != "" && newName != scope {

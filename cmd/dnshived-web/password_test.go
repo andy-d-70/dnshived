@@ -248,3 +248,42 @@ func TestChangePasswordFormHandler_WritesAuditEntryOnEveryNode(t *testing.T) {
 		t.Error("audit summary must never contain the actual password")
 	}
 }
+
+func TestApplyPasswordChangeHandler_RefusesAHashOutsideTheAllowedSizes(t *testing.T) {
+	tests := []struct {
+		name string
+		hash string
+	}{
+		{"billions of rounds", strings.Repeat("ab", 16) + ":4000000000:" + strings.Repeat("cd", 32)},
+		{"salt of 15 bytes", strings.Repeat("ab", 15) + ":600000:" + strings.Repeat("cd", 32)},
+		{"empty key", strings.Repeat("ab", 16) + ":600000:"},
+		{"two parts", "x:1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store, usersFile := newTestStore(t, "admin", "correct-horse", "admin")
+			cfg := &WebConfig{
+				UsersFile: usersFile,
+				Nodes:     []NodeConfig{{Name: "core-1", Addr: "10.0.0.1:9443", AdminToken: "shared-secret"}},
+			}
+			before, _ := store.Lookup("admin")
+
+			req := httptest.NewRequest(http.MethodPost, "/internal/password/change",
+				strings.NewReader(`{"name":"admin","password_hash":"`+tt.hash+`","role":"admin"}`))
+			req.Header.Set("Authorization", "Bearer shared-secret")
+			w := httptest.NewRecorder()
+			applyPasswordChangeHandler(newConfigRef(cfg), testRepl(store, cfg))(w, req)
+
+			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invalid password hash") {
+				t.Fatalf("status = %d, body = %s; want 400 invalid password hash", w.Code, w.Body.String())
+			}
+			after, _ := store.Lookup("admin")
+			if after.PasswordHash != before.PasswordHash || after.SessionEpoch != before.SessionEpoch {
+				t.Error("the user was changed by a refused hash")
+			}
+			if _, ok := store.Verify("admin", "correct-horse"); !ok {
+				t.Error("the old password stopped working")
+			}
+		})
+	}
+}

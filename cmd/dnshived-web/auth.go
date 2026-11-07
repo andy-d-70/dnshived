@@ -159,6 +159,7 @@ func verifyWithCache(verify func(username, password string) (webauth.User, bool)
 type failLimiter struct {
 	mu      sync.Mutex
 	clients map[string]*failState
+	what    string
 }
 
 type failState struct {
@@ -174,7 +175,10 @@ const (
 	failMaxBlock  = 15 * time.Minute
 )
 
-var loginLimiter = &failLimiter{clients: map[string]*failState{}}
+var (
+	loginLimiter   = &failLimiter{clients: map[string]*failState{}, what: "logins"}
+	restoreLimiter = &failLimiter{clients: map[string]*failState{}, what: "restore attempts"}
+)
 
 func (l *failLimiter) blocked(client string, now time.Time) bool {
 	return l.retryAfter(client, now) > 0
@@ -217,7 +221,7 @@ func (l *failLimiter) fail(client string, now time.Time) {
 	st.strikes++
 	st.until = now.Add(block)
 	st.failures = st.failures[:0]
-	log.Printf("[AUTH] %s locked out of password checks for %s after %d failed logins", client, block, failThreshold)
+	log.Printf("[AUTH] %s locked out of password checks for %s after %d failed %s", client, block, failThreshold, l.what)
 }
 
 func (l *failLimiter) prune(now time.Time) {
@@ -292,6 +296,7 @@ func startVerifyCacheCleanup() {
 			}
 			verifyCacheMu.Unlock()
 			loginLimiter.prune(now)
+			restoreLimiter.prune(now)
 		}
 	}()
 }

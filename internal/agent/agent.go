@@ -4086,10 +4086,20 @@ type ReadinessCheck struct {
 	HelperReachable bool `json:"helper_reachable"`
 }
 
-// AllReady reports whether every check that gates readiness passed.
-func (r ReadinessCheck) AllReady() bool {
-	return r.InterfaceExists && r.NodeIPAssigned && r.VRRPOperational &&
-		r.ConfigValidated && r.HelperReachable
+// scopeConfigRendered reports whether the central DNS and DHCP configuration this node rendered
+// covers the scope. A scope with DHCP and DNS off has nothing to render.
+func (a *Agent) scopeConfigRendered(scope string, sc config.ScopeConfig) bool {
+	if sc.DNSMasqDisabled {
+		return true
+	}
+	if _, err := os.Stat(coreDNSConfigPath(a.dataDir)); err != nil {
+		return false
+	}
+	if sc.DHCPRange[0] == "" || sc.DHCPRange[1] == "" {
+		return true
+	}
+	data, err := os.ReadFile(coreDHCPConfigPath(a.dataDir))
+	return err == nil && strings.Contains(string(data), "dhcp-range=set:"+scope+",")
 }
 
 // Readiness returns the ReadinessCheck for a scope.
@@ -4117,9 +4127,7 @@ func (a *Agent) Readiness(scope string) ReadinessCheck {
 		rc.DHCPGateClosed = state == "closed"
 	}
 
-	if _, err := os.Stat(filepath.Join(a.dataDir, "dnsmasq-"+scope+".conf")); err == nil {
-		rc.ConfigValidated = true
-	}
+	rc.ConfigValidated = a.scopeConfigRendered(scope, sc)
 
 	rc.HelperReachable = a.helperReachable()
 
