@@ -96,6 +96,10 @@ func (p *Platform) ResolveMgmt(role string) string {
 // ScopeConfig defines a single scope (maps to a VLAN + VIP + DHCP
 // service).
 type ScopeConfig struct {
+	// Extra holds keys this version has no field for; they are written back
+	// unchanged (see extra.go).
+	Extra map[string]json.RawMessage `json:"-"`
+
 	Parent string `json:"parent"`            // worker interface (e.g. "ens19")
 	VLANID int    `json:"vlan_id"`           // 802.1Q VLAN tag
 	VIP    string `json:"vip"`               // virtual IP with prefix (e.g. "192.168.100.1/24")
@@ -575,6 +579,10 @@ func dhcpOptionOverridesClientDNS(opts []string) bool {
 
 // Cluster is the static configuration.
 type Cluster struct {
+	// Extra holds keys this version has no field for; they are written back
+	// unchanged (see extra.go).
+	Extra map[string]json.RawMessage `json:"-"`
+
 	SchemaVersion int      `json:"schema_version,omitempty"`
 	ClusterID     string   `json:"cluster_id"`
 	NodeID        string   `json:"node_id"`

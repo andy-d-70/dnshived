@@ -73,3 +73,30 @@ func TestPayload_EmptyDHCPLeasesOmittedFromJSON(t *testing.T) {
 		t.Fatalf("dhcp_leases key present in JSON with DHCPLeases nil, want omitted")
 	}
 }
+
+func TestPayload_KeepsUnknownClusterKeysButNotItsOwnSections(t *testing.T) {
+	in := `{"cluster_id":"c1","templates":{"t":1},"dhcp_leases":{"leases":[{"mac":"aa:bb","ip":"192.0.2.5"}]},"reliability":{"local":{}}}`
+	var p Payload
+	if err := json.Unmarshal([]byte(in), &p); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if p.DHCPLeases == nil || len(p.DHCPLeases.Leases) != 1 || p.Reliability == nil {
+		t.Fatalf("sections lost: %+v", p)
+	}
+	if len(p.Extra) != 1 || p.Extra["templates"] == nil {
+		t.Fatalf("Extra = %v, want only templates", p.Extra)
+	}
+	out, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(out, &raw); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	for _, k := range []string{"cluster_id", "templates", "dhcp_leases", "reliability"} {
+		if raw[k] == nil {
+			t.Errorf("key %q missing from %s", k, out)
+		}
+	}
+}

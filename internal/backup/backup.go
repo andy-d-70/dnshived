@@ -8,6 +8,7 @@ package backup
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -45,6 +46,56 @@ type Payload struct {
 	config.Cluster
 	DHCPLeases  *LeaseData       `json:"dhcp_leases,omitempty"`
 	Reliability *ReliabilityData `json:"reliability,omitempty"`
+}
+
+type payloadExtras struct {
+	DHCPLeases  *LeaseData       `json:"dhcp_leases,omitempty"`
+	Reliability *ReliabilityData `json:"reliability,omitempty"`
+}
+
+// MarshalJSON writes the cluster's keys and the two backup-only sections in
+// one object. Payload needs its own method because it embeds config.Cluster,
+// whose MarshalJSON would otherwise be promoted and hide the sections.
+func (p Payload) MarshalJSON() ([]byte, error) {
+	base, err := json.Marshal(p.Cluster)
+	if err != nil {
+		return nil, err
+	}
+	extra, err := json.Marshal(payloadExtras{DHCPLeases: p.DHCPLeases, Reliability: p.Reliability})
+	if err != nil {
+		return nil, err
+	}
+	if len(extra) <= 2 {
+		return base, nil
+	}
+	if len(base) <= 2 {
+		return extra, nil
+	}
+	out := make([]byte, 0, len(base)+len(extra))
+	out = append(out, base[:len(base)-1]...)
+	out = append(out, ',')
+	out = append(out, extra[1:]...)
+	return out, nil
+}
+
+// UnmarshalJSON is the counterpart of MarshalJSON; the two sections are not
+// kept in the cluster's unknown keys.
+func (p *Payload) UnmarshalJSON(data []byte) error {
+	var c config.Cluster
+	if err := json.Unmarshal(data, &c); err != nil {
+		return err
+	}
+	var x payloadExtras
+	if err := json.Unmarshal(data, &x); err != nil {
+		return err
+	}
+	delete(c.Extra, "dhcp_leases")
+	delete(c.Extra, "reliability")
+	if len(c.Extra) == 0 {
+		c.Extra = nil
+	}
+	*p = Payload{Cluster: c, DHCPLeases: x.DHCPLeases, Reliability: x.Reliability}
+	return nil
 }
 
 // ReliabilityData holds one node's own reliability.Store snapshots at

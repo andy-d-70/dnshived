@@ -827,6 +827,7 @@ func main() {
 	})
 	mux.HandleFunc("/api/v1/cluster/status", clusterStatusHandler(buildStatus, observer))
 	mux.HandleFunc("/api/v1/cluster/snapshot", clusterSnapshotHandler(observer))
+	mux.HandleFunc("/api/v1/cluster/activation", clusterActivationHandler(observer))
 
 	// /api/v1/health — simple health check for load balancers and monitoring.
 	// Returns 200 when STABLE, 503 otherwise. Minimal body for fast polling.
