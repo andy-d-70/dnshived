@@ -805,7 +805,7 @@ func main() {
 
 		fresh := currentConfig.Load()
 		scopesHash := fresh.ScopesHash()
-		configHash := fresh.ConfigDocumentHash()
+		configHash, configHashV2 := fresh.ConfigDocumentHashes()
 		configuredScopes := fresh.ScopeNames()
 		iotScopes := fresh.IoTScopeNames()
 		disabledScopes := fresh.DisabledScopeNames()
@@ -837,6 +837,7 @@ func main() {
 			"scope_paths":       ag.ScopeBeaconSnapshot(),
 			"scopes_hash":       scopesHash,
 			"config_hash":       configHash,
+			"config_hash_v2":    configHashV2,
 			"config_revision":   fresh.ConfigRevision,
 			"membership_epoch":  fresh.MembershipEpoch,
 			"outage_rules":      outageStatus(),
@@ -1494,18 +1495,19 @@ type reconcileLoop struct {
 	split       *desired.SplitTracker
 	splitDetail map[string]string
 
-	hashFor     *config.Cluster
-	hash        string
-	lastHoldKey string
+	hashFor      *config.Cluster
+	hash, hashV2 string
+	lastHoldKey  string
 }
 
-// configHash returns cur's content hash, recomputed only when the live
+// configHashes returns cur's two content hashes, recomputed only when the live
 // configuration was replaced.
-func (rl *reconcileLoop) configHash(cur *config.Cluster) string {
+func (rl *reconcileLoop) configHashes(cur *config.Cluster) (string, string) {
 	if rl.hashFor != cur {
-		rl.hash, rl.hashFor = cur.ConfigDocumentHash(), cur
+		rl.hash, rl.hashV2 = cur.ConfigDocumentHashes()
+		rl.hashFor = cur
 	}
-	return rl.hash
+	return rl.hash, rl.hashV2
 }
 
 // once runs exactly one reconcile pass.
@@ -1569,9 +1571,9 @@ func (rl *reconcileLoop) once(reason string) {
 	}
 
 	cur := currentConfig.Load()
-	curHash := rl.configHash(cur)
-	rl.observer.UpdateConfigState(cur.ConfigRevision, curHash, cur.MembershipEpoch)
-	startHold, memberHold := outage.evaluate(cur, curHash, peerViews(rl.observer.Snapshot()), time.Now())
+	curHash, curHashV2 := rl.configHashes(cur)
+	rl.observer.UpdateConfigState(cur.ConfigRevision, curHash, curHashV2, cur.MembershipEpoch)
+	startHold, memberHold := outage.evaluate(cur, curHash, curHashV2, peerViews(rl.observer.Snapshot()), time.Now())
 	holdKey := fmt.Sprintf("%v/%v", startHold != "", memberHold != "")
 	if holdKey != rl.lastHoldKey {
 		rl.lastHoldKey = holdKey

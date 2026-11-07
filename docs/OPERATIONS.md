@@ -17,6 +17,10 @@ changes button.
   change on all nodes; nothing applies until you commit it on Pending
   changes, which shows a diff and warns if a change needs a restart.
   Scope changes hot-reload; see `docs/SCOPE_LIFECYCLE.md`.
+- **Config hashes.** `config_hash` covers the settings a commit distributes
+  except the sanity-check and backup settings; `config_hash_v2` also covers
+  those. The Overview, the catch-up and the start-up check compare the
+  second one when every core reports it, otherwise the first.
 - **Config revision.** Every commit raises the cluster's config
   revision (`config_revision` in `cluster.json` and in
   `/api/v1/status`). A node that was down during a commit comes back
@@ -150,7 +154,7 @@ Main read endpoints:
 
 | Endpoint | Description |
 |----------|-------------|
-| `/api/v1/status` | node state, serving, configured and disabled scopes, epoch, generation, version, config revision, membership epoch, outage rules |
+| `/api/v1/status` | node state, serving, configured and disabled scopes, epoch, generation, version, config revision, config hash and hash v2, membership epoch, outage rules |
 | `/api/v1/cluster` | peers and reachability |
 | `/api/v1/cluster/snapshot` | status, system, events, daemons of every node in one call |
 | `/api/v1/cluster/activation` | whether every configured core runs at least the version a later feature needs, and which nodes do not (nothing uses it yet) |

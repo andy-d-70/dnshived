@@ -6,6 +6,7 @@ package main
 import (
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -89,7 +90,7 @@ func TestConfigVerdict(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			state, reason := configVerdict(tt.selfRev, tt.selfHash, tt.configured, tt.peers, tt.since)
+			state, reason := configVerdict(tt.selfRev, tt.selfHash, "", tt.configured, tt.peers, tt.since)
 			if state != tt.want {
 				t.Fatalf("state = %q (%s), want %q", state, reason, tt.want)
 			}
@@ -196,5 +197,62 @@ func TestCheckWriteRules(t *testing.T) {
 				t.Error("a refusal needs a message")
 			}
 		})
+	}
+}
+
+func TestConfigVerdict_UsesTheSecondHashWhenBothSidesHaveIt(t *testing.T) {
+	peer := func(rev int64, hash, hashV2 string) peerView {
+		p := up("a", rev, hash)
+		p.HashV2 = hashV2
+		return p
+	}
+	tests := []struct {
+		name       string
+		selfRev    int64
+		selfV1     string
+		selfV2     string
+		peer       peerView
+		wantBehind bool
+	}{
+		{"same v1, different v2: the backup settings differ", 3, "h", "v2-self", peer(5, "h", "v2-peer"), true},
+		{"same v1 and v2", 3, "h", "v2", peer(5, "h", "v2"), false},
+		{"different v1, same v2 is the same content", 3, "h-self", "v2", peer(5, "h-peer", "v2"), false},
+		{"peer has no v2: fall back to v1 (same)", 3, "h", "v2-self", peer(5, "h", ""), false},
+		{"peer has no v2: fall back to v1 (different)", 3, "h-self", "v2-self", peer(5, "h-peer", ""), true},
+		{"this node has no v2: fall back to v1", 3, "h", "", peer(5, "h", "v2-peer"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state, _ := configVerdict(tt.selfRev, tt.selfV1, tt.selfV2, 2, []peerView{tt.peer}, time.Second)
+			if (state == cfgBehind) != tt.wantBehind {
+				t.Errorf("state = %q, wantBehind %v", state, tt.wantBehind)
+			}
+		})
+	}
+}
+
+// Every field a commit pushes must be hashed, or listed here as metadata.
+// A new setting that is pushed but not hashed would drift unnoticed.
+func TestEveryPushedSettingIsHashedOrMarkedAsMetadata(t *testing.T) {
+	metadata := map[string]bool{
+		"config_revision": true, "config_revision_at": true, "config_revision_origin": true,
+		"config_catchup": true, "config_base_revision": true,
+	}
+	_, hashed := config.HashedKeys()
+	covered := map[string]bool{}
+	for _, k := range hashed {
+		covered[k] = true
+	}
+	typ := reflect.TypeOf(configUpdate{})
+	for i := 0; i < typ.NumField(); i++ {
+		key, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+		if !covered[key] && !metadata[key] {
+			t.Errorf("configUpdate field %q is pushed by a commit but not covered by ConfigDocumentHashV2; add it to documentV2Extra or to the metadata list", key)
+		}
+	}
+	for k := range metadata {
+		if covered[k] {
+			t.Errorf("%q is listed as metadata but is hashed", k)
+		}
 	}
 }

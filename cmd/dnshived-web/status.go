@@ -218,11 +218,16 @@ func scopesMismatch(rows []statusRow) bool {
 }
 
 func configHashMismatch(rows []statusRow) bool {
-	hashes := make(map[string]bool)
+	var reporting []nodeStatus
 	for _, row := range rows {
 		if row.FetchError == "" && row.Status.ConfigHash != "" {
-			hashes[row.Status.ConfigHash] = true
+			reporting = append(reporting, row.Status)
 		}
+	}
+	v2 := useHashV2(reporting)
+	hashes := make(map[string]bool)
+	for _, st := range reporting {
+		hashes[pickHash(st, v2)] = true
 	}
 	return len(hashes) > 1
 }
@@ -794,6 +799,13 @@ func configRevisionWarnings(rows []statusRow) []string {
 		hash string
 	}
 	var reporting []seen
+	var statuses []nodeStatus
+	for _, row := range rows {
+		if row.FetchError == "" && isCoreRole(row.Status.Role) && row.Status.ConfigRevision != nil {
+			statuses = append(statuses, row.Status)
+		}
+	}
+	v2 := useHashV2(statuses)
 	for _, row := range rows {
 		if row.FetchError != "" || !isCoreRole(row.Status.Role) {
 			continue
@@ -803,9 +815,10 @@ func configRevisionWarnings(rows []statusRow) []string {
 			continue
 		}
 		r := *row.Status.ConfigRevision
-		reporting = append(reporting, seen{row.Status.Role, r, row.Status.ConfigHash})
+		h := pickHash(row.Status, v2)
+		reporting = append(reporting, seen{row.Status.Role, r, h})
 		if r > highest {
-			highest, highestHash = r, row.Status.ConfigHash
+			highest, highestHash = r, h
 		}
 	}
 	var warnings []string

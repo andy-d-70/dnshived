@@ -238,3 +238,52 @@ func TestWithNextRevision(t *testing.T) {
 		})
 	}
 }
+
+func statusV2(r *int64, v1, v2 string) nodeStatus {
+	return nodeStatus{ConfigRevision: r, ConfigHash: v1, ConfigHashV2: v2}
+}
+
+func TestCatchUp_RepairsANodeBehindOnlyInTheBackupSettings(t *testing.T) {
+	// Same original hash, different second hash: the six settings differ.
+	st := map[string]nodeStatus{
+		"core-1": statusV2(rev(5), "same", "v2-new"),
+		"core-2": statusV2(rev(5), "same", "v2-new"),
+		"core-3": statusV2(rev(3), "same", "v2-old"),
+	}
+	c, pushedTo, _ := catchUpFixture(t, "core-1", st)
+	c.pass()
+	c.pass()
+	if len(*pushedTo) != 1 || (*pushedTo)[0] != "core-3" {
+		t.Errorf("pushed to %v: a node behind only in the backup settings must be repaired", *pushedTo)
+	}
+}
+
+func TestCatchUp_FallsBackToTheOriginalHashInAMixedCluster(t *testing.T) {
+	// core-3 is an older daemon without the second hash: only the original hash may be compared.
+	st := map[string]nodeStatus{
+		"core-1": statusV2(rev(5), "same", "v2-new"),
+		"core-2": statusV2(rev(5), "same", "v2-new"),
+		"core-3": statusV2(rev(3), "same", ""),
+	}
+	c, pushedTo, _ := catchUpFixture(t, "core-1", st)
+	c.pass()
+	c.pass()
+	if len(*pushedTo) != 0 {
+		t.Errorf("pushed to %v: with no second hash on core-3 the content looks equal", *pushedTo)
+	}
+}
+
+func TestUseHashV2(t *testing.T) {
+	if useHashV2(nil) {
+		t.Error("no statuses")
+	}
+	if !useHashV2([]nodeStatus{{ConfigHashV2: "a"}, {ConfigHashV2: "b"}}) {
+		t.Error("all report it")
+	}
+	if useHashV2([]nodeStatus{{ConfigHashV2: "a"}, {}}) {
+		t.Error("one reports none")
+	}
+	if pickHash(nodeStatus{ConfigHash: "1", ConfigHashV2: "2"}, true) != "2" || pickHash(nodeStatus{ConfigHash: "1", ConfigHashV2: "2"}, false) != "1" {
+		t.Error("pickHash")
+	}
+}

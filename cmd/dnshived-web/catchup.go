@@ -115,12 +115,17 @@ func (c *catchUp) pass() {
 			leader = n
 		}
 	}
+	all := make([]nodeStatus, 0, len(st))
+	for _, s := range st {
+		all = append(all, s)
+	}
+	v2 := useHashV2(all)
 	for _, n := range nodes {
 		if n.Name == leaderName {
 			continue
 		}
 		s, ok := st[n.Name]
-		if !ok || s.ConfigRevision == nil || *s.ConfigRevision >= leaderRev || s.ConfigHash == st[leaderName].ConfigHash {
+		if !ok || s.ConfigRevision == nil || *s.ConfigRevision >= leaderRev || pickHash(s, v2) == pickHash(st[leaderName], v2) {
 			delete(c.seen, n.Name)
 			continue
 		}

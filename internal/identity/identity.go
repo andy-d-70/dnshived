@@ -51,5 +51,6 @@ type Identity struct {
 	// announce none of them.
 	ConfigRevision  int64  `json:"config_revision,omitempty"`
 	ConfigHash      string `json:"config_hash,omitempty"`
+	ConfigHashV2    string `json:"config_hash_v2,omitempty"`
 	MembershipEpoch int64  `json:"membership_epoch,omitempty"`
 }

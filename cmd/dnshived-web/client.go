@@ -76,6 +76,8 @@ type nodeStatus struct {
 	ScopesHash  string            `json:"scopes_hash"`
 	// ConfigHash mirrors Cluster.ConfigDocumentHash().
 	ConfigHash string `json:"config_hash"`
+	// ConfigHashV2 also covers the sanity-check and backup settings; empty for an older daemon.
+	ConfigHashV2 string `json:"config_hash_v2"`
 	// OutageRules is nil for a daemon too old to report it.
 	OutageRules *nodeOutageRules `json:"outage_rules"`
 	// ConfigRevision is nil for a daemon too old to report one.

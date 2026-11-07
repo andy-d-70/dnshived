@@ -1465,3 +1465,40 @@ func TestConfigCheckResponse_RefusalIsShownAsAnError(t *testing.T) {
 		t.Errorf("a base of zero must still be sent: %s", b)
 	}
 }
+
+func TestConfigHashMismatch_UsesTheSecondHashWhenEveryNodeHasIt(t *testing.T) {
+	row := func(v1, v2 string) statusRow {
+		return statusRow{Status: nodeStatus{Role: "core-1", ConfigHash: v1, ConfigHashV2: v2}}
+	}
+	tests := []struct {
+		name string
+		rows []statusRow
+		want bool
+	}{
+		{"all equal", []statusRow{row("a", "x"), row("a", "x")}, false},
+		{"only the backup settings differ", []statusRow{row("a", "x"), row("a", "y")}, true},
+		{"original hash differs", []statusRow{row("a", "x"), row("b", "x")}, false},
+		{"mixed versions fall back to the original hash (equal)", []statusRow{row("a", "x"), row("a", "")}, false},
+		{"mixed versions fall back to the original hash (different)", []statusRow{row("a", "x"), row("b", "")}, true},
+		{"old daemons only", []statusRow{row("a", ""), row("b", "")}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := configHashMismatch(tt.rows); got != tt.want {
+				t.Errorf("mismatch = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigRevisionWarnings_BehindInTheBackupSettingsOnly(t *testing.T) {
+	r5, r3 := int64(5), int64(3)
+	rows := []statusRow{
+		{Status: nodeStatus{Role: "core-1", ConfigRevision: &r5, ConfigHash: "same", ConfigHashV2: "new"}},
+		{Status: nodeStatus{Role: "core-2", ConfigRevision: &r3, ConfigHash: "same", ConfigHashV2: "old"}},
+	}
+	got := configRevisionWarnings(rows)
+	if len(got) != 1 || !strings.Contains(got[0], "core-2 (revision 3) missed a commit") {
+		t.Errorf("warnings = %v", got)
+	}
+}

@@ -126,7 +126,7 @@ func TestOutageStateEvaluate(t *testing.T) {
 	s := &outageState{startedAt: time.Now().Add(-time.Minute)}
 	cur := &config.Cluster{ConfigRevision: 3, Peers: []string{"a:1"}, MembershipEpoch: 1}
 	ahead := []peerView{{Addr: "a:1", Reachable: true, Known: true, Revision: 5, Hash: "h5", MembershipEpoch: 2}}
-	start, member := s.evaluate(cur, "h3", ahead, time.Now())
+	start, member := s.evaluate(cur, "h3", "", ahead, time.Now())
 	if start != "" || member != "" {
 		t.Errorf("holds returned while the rules are off: %q %q", start, member)
 	}
@@ -134,12 +134,12 @@ func TestOutageStateEvaluate(t *testing.T) {
 		t.Errorf("the verdicts must still be published for display: %q %q", st, m)
 	}
 	s.rules.active.Store(true)
-	start, member = s.evaluate(cur, "h3", ahead, time.Now())
+	start, member = s.evaluate(cur, "h3", "", ahead, time.Now())
 	if start == "" || member == "" || !s.membershipHeld() {
 		t.Errorf("holds missing with the rules on: %q %q", start, member)
 	}
 	agree := []peerView{{Addr: "a:1", Reachable: true, Known: true, Revision: 3, Hash: "h3", MembershipEpoch: 1}}
-	start, member = s.evaluate(cur, "h3", agree, time.Now())
+	start, member = s.evaluate(cur, "h3", "", agree, time.Now())
 	if start != "" || member != "" || s.membershipHeld() {
 		t.Errorf("holds not released: %q %q", start, member)
 	}

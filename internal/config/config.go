@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -771,37 +772,51 @@ func (c *Cluster) StampRevision(rev int64, at, origin string, now func() time.Ti
 	c.ConfigRevision = next
 }
 
+// documentV1 is the set of fields the original content hash covers. Its field
+// order and tags are part of the hash: do not change them.
+type documentV1 struct {
+	PSK                   string                 `json:"psk"`
+	TrustedHosts          []string               `json:"trusted_hosts"`
+	TLSCert               string                 `json:"tls_cert"`
+	TLSKey                string                 `json:"tls_key"`
+	APITokens             []APIToken             `json:"api_tokens"`
+	LogLevel              string                 `json:"log_level"`
+	HelperSocket          string                 `json:"helper_socket"`
+	Platform              *Platform              `json:"platform"`
+	Scopes                map[string]ScopeConfig `json:"scopes"`
+	ProbeIntervalMS       int                    `json:"probe_interval_ms"`
+	MgmtVIP               *MgmtVIPConfig         `json:"mgmt_vip"`
+	DefaultDNSChecks      []DNSCheck             `json:"default_dns_checks"`
+	GlobalDNSRecords      []DNSRecord            `json:"global_dns_records"`
+	LocalDomains          []LocalDomain          `json:"local_domains"`
+	ScopeDefaults         *ScopeDefaults         `json:"scope_defaults"`
+	DefaultDHCPOptions    []string               `json:"default_dhcp_options"`
+	CoreDNSAddress        string                 `json:"core_dns_address"`
+	CoreDHCPAddress       string                 `json:"core_dhcp_address"`
+	CoreDNSQueryLogging   bool                   `json:"core_dns_query_logging"`
+	DNSRelayCacheSize     int                    `json:"dnsrelay_cache_size"`
+	DNSRelayCacheMaxBytes int                    `json:"dnsrelay_cache_max_bytes"`
+}
+
+// documentV2Extra are the settings a commit pushes that documentV1 leaves out.
+type documentV2Extra struct {
+	SanityCheckDisabled    bool   `json:"sanity_check_disabled"`
+	BackupEnabled          bool   `json:"backup_enabled"`
+	BackupIntervalHours    int    `json:"backup_interval_hours"`
+	BackupRetentionCount   int    `json:"backup_retention_count"`
+	BackupPassword         string `json:"backup_password"`
+	BackupReplicateToPeers bool   `json:"backup_replicate_to_peers"`
+}
+
 // ConfigDocumentHash returns a stable, truncated SHA-256 digest over every
 // field a coordination-plane config push actually distributes.
-func (c *Cluster) ConfigDocumentHash() string {
+func (c *Cluster) documentJSON() ([]byte, error) {
 	normalizedScopes := make(map[string]ScopeConfig, len(c.Scopes))
 	for name, sc := range c.Scopes {
 		sc.NodeIP = ""
 		normalizedScopes[name] = sc
 	}
-	doc := struct {
-		PSK                   string                 `json:"psk"`
-		TrustedHosts          []string               `json:"trusted_hosts"`
-		TLSCert               string                 `json:"tls_cert"`
-		TLSKey                string                 `json:"tls_key"`
-		APITokens             []APIToken             `json:"api_tokens"`
-		LogLevel              string                 `json:"log_level"`
-		HelperSocket          string                 `json:"helper_socket"`
-		Platform              *Platform              `json:"platform"`
-		Scopes                map[string]ScopeConfig `json:"scopes"`
-		ProbeIntervalMS       int                    `json:"probe_interval_ms"`
-		MgmtVIP               *MgmtVIPConfig         `json:"mgmt_vip"`
-		DefaultDNSChecks      []DNSCheck             `json:"default_dns_checks"`
-		GlobalDNSRecords      []DNSRecord            `json:"global_dns_records"`
-		LocalDomains          []LocalDomain          `json:"local_domains"`
-		ScopeDefaults         *ScopeDefaults         `json:"scope_defaults"`
-		DefaultDHCPOptions    []string               `json:"default_dhcp_options"`
-		CoreDNSAddress        string                 `json:"core_dns_address"`
-		CoreDHCPAddress       string                 `json:"core_dhcp_address"`
-		CoreDNSQueryLogging   bool                   `json:"core_dns_query_logging"`
-		DNSRelayCacheSize     int                    `json:"dnsrelay_cache_size"`
-		DNSRelayCacheMaxBytes int                    `json:"dnsrelay_cache_max_bytes"`
-	}{
+	doc := documentV1{
 		PSK: c.PSK, TrustedHosts: c.TrustedHosts,
 		TLSCert: c.TLSCert, TLSKey: c.TLSKey, APITokens: c.APITokens,
 		LogLevel: c.LogLevel, HelperSocket: c.HelperSocket, Platform: c.Platform,
@@ -814,12 +829,65 @@ func (c *Cluster) ConfigDocumentHash() string {
 		DNSRelayCacheSize:     c.DNSRelayCacheSize,
 		DNSRelayCacheMaxBytes: c.DNSRelayCacheMaxBytes,
 	}
-	data, err := json.Marshal(doc)
+	return json.Marshal(doc)
+}
+
+func shortHash(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// ConfigDocumentHash returns a stable, truncated SHA-256 digest over the
+// fields in documentV1. It never changes meaning, so nodes of different
+// versions compare equal when their content is.
+func (c *Cluster) ConfigDocumentHash() string {
+	data, err := c.documentJSON()
 	if err != nil {
 		return ""
 	}
-	sum := sha256.Sum256(data)
-	return hex.EncodeToString(sum[:])[:12]
+	return shortHash(data)
+}
+
+// ConfigDocumentHashV2 is ConfigDocumentHash plus the sanity-check and backup
+// settings, which a commit also distributes. Consistency checks use it when
+// every node reports one.
+func (c *Cluster) ConfigDocumentHashV2() string {
+	_, v2 := c.ConfigDocumentHashes()
+	return v2
+}
+
+// ConfigDocumentHashes returns both hashes from one marshalling of the document.
+func (c *Cluster) ConfigDocumentHashes() (v1, v2 string) {
+	data, err := c.documentJSON()
+	if err != nil {
+		return "", ""
+	}
+	v1 = shortHash(data)
+	extra, err := json.Marshal(documentV2Extra{
+		SanityCheckDisabled: c.SanityCheckDisabled, BackupEnabled: c.BackupEnabled,
+		BackupIntervalHours: c.BackupIntervalHours, BackupRetentionCount: c.BackupRetentionCount,
+		BackupPassword: c.BackupPassword, BackupReplicateToPeers: c.BackupReplicateToPeers,
+	})
+	if err != nil {
+		return v1, ""
+	}
+	return v1, shortHash(append(data, extra...))
+}
+
+// HashedKeys returns the JSON keys the two hashes cover: v1 is the original
+// set, v2 adds to it.
+func HashedKeys() (v1, v2 []string) {
+	keys := func(v any) []string {
+		t := reflect.TypeOf(v)
+		out := make([]string, 0, t.NumField())
+		for i := 0; i < t.NumField(); i++ {
+			name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+			out = append(out, name)
+		}
+		return out
+	}
+	v1 = keys(documentV1{})
+	return v1, append(append([]string(nil), v1...), keys(documentV2Extra{})...)
 }
 
 // ScopeNames returns the scope names sorted for deterministic iteration.

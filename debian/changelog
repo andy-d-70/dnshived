@@ -1,3 +1,10 @@
+dnshived (0.9.8.9~dev-4) unstable; urgency=medium
+
+  * Lab build: second configuration hash that also covers the sanity-check and
+    backup settings, used by the Overview, the catch-up and the start check.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Sat, 07 Nov 2026 20:00:00 +0100
+
 dnshived (0.9.8.9~dev-3) unstable; urgency=medium
 
   * Lab build: outage rules (write quorum, stale-base refusal, configuration

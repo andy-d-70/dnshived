@@ -415,11 +415,12 @@ func (o *Observer) PeerServing() map[string][]string {
 
 // UpdateConfigState sets the configuration revision, its content hash and the
 // membership epoch announced to peers.
-func (o *Observer) UpdateConfigState(revision int64, hash string, membershipEpoch int64) {
+func (o *Observer) UpdateConfigState(revision int64, hash, hashV2 string, membershipEpoch int64) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.self.ConfigRevision = revision
 	o.self.ConfigHash = hash
+	o.self.ConfigHashV2 = hashV2
 	o.self.MembershipEpoch = membershipEpoch
 }
 

@@ -29,6 +29,7 @@ type peerView struct {
 	Version         string
 	Revision        int64
 	Hash            string
+	HashV2          string
 	MembershipEpoch int64
 }
 
@@ -41,6 +42,7 @@ func peerViews(snap []cluster.PeerState) []peerView {
 			v.Version = ps.Identity.Version
 			v.Revision = ps.Identity.ConfigRevision
 			v.Hash = ps.Identity.ConfigHash
+			v.HashV2 = ps.Identity.ConfigHashV2
 			v.MembershipEpoch = ps.Identity.MembershipEpoch
 		}
 		out = append(out, v)
@@ -84,7 +86,7 @@ const (
 // configVerdict compares this node's configuration with its peers after a
 // start. verifying and behind hold new scope starts; unverified (no peer
 // answered within the wait) serves with a notice.
-func configVerdict(selfRev int64, selfHash string, configured int, peers []peerView, sinceStart time.Duration) (state, reason string) {
+func configVerdict(selfRev int64, selfHash, selfHashV2 string, configured int, peers []peerView, sinceStart time.Duration) (state, reason string) {
 	if configured == 0 {
 		return cfgVerified, ""
 	}
@@ -94,7 +96,11 @@ func configVerdict(selfRev int64, selfHash string, configured int, peers []peerV
 			continue
 		}
 		informative = true
-		if p.Revision > selfRev && p.Hash != selfHash {
+		differs := p.Hash != selfHash
+		if p.HashV2 != "" && selfHashV2 != "" {
+			differs = p.HashV2 != selfHashV2
+		}
+		if p.Revision > selfRev && differs {
 			return cfgBehind, fmt.Sprintf("peer %s is at config revision %d, this node at %d; waiting for the catch-up", p.Addr, p.Revision, selfRev)
 		}
 	}
@@ -203,8 +209,8 @@ var outage = &outageState{startedAt: time.Now()}
 // evaluate computes the verdicts for one reconcile pass, publishes them and
 // returns the holds to pass to the agent. Holds only apply once the rules are
 // latched on.
-func (s *outageState) evaluate(cur *config.Cluster, hash string, peers []peerView, now time.Time) (startHold, memberHold string) {
-	state, reason := configVerdict(cur.ConfigRevision, hash, len(cur.Peers), peers, now.Sub(s.startedAt))
+func (s *outageState) evaluate(cur *config.Cluster, hash, hashV2 string, peers []peerView, now time.Time) (startHold, memberHold string) {
+	state, reason := configVerdict(cur.ConfigRevision, hash, hashV2, len(cur.Peers), peers, now.Sub(s.startedAt))
 	member := membershipVerdict(cur.MembershipEpoch, peers)
 	s.mu.Lock()
 	s.cfgState, s.cfgReason, s.member = state, reason, member

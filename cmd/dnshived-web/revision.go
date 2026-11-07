@@ -65,3 +65,26 @@ func withNextRevision(nodes []NodeConfig, p configPushPayload) configPushPayload
 	p.ConfigRevisionOrigin = selfNameFn()
 	return p
 }
+
+// useHashV2 says whether the second content hash can be compared: every
+// status reports one. Otherwise the original hash is used, so a mixed-version
+// cluster never shows a difference that is only a missing field.
+func useHashV2(statuses []nodeStatus) bool {
+	if len(statuses) == 0 {
+		return false
+	}
+	for _, s := range statuses {
+		if s.ConfigHashV2 == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// pickHash returns the hash to compare for s.
+func pickHash(s nodeStatus, v2 bool) string {
+	if v2 {
+		return s.ConfigHashV2
+	}
+	return s.ConfigHash
+}
