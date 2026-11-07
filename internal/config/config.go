@@ -30,6 +30,9 @@ var domainNamePattern = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-z
 
 var scopeNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
+// ValidScopeName reports whether name can be used as a scope name.
+func ValidScopeName(name string) bool { return scopeNamePattern.MatchString(name) }
+
 // Core role names.
 const (
 	RoleCore1 = "core-1"
