@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"dnshived/internal/passpolicy"
 	"dnshived/internal/webauth"
 )
 
@@ -104,10 +105,11 @@ var resetTmpl = template.Must(template.New("reset").Parse(`<!doctype html>
 {{if .Token}}
 <form method="post" action="/reset">
 <input type="hidden" name="token" value="{{.Token}}">
-<p><label>New password<br><input type="password" name="new_password" autocomplete="new-password" required autofocus style="width:100%"></label></p>
+<p><label>New password<br><input type="password" name="new_password" autocomplete="new-password" required autofocus style="width:100%" data-pwbar></label></p>
 <p><label>Confirm new password<br><input type="password" name="confirm_password" autocomplete="new-password" required style="width:100%"></label></p>
 <p><button type="submit" class="btn-success">Set password</button></p>
 </form>
+` + passwordBarScriptHTML + `
 {{else}}<p><a href="/forgot">Request a new link</a> · <a href="/login">log in</a></p>{{end}}
 </div>
 `))
@@ -224,8 +226,9 @@ func handleResetPost(store *webauth.Store, repl *authSync, ref *configRef) http.
 			fail("New password and confirmation do not match.", true)
 			return
 		}
-		if len(newPw) < minPasswordLength {
-			fail(fmt.Sprintf("The new password must have at least %d characters.", minPasswordLength), true)
+		resetting, _ := store.Lookup(name)
+		if problems := passpolicy.Check(newPw, policyContext(store, name, resetting.Email)); len(problems) > 0 {
+			fail("The password is too weak: it "+strings.Join(problems, ", ")+".", true)
 			return
 		}
 		hash, err := webauth.HashPassword(newPw)

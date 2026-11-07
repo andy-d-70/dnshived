@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"dnshived/internal/passpolicy"
 	"dnshived/internal/webauth"
 )
 
@@ -222,6 +223,10 @@ func handleLoginPost(store *webauth.Store, ref *configRef) http.HandlerFunc {
 			User: user.Name, Epoch: user.SessionEpoch, Issued: now.Unix(), Seen: now.Unix(),
 		}))
 		log.Printf("[AUTH] %s logged in from %s", user.Name, client)
+		if problems := passpolicy.Check(r.FormValue("password"), policyContext(store, user.Name, user.Email)); len(problems) > 0 {
+			log.Printf("[AUTH] %s logged in with a password that does not meet the password policy (it %s); it keeps working until it is changed", user.Name, strings.Join(problems, ", "))
+			next = "/password?weak=1&next=" + url.QueryEscape(next)
+		}
 		http.Redirect(w, r, next, http.StatusSeeOther)
 	}
 }

@@ -14,7 +14,7 @@ reset. In order of preference:
 3. On any core node (also re-enables a disabled account):
 
 ```sh
-sudo /usr/local/bin/dnshived-web -reset-user admin     # prompts; or -password '...'
+sudo /usr/local/bin/dnshived-web -reset-user admin     # prompts; or -password '...' (must meet the password policy, docs/SECURITY.md)
 ```
 
 Users are replicated: the change reaches the other cores within seconds,

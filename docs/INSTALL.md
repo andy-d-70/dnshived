@@ -41,7 +41,7 @@ gotchas).
 ```sh
 git clone https://github.com/andy-d-70/dnshived.git
 cd dnshived
-git checkout v0.9.8.6    # latest release
+git checkout v0.9.8.7    # latest release
 ```
 
 `main` is ongoing development past the latest tag. Don't use `v0.9.8`

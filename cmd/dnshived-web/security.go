@@ -6,6 +6,9 @@ package main
 import (
 	"html/template"
 	"net/http"
+
+	"dnshived/internal/config"
+	"dnshived/internal/passpolicy"
 )
 
 // securityFormTmpl renders the API tokens section of the Security tab.
@@ -85,8 +88,27 @@ func handleSecurityPost(ref *configRef) http.HandlerFunc {
 		payload := clusterPushPayloadFrom(current)
 		payload.Scopes = current.Scopes
 		payload.APITokens = parseTokenSlots(r.PostForm, current.APITokens)
+		for _, t := range payload.APITokens {
+			if tokenUnchanged(current.APITokens, t) {
+				continue
+			}
+			if problems := passpolicy.CheckToken(t.Token); len(problems) > 0 {
+				http.Error(w, "token \""+t.Name+"\" is too weak: it "+passpolicy.Join(problems)+" (for example: openssl rand -base64 32)", http.StatusBadRequest)
+				return
+			}
+		}
 
 		user, _ := userFromContext(r)
 		pushCandidateAndRenderResult(w, cfg, payload, user, "/security", "back to security")
 	}
+}
+
+// tokenUnchanged reports whether the same token value already exists under that name.
+func tokenUnchanged(current []config.APIToken, t config.APIToken) bool {
+	for _, c := range current {
+		if c.Name == t.Name && c.Token == t.Token {
+			return true
+		}
+	}
+	return false
 }

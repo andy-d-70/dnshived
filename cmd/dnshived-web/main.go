@@ -15,6 +15,7 @@ import (
 
 	"dnshived/internal/cliguard"
 	"dnshived/internal/instlock"
+	"dnshived/internal/passpolicy"
 	"dnshived/internal/tlspin"
 	"dnshived/internal/webauth"
 )
@@ -49,6 +50,11 @@ func main() {
 	}
 
 	if *hashPassword != "" {
+		rating := passpolicy.Rate(*hashPassword, passpolicy.Context{})
+		log.Printf("password strength: %s", rating.TextBar())
+		if len(rating.Problems) > 0 {
+			log.Fatalf("password refused: it %s", rating.ProblemText())
+		}
 		hash, err := webauth.HashPassword(*hashPassword)
 		if err != nil {
 			log.Fatalf("hash password: %v", err)
@@ -109,6 +115,7 @@ func main() {
 	mux.HandleFunc("POST /forgot", handleForgotPost(store, repl, ref))
 	mux.HandleFunc("GET /reset", handleResetGet(store))
 	mux.HandleFunc("POST /reset", handleResetPost(store, repl, ref))
+	mux.HandleFunc("POST /password-strength", handlePasswordStrength(store))
 	mux.HandleFunc("/favicon.ico", handleFavicon)
 	mux.HandleFunc("/favicon.svg", handleFavicon)
 	mux.HandleFunc("/", requirePermission(store, webauth.PermViewStatus, handleStatus(ref)))
@@ -154,8 +161,8 @@ func main() {
 	mux.HandleFunc("POST /config/probe-parallel", requirePermission(store, webauth.PermEditConfig, handleProbeParallelPost(ref)))
 	mux.HandleFunc("/config/export", requirePermissionOrToken(store, webauth.PermEditConfig, ref, handleConfigExport(ref)))
 	mux.HandleFunc("/backup", requirePermission(store, webauth.PermViewStatus, handleBackup(ref)))
-	mux.HandleFunc("POST /backup/settings", requirePermission(store, webauth.PermEditConfig, handleBackupSettingsPost(ref)))
-	mux.HandleFunc("POST /backup/create", requirePermission(store, webauth.PermEditConfig, handleBackupCreatePost(ref)))
+	mux.HandleFunc("POST /backup/settings", requirePermission(store, webauth.PermEditConfig, handleBackupSettingsPost(ref, store)))
+	mux.HandleFunc("POST /backup/create", requirePermission(store, webauth.PermEditConfig, handleBackupCreatePost(ref, store)))
 	mux.HandleFunc("GET /backup/download/{node}/{name}", requirePermissionOrToken(store, webauth.PermEditConfig, ref, handleBackupDownload(ref)))
 	mux.HandleFunc("GET /backup/list", requirePermissionOrToken(store, webauth.PermViewStatus, ref, handleBackupListAPI(ref)))
 	mux.HandleFunc("POST /backup/delete/{node}/{name}", requirePermission(store, webauth.PermEditConfig, handleBackupDeletePost(ref)))
@@ -206,6 +213,7 @@ func main() {
 
 	// Users and mail settings (users.go, mail.go), replicated by authsync.go.
 	mux.HandleFunc("GET /users", requirePermission(store, webauth.PermEditConfig, handleUsersGet(store)))
+	mux.HandleFunc("POST /users/policy", requirePermission(store, webauth.PermEditConfig, handleUsersPolicyPost(store, repl, ref)))
 	mux.HandleFunc("POST /users/new", requirePermission(store, webauth.PermEditConfig, handleUserCreate(store, repl, ref)))
 	mux.HandleFunc("GET /users/{name}", requirePermission(store, webauth.PermEditConfig, handleUserEditGet(store)))
 	mux.HandleFunc("POST /users/{name}", requirePermission(store, webauth.PermEditConfig, handleUserUpdate(store, repl, ref)))

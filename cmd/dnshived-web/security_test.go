@@ -74,7 +74,7 @@ func TestHandleSecurityPost_PreservesLiveClusterFieldsUnedited(t *testing.T) {
 	form := url.Values{
 		"__token_row_count__": {"1"},
 		"token_name_0":        {"new-token"},
-		"token_value_0":       {"new-value"},
+		"token_value_0":       {"k8Zp2QvN7xLw4RtY9bGd3HsF6mCj1VeA"},
 		"token_role_0":        {"readonly"},
 	}
 	req := httptest.NewRequest(http.MethodPost, "/security", strings.NewReader(form.Encode()))

@@ -127,8 +127,22 @@ its own admin token. It never writes `cluster.json` itself.
 - **Credentials** live in `webui-users.json`, separate from
   `cluster.json`: PBKDF2-HMAC-SHA256 (Go stdlib), 16-byte salt, 600,000
   iterations, constant-time comparison, stored as
-  `salt:iterations:key`; minimum length 10 for passwords set in the web
-  UI. Roles: `admin` (everything), `scopeadmin` (everything served to
+  `salt:iterations:key`. Passwords set in the web UI, with `-reset-user` or
+  with `-hash-password` follow one policy: at least 12 characters (an
+  admin can set 8 to 64 on the Users page), an uppercase letter, a digit,
+  a special character, five different characters, no simple sequence
+  (`abcd`, `1234`, `qwer`), no repeated block, and not the user name, the
+  mail address's local part or the host name. Strength is judged by length
+  and variety; passwords are not checked against lists of known passwords.
+  Existing passwords keep working; a login with one that does not meet the
+  policy logs a line and first shows the change-password page, with a link
+  to continue without changing. The same policy applies to a backup
+  password set in the web UI. API tokens typed on the Security page need
+  at least 32 characters, 10 different characters, no whitespace and no
+  simple sequence or repeated block (existing tokens are only checked when
+  changed). The mail server password is not checked: it belongs to the
+  mail server. A stored hash is used only with a 16 to 64 byte salt,
+  a 1 to 64 byte key and 1 to 1,200,000 rounds. Roles: `admin` (everything), `scopeadmin` (everything served to
   clients; commits refused when a staged change is outside that) and
   `readonly` (view, audit). Disabled users cannot log in.
 - **Replication:** the whole users document (users, reset-link hashes,

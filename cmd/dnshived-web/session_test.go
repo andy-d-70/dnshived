@@ -94,7 +94,7 @@ func TestLoginPost_SetsCookieAndRedirectsSafely(t *testing.T) {
 	orig := pbkdf2Slots
 	t.Cleanup(func() { pbkdf2Slots = orig; clearVerifyCache() })
 	s := sessionStore(t)
-	if err := s.Upsert("admin", "correct-horse-1", webauth.RoleAdmin); err != nil {
+	if err := s.Upsert("admin", "Correct-Horse#4Xq", webauth.RoleAdmin); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &WebConfig{}
@@ -107,7 +107,7 @@ func TestLoginPost_SetsCookieAndRedirectsSafely(t *testing.T) {
 		handleLoginPost(s, newConfigRef(cfg))(w, r)
 		return w
 	}
-	w := post("admin", "correct-horse-1", "//evil.example/x")
+	w := post("admin", "Correct-Horse#4Xq", "//evil.example/x")
 	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/" {
 		t.Errorf("open redirect not blocked: %d %q", w.Code, w.Header().Get("Location"))
 	}
@@ -118,7 +118,7 @@ func TestLoginPost_SetsCookieAndRedirectsSafely(t *testing.T) {
 	if _, _, ok := sessionUser(s, ck[0].Value, time.Now()); !ok {
 		t.Error("issued cookie does not validate")
 	}
-	if w := post("admin", "correct-horse-1", "/scopes?x=1"); w.Header().Get("Location") != "/scopes?x=1" {
+	if w := post("admin", "Correct-Horse#4Xq", "/scopes?x=1"); w.Header().Get("Location") != "/scopes?x=1" {
 		t.Errorf("next not honored: %q", w.Header().Get("Location"))
 	}
 	if w := post("admin", "wrong", "/"); w.Code != http.StatusUnauthorized || len(w.Result().Cookies()) != 0 {

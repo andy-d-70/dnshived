@@ -21,6 +21,8 @@ import (
 
 	"dnshived/internal/backup"
 	"dnshived/internal/backupcrypt"
+	"dnshived/internal/passpolicy"
+	"dnshived/internal/webauth"
 )
 
 // backupInfo mirrors internal/backup.Info's JSON shape exactly.
@@ -352,7 +354,7 @@ func fetchBackupList(n NodeConfig) ([]backupInfo, error) {
 
 // handleBackupSettingsPost stages the automated-backup settings
 // (enabled/interval/retention/password) as a pending change.
-func handleBackupSettingsPost(ref *configRef) http.HandlerFunc {
+func handleBackupSettingsPost(ref *configRef, store *webauth.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := ref.Load()
 		if err := r.ParseForm(); err != nil {
@@ -370,6 +372,11 @@ func handleBackupSettingsPost(ref *configRef) http.HandlerFunc {
 		payload.BackupIntervalHours, _ = strconv.Atoi(r.PostForm.Get("backup_interval_hours"))
 		payload.BackupRetentionCount, _ = strconv.Atoi(r.PostForm.Get("backup_retention_count"))
 		if pw := r.PostForm.Get("backup_password"); pw != "" {
+			actor, _ := userFromContext(r)
+			if problems := passpolicy.Check(pw, policyContext(store, actor.Name, actor.Email)); len(problems) > 0 {
+				http.Error(w, "the backup password is too weak: it "+passpolicy.Join(problems), http.StatusBadRequest)
+				return
+			}
 			payload.BackupPassword = pw
 		}
 		payload.BackupReplicateToPeers = r.PostForm.Get("backup_replicate_to_peers") != ""
@@ -381,7 +388,7 @@ func handleBackupSettingsPost(ref *configRef) http.HandlerFunc {
 
 // handleBackupCreatePost fans out POST /api/v1/backups to every reachable
 // node with the operator-typed password from the form.
-func handleBackupCreatePost(ref *configRef) http.HandlerFunc {
+func handleBackupCreatePost(ref *configRef, store *webauth.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := ref.Load()
 		if err := r.ParseForm(); err != nil {
@@ -391,6 +398,11 @@ func handleBackupCreatePost(ref *configRef) http.HandlerFunc {
 		password := r.PostForm.Get("password")
 		if password == "" {
 			http.Error(w, "password is required", http.StatusBadRequest)
+			return
+		}
+		actor, _ := userFromContext(r)
+		if problems := passpolicy.Check(password, policyContext(store, actor.Name, actor.Email)); len(problems) > 0 {
+			http.Error(w, "the backup password is too weak: it "+passpolicy.Join(problems), http.StatusBadRequest)
 			return
 		}
 		comment := r.PostForm.Get("comment")

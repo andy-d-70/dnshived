@@ -127,14 +127,14 @@ func TestPasswordReset_EndToEnd(t *testing.T) {
 	if w := set("short"); w.Code != http.StatusBadRequest {
 		t.Errorf("short password accepted: %d", w.Code)
 	}
-	if w := set("brand-new-pass-1"); w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/login?msg=reset" {
+	if w := set("Brand-New#Pass7Xq"); w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/login?msg=reset" {
 		t.Fatalf("reset refused: %d %s", w.Code, w.Body.String())
 	}
 	u, _ := store.Lookup("ops")
-	if !webauth.VerifyPassword("brand-new-pass-1", u.PasswordHash) || u.SessionEpoch != 1 {
+	if !webauth.VerifyPassword("Brand-New#Pass7Xq", u.PasswordHash) || u.SessionEpoch != 1 {
 		t.Errorf("password not set or sessions not ended: %+v", u)
 	}
-	if w := set("another-pass-12"); w.Code != http.StatusBadRequest {
+	if w := set("Another#Pass9Zx"); w.Code != http.StatusBadRequest {
 		t.Error("a reset link worked twice")
 	}
 }

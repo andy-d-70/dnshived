@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 
+	"dnshived/internal/passpolicy"
 	"dnshived/internal/webauth"
 )
 
@@ -18,6 +19,8 @@ type passwordData struct {
 	Username string
 	Error    string
 	Success  bool
+	Weak     bool
+	Next     string
 }
 
 var passwordTmpl = template.Must(template.New("password").Parse(`<!doctype html>
@@ -28,13 +31,16 @@ var passwordTmpl = template.Must(template.New("password").Parse(`<!doctype html>
 {{if .Success}}<p><strong>Password changed</strong> on every core. All your sessions have ended — <a href="/login">log in again</a> with the new password.</p>
 {{else}}
 {{if .Error}}<p><strong>{{.Error}}</strong></p>{{end}}
+{{if .Weak}}<p class="warn">Your password does not meet the current password policy (minimum length, an uppercase letter, a digit and a special character, no simple patterns). It still works, but please change it.</p><p><a href="{{.Next}}">Continue without changing</a></p>{{end}}
 <p>Logged in as {{.Username}}.</p>
 <form method="post" action="/password">
 <label>Current password: <input type="password" name="current_password" autocomplete="current-password"></label><br>
-<label>New password: <input type="password" name="new_password" autocomplete="new-password"></label><br>
+<input type="hidden" name="name" value="{{.Username}}">
+<label>New password: <input type="password" name="new_password" autocomplete="new-password" data-pwbar data-pwbar-name="name"></label><br>
 <label>Confirm new password: <input type="password" name="confirm_password" autocomplete="new-password"></label><br>
 <button type="submit">Change password</button>
 </form>
+` + passwordBarScriptHTML + `
 {{end}}
 `))
 
@@ -42,7 +48,7 @@ func handlePasswordForm(ref *configRef) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, _ := userFromContext(r)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := passwordTmpl.Execute(w, passwordData{Username: user.Name}); err != nil {
+		if err := passwordTmpl.Execute(w, passwordData{Username: user.Name, Weak: r.URL.Query().Get("weak") == "1", Next: safeNext(r.URL.Query().Get("next"))}); err != nil {
 			log.Printf("[PASSWORD] render form: %v", err)
 		}
 	}
@@ -53,9 +59,6 @@ func renderPasswordError(w http.ResponseWriter, username, msg string) {
 	w.WriteHeader(http.StatusBadRequest)
 	passwordTmpl.Execute(w, passwordData{Username: username, Error: msg})
 }
-
-// minPasswordLength applies to every password set through the web UI.
-const minPasswordLength = 10
 
 // changePasswordFormHandler (POST /password) is the self-service
 // counterpart to cmd/dnshived-web's console-only -reset-user flag.
@@ -79,8 +82,8 @@ func changePasswordFormHandler(ref *configRef, store *webauth.Store, repl *authS
 			renderPasswordError(w, user.Name, "new password and confirmation do not match")
 			return
 		}
-		if len(newPw) < minPasswordLength {
-			renderPasswordError(w, user.Name, fmt.Sprintf("the new password must have at least %d characters", minPasswordLength))
+		if problems := passpolicy.Check(newPw, policyContext(store, user.Name, user.Email)); len(problems) > 0 {
+			renderPasswordError(w, user.Name, tooWeakMessage(problems))
 			return
 		}
 		if _, ok := store.Verify(user.Name, current); !ok {

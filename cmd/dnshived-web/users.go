@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"dnshived/internal/passpolicy"
 	"dnshived/internal/webauth"
 )
 
@@ -23,12 +24,13 @@ type userRow struct {
 }
 
 type usersPageData struct {
-	Users  []userRow
-	Roles  []string
-	Error  string
-	Notice string
-	Edit   *userRow
-	New    struct{ Name, Email, Role string }
+	MinLength int
+	Users     []userRow
+	Roles     []string
+	Error     string
+	Notice    string
+	Edit      *userRow
+	New       struct{ Name, Email, Role string }
 }
 
 var usersTmpl = template.Must(template.New("users").Parse(`<!doctype html>
@@ -46,11 +48,12 @@ templates, local domains — but no cluster settings, nodes, users, tokens, back
 {{if .Edit}}
 <h2>Edit {{.Edit.Name}}</h2>
 <form method="post" action="/users/{{.Edit.Name}}">
+<input type="hidden" name="name" value="{{.Edit.Name}}">
 <table border="1" cellpadding="4">
 <tr><td>Role</td><td>{{if .Edit.Self}}{{.Edit.Role}} <span class="dim">(you cannot change your own role)</span><input type="hidden" name="role" value="{{.Edit.Role}}">{{else}}<select name="role" class="js-combo">{{$r := .Edit.Role}}{{range .Roles}}<option value="{{.}}" {{if eq . $r}}selected{{end}}>{{.}}</option>{{end}}</select>{{end}}</td></tr>
 <tr><td>Email</td><td><input name="email" value="{{.Edit.Email}}" size="30" placeholder="for password reset"></td></tr>
 <tr><td>Disabled</td><td>{{if .Edit.Self}}<span class="dim">you cannot disable yourself</span>{{else}}<label><input type="checkbox" name="disabled" {{if .Edit.Disabled}}checked{{end}}> cannot log in</label>{{end}}</td></tr>
-<tr><td>New password</td><td><input type="password" name="new_password" autocomplete="new-password" size="24" placeholder="blank = unchanged"> confirm <input type="password" name="confirm_password" autocomplete="new-password" size="24"></td></tr>
+<tr><td>New password</td><td><input type="password" name="new_password" autocomplete="new-password" size="24" placeholder="blank = unchanged" data-pwbar data-pwbar-name="name" data-pwbar-email="email"> confirm <input type="password" name="confirm_password" autocomplete="new-password" size="24"></td></tr>
 </table>
 <p><button type="submit" class="btn-success">Save</button> <a href="/users" style="margin-left:1rem">cancel</a></p>
 </form>
@@ -71,15 +74,23 @@ templates, local domains — but no cluster settings, nodes, users, tokens, back
 <tr><td>User name</td><td><input name="name" value="{{.New.Name}}" required pattern="[A-Za-z0-9._@\-]{1,64}" title="letters, digits, . _ @ -"></td></tr>
 <tr><td>Role</td><td><select name="role" class="js-combo">{{$r := .New.Role}}{{range .Roles}}<option value="{{.}}" {{if eq . $r}}selected{{end}}>{{.}}</option>{{end}}</select></td></tr>
 <tr><td>Email</td><td><input name="email" value="{{.New.Email}}" size="30" placeholder="optional, for password reset"></td></tr>
-<tr><td>Password</td><td><input type="password" name="new_password" autocomplete="new-password" required size="24"> confirm <input type="password" name="confirm_password" autocomplete="new-password" required size="24"></td></tr>
+<tr><td>Password</td><td><input type="password" name="new_password" autocomplete="new-password" required size="24" data-pwbar data-pwbar-name="name" data-pwbar-email="email"> confirm <input type="password" name="confirm_password" autocomplete="new-password" required size="24"></td></tr>
 </table>
 <p><button type="submit" class="btn-success">Add user</button></p>
 </form>
+
+<h2>Password policy</h2>
+<form method="post" action="/users/policy">
+<p>Minimum length <input type="number" name="min_length" min="8" max="64" value="{{.MinLength}}" style="width:5rem"> characters (8 to 64).
+Also required: an uppercase letter, a digit, a special character, five different characters, no simple sequence or repeated block, and not the user name, mail address or host name.
+Existing passwords keep working until they are changed. <button type="submit">Save</button></p>
+</form>
 {{end}}
+` + passwordBarScriptHTML + `
 `))
 
 func usersData(store *webauth.Store, self string) usersPageData {
-	data := usersPageData{Roles: webauth.Roles}
+	data := usersPageData{Roles: webauth.Roles, MinLength: passpolicy.ClampMin(store.PasswordMinLength())}
 	data.New.Role = webauth.RoleReadonly
 	for _, u := range store.List() {
 		data.Users = append(data.Users, userRow{User: u, Self: u.Name == self})
@@ -117,12 +128,12 @@ func handleUserEditGet(store *webauth.Store) http.HandlerFunc {
 	}
 }
 
-func checkNewPassword(pw, confirm string) error {
+func checkNewPassword(store *webauth.Store, name, email, pw, confirm string) error {
 	if pw != confirm {
 		return errors.New("password and confirmation do not match")
 	}
-	if len(pw) < minPasswordLength {
-		return fmt.Errorf("the password must have at least %d characters", minPasswordLength)
+	if problems := passpolicy.Check(pw, policyContext(store, name, email)); len(problems) > 0 {
+		return errors.New(tooWeakMessage(problems))
 	}
 	return nil
 }
@@ -163,7 +174,7 @@ func handleUserCreate(store *webauth.Store, repl *authSync, ref *configRef) http
 			fail(err)
 			return
 		}
-		if err := checkNewPassword(r.FormValue("new_password"), r.FormValue("confirm_password")); err != nil {
+		if err := checkNewPassword(store, name, email, r.FormValue("new_password"), r.FormValue("confirm_password")); err != nil {
 			fail(err)
 			return
 		}
@@ -222,7 +233,7 @@ func handleUserUpdate(store *webauth.Store, repl *authSync, ref *configRef) http
 		}
 		var hash string
 		if pw := r.FormValue("new_password"); pw != "" {
-			if err := checkNewPassword(pw, r.FormValue("confirm_password")); err != nil {
+			if err := checkNewPassword(store, name, email, pw, r.FormValue("confirm_password")); err != nil {
 				fail(err)
 				return
 			}

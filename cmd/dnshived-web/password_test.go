@@ -47,7 +47,7 @@ func TestChangePasswordFormHandler_WrongCurrentPasswordRejected(t *testing.T) {
 	store, usersFile := newTestStore(t, "admin", "correct-horse", "admin")
 	cfg := &WebConfig{UsersFile: usersFile}
 
-	form := url.Values{"current_password": {"wrong"}, "new_password": {"new-pass-1234"}, "confirm_password": {"new-pass-1234"}}
+	form := url.Values{"current_password": {"wrong"}, "new_password": {"New-Pass#8342Xq"}, "confirm_password": {"New-Pass#8342Xq"}}
 	req := httptest.NewRequest(http.MethodPost, "/password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req = withAuthedUser(req, webauth.User{Name: "admin", Role: "admin"})
@@ -58,7 +58,7 @@ func TestChangePasswordFormHandler_WrongCurrentPasswordRejected(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
 	}
-	if _, ok := store.Verify("admin", "new-pass-1234"); ok {
+	if _, ok := store.Verify("admin", "New-Pass#8342Xq"); ok {
 		t.Error("password was changed despite a wrong current-password check")
 	}
 	if _, ok := store.Verify("admin", "correct-horse"); !ok {
@@ -70,7 +70,7 @@ func TestChangePasswordFormHandler_MismatchedConfirmationRejected(t *testing.T) 
 	store, usersFile := newTestStore(t, "admin", "correct-horse", "admin")
 	cfg := &WebConfig{UsersFile: usersFile}
 
-	form := url.Values{"current_password": {"correct-horse"}, "new_password": {"new-pass-1234"}, "confirm_password": {"different"}}
+	form := url.Values{"current_password": {"correct-horse"}, "new_password": {"New-Pass#8342Xq"}, "confirm_password": {"different"}}
 	req := httptest.NewRequest(http.MethodPost, "/password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req = withAuthedUser(req, webauth.User{Name: "admin", Role: "admin"})
@@ -81,7 +81,7 @@ func TestChangePasswordFormHandler_MismatchedConfirmationRejected(t *testing.T) 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
 	}
-	if _, ok := store.Verify("admin", "new-pass-1234"); ok {
+	if _, ok := store.Verify("admin", "New-Pass#8342Xq"); ok {
 		t.Error("password was changed despite mismatched confirmation")
 	}
 }
@@ -93,7 +93,7 @@ func TestChangePasswordFormHandler_SuccessTakesEffectImmediately(t *testing.T) {
 	store, usersFile := newTestStore(t, "admin", "correct-horse", "admin")
 	cfg := &WebConfig{UsersFile: usersFile}
 
-	form := url.Values{"current_password": {"correct-horse"}, "new_password": {"new-pass-1234"}, "confirm_password": {"new-pass-1234"}}
+	form := url.Values{"current_password": {"correct-horse"}, "new_password": {"New-Pass#8342Xq"}, "confirm_password": {"New-Pass#8342Xq"}}
 	req := httptest.NewRequest(http.MethodPost, "/password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req = withAuthedUser(req, webauth.User{Name: "admin", Role: "admin"})
@@ -107,7 +107,7 @@ func TestChangePasswordFormHandler_SuccessTakesEffectImmediately(t *testing.T) {
 	if _, ok := store.Verify("admin", "correct-horse"); ok {
 		t.Error("old password still verifies after a successful change")
 	}
-	if u, ok := store.Verify("admin", "new-pass-1234"); !ok || u.Role != "admin" {
+	if u, ok := store.Verify("admin", "New-Pass#8342Xq"); !ok || u.Role != "admin" {
 		t.Errorf("new password does not verify (or role changed): user=%+v ok=%v", u, ok)
 	}
 
@@ -115,7 +115,7 @@ func TestChangePasswordFormHandler_SuccessTakesEffectImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload saved file: %v", err)
 	}
-	if _, ok := reloaded.Verify("admin", "new-pass-1234"); !ok {
+	if _, ok := reloaded.Verify("admin", "New-Pass#8342Xq"); !ok {
 		t.Error("new password was not persisted to disk")
 	}
 }
@@ -128,7 +128,7 @@ func TestChangePasswordFormHandler_ClearsVerifyCache(t *testing.T) {
 		t.Fatal("seed: old credentials should verify and populate the cache")
 	}
 
-	form := url.Values{"current_password": {"correct-horse"}, "new_password": {"new-pass-1234"}, "confirm_password": {"new-pass-1234"}}
+	form := url.Values{"current_password": {"correct-horse"}, "new_password": {"New-Pass#8342Xq"}, "confirm_password": {"New-Pass#8342Xq"}}
 	req := httptest.NewRequest(http.MethodPost, "/password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req = withAuthedUser(req, webauth.User{Name: "admin", Role: "admin"})
@@ -174,7 +174,7 @@ func TestApplyPasswordChangeHandler_AppliesHashDirectly(t *testing.T) {
 		Nodes:     []NodeConfig{{Name: "core-1", Addr: "10.0.0.1:9443", AdminToken: "shared-secret"}},
 	}
 
-	newHash, err := webauth.HashPassword("new-pass-1234")
+	newHash, err := webauth.HashPassword("New-Pass#8342Xq")
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestApplyPasswordChangeHandler_AppliesHashDirectly(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200, body=%s", w.Code, w.Body.String())
 	}
-	if _, ok := store.Verify("admin", "new-pass-1234"); !ok {
+	if _, ok := store.Verify("admin", "New-Pass#8342Xq"); !ok {
 		t.Error("applied hash does not verify against the plaintext it was derived from")
 	}
 	if _, err := os.Stat(usersFile); err != nil {
@@ -220,7 +220,7 @@ func TestChangePasswordFormHandler_WritesAuditEntryOnEveryNode(t *testing.T) {
 		Nodes:     []NodeConfig{{Name: "core-1", Addr: strings.TrimPrefix(srv.URL, "http://"), AdminToken: "shared-secret"}},
 	}
 
-	form := url.Values{"current_password": {"correct-horse"}, "new_password": {"new-pass-1234"}, "confirm_password": {"new-pass-1234"}}
+	form := url.Values{"current_password": {"correct-horse"}, "new_password": {"New-Pass#8342Xq"}, "confirm_password": {"New-Pass#8342Xq"}}
 	req := httptest.NewRequest(http.MethodPost, "/password", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req = withAuthedUser(req, webauth.User{Name: "admin", Role: "admin"})
@@ -244,7 +244,7 @@ func TestChangePasswordFormHandler_WritesAuditEntryOnEveryNode(t *testing.T) {
 	if !strings.Contains(gotSummary, "admin") {
 		t.Errorf("audit summary = %q, want it to name the account", gotSummary)
 	}
-	if strings.Contains(gotSummary, "new-pass-1234") {
+	if strings.Contains(gotSummary, "New-Pass#8342Xq") {
 		t.Error("audit summary must never contain the actual password")
 	}
 }

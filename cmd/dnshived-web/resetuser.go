@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"dnshived/internal/passpolicy"
 	"dnshived/internal/webauth"
 )
 
@@ -42,6 +43,18 @@ func runResetUser(cfgPath, usersFileFlag, name, role, password, email string) {
 			log.Fatalf("load %s: %v", usersFile, err)
 		}
 		store = &webauth.Store{}
+	}
+
+	existing, _ := store.Lookup(name)
+	policyEmail := email
+	if policyEmail == "" {
+		policyEmail = existing.Email
+	}
+	hostName, _ := os.Hostname()
+	rating := passpolicy.Rate(password, passpolicy.Context{MinLength: store.PasswordMinLength(), Names: passpolicy.NamesFor(name, policyEmail, hostName)})
+	log.Printf("password strength: %s", rating.TextBar())
+	if len(rating.Problems) > 0 {
+		log.Fatalf("password refused: it %s", rating.ProblemText())
 	}
 
 	_, existed := store.Lookup(name)

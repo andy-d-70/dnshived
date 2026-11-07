@@ -91,6 +91,7 @@ func (s *Store) replaceWith(f *Store) {
 		s.SMTP = &smtp
 	}
 	s.PublicURL = f.PublicURL
+	s.MinPasswordLength = f.MinPasswordLength
 }
 
 // Mutate runs fn on the document under the write lock and, if fn succeeds,

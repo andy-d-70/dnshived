@@ -19,6 +19,7 @@ import (
 	"dnshived/internal/backup"
 	"dnshived/internal/backupcrypt"
 	"dnshived/internal/config"
+	"dnshived/internal/webauth"
 )
 
 func TestHandleBackupSettingsPost_PreservesLiveScopesUnedited(t *testing.T) {
@@ -27,12 +28,12 @@ func TestHandleBackupSettingsPost_PreservesLiveScopesUnedited(t *testing.T) {
 	defer srv.Close()
 
 	cfg := &WebConfig{Nodes: []NodeConfig{nodeConfigFor(t, srv)}}
-	form := strings.NewReader("backup_enabled=on&backup_interval_hours=12&backup_retention_count=7&backup_password=hunter2")
+	form := strings.NewReader("backup_enabled=on&backup_interval_hours=12&backup_retention_count=7&backup_password=Hunter-Secret84Xq")
 	r := httptest.NewRequest(http.MethodPost, "/backup/settings", form)
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 
-	handleBackupSettingsPost(newConfigRef(cfg))(w, r)
+	handleBackupSettingsPost(newConfigRef(cfg), &webauth.Store{})(w, r)
 
 	if w.Code >= 400 {
 		t.Fatalf("handler returned HTTP %d: %s", w.Code, w.Body.String())
@@ -49,8 +50,8 @@ func TestHandleBackupSettingsPost_PreservesLiveScopesUnedited(t *testing.T) {
 	if pushed.BackupRetentionCount != 7 {
 		t.Errorf("pushed candidate BackupRetentionCount = %d, want 7", pushed.BackupRetentionCount)
 	}
-	if pushed.BackupPassword != "hunter2" {
-		t.Errorf("pushed candidate BackupPassword = %q, want %q", pushed.BackupPassword, "hunter2")
+	if pushed.BackupPassword != "Hunter-Secret84Xq" {
+		t.Errorf("pushed candidate BackupPassword = %q, want %q", pushed.BackupPassword, "Hunter-Secret84Xq")
 	}
 }
 
@@ -60,12 +61,12 @@ func TestHandleBackupSettingsPost_UncheckedBoxDisables(t *testing.T) {
 	defer srv.Close()
 
 	cfg := &WebConfig{Nodes: []NodeConfig{nodeConfigFor(t, srv)}}
-	form := strings.NewReader("backup_interval_hours=&backup_retention_count=&backup_password=old")
+	form := strings.NewReader("backup_interval_hours=&backup_retention_count=&backup_password=")
 	r := httptest.NewRequest(http.MethodPost, "/backup/settings", form)
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
 
-	handleBackupSettingsPost(newConfigRef(cfg))(w, r)
+	handleBackupSettingsPost(newConfigRef(cfg), &webauth.Store{})(w, r)
 
 	if w.Code >= 400 {
 		t.Fatalf("handler returned HTTP %d: %s", w.Code, w.Body.String())
@@ -85,11 +86,11 @@ func TestHandleBackupCreatePost_RedirectsWithSuccessCount(t *testing.T) {
 	n.Name = "core-1"
 	cfg := &WebConfig{Nodes: []NodeConfig{n}}
 
-	form := strings.NewReader("password=hunter2")
+	form := strings.NewReader("password=Hunter-Secret84Xq")
 	r := httptest.NewRequest(http.MethodPost, "/backup/create", form)
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
-	handleBackupCreatePost(newConfigRef(cfg))(w, r)
+	handleBackupCreatePost(newConfigRef(cfg), &webauth.Store{})(w, r)
 
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("status = %d, want 303", w.Code)
@@ -120,11 +121,11 @@ func TestHandleBackupCreatePost_SendsCommentToEveryNode(t *testing.T) {
 	defer node.Close()
 	cfg := &WebConfig{Nodes: []NodeConfig{nodeConfigFor(t, node)}}
 
-	form := strings.NewReader("password=hunter2&comment=" + url.QueryEscape("before DNS relay cutover"))
+	form := strings.NewReader("password=Hunter-Secret84Xq&comment=" + url.QueryEscape("before DNS relay cutover"))
 	r := httptest.NewRequest(http.MethodPost, "/backup/create", form)
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
-	handleBackupCreatePost(newConfigRef(cfg))(w, r)
+	handleBackupCreatePost(newConfigRef(cfg), &webauth.Store{})(w, r)
 
 	if gotComment != "before DNS relay cutover" {
 		t.Errorf("comment sent to node = %q, want %q", gotComment, "before DNS relay cutover")
@@ -295,11 +296,11 @@ func TestHandleBackupCreatePost_RedirectsWithFailedNodeName(t *testing.T) {
 	n.Name = "core-2"
 	cfg := &WebConfig{Nodes: []NodeConfig{n}}
 
-	form := strings.NewReader("password=hunter2")
+	form := strings.NewReader("password=Hunter-Secret84Xq")
 	r := httptest.NewRequest(http.MethodPost, "/backup/create", form)
 	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
-	handleBackupCreatePost(newConfigRef(cfg))(w, r)
+	handleBackupCreatePost(newConfigRef(cfg), &webauth.Store{})(w, r)
 
 	loc := w.Header().Get("Location")
 	if !strings.Contains(loc, "backup_ok=0") {

@@ -39,11 +39,11 @@ func TestUserCreate_ValidatesAndAdds(t *testing.T) {
 	store, repl, ref := usersFixture(t, webauth.User{Name: "admin", Role: webauth.RoleAdmin})
 	h := handleUserCreate(store, repl, ref)
 	cases := []url.Values{
-		{"name": {"bad name"}, "role": {"readonly"}, "new_password": {"long-enough-1"}, "confirm_password": {"long-enough-1"}},
-		{"name": {"ok"}, "role": {"root"}, "new_password": {"long-enough-1"}, "confirm_password": {"long-enough-1"}},
+		{"name": {"bad name"}, "role": {"readonly"}, "new_password": {"Long-Enough#1Xq"}, "confirm_password": {"Long-Enough#1Xq"}},
+		{"name": {"ok"}, "role": {"root"}, "new_password": {"Long-Enough#1Xq"}, "confirm_password": {"Long-Enough#1Xq"}},
 		{"name": {"ok"}, "role": {"readonly"}, "new_password": {"short"}, "confirm_password": {"short"}},
-		{"name": {"ok"}, "role": {"readonly"}, "email": {"not-an-address"}, "new_password": {"long-enough-1"}, "confirm_password": {"long-enough-1"}},
-		{"name": {"admin"}, "role": {"readonly"}, "new_password": {"long-enough-1"}, "confirm_password": {"long-enough-1"}},
+		{"name": {"ok"}, "role": {"readonly"}, "email": {"not-an-address"}, "new_password": {"Long-Enough#1Xq"}, "confirm_password": {"Long-Enough#1Xq"}},
+		{"name": {"admin"}, "role": {"readonly"}, "new_password": {"Long-Enough#1Xq"}, "confirm_password": {"Long-Enough#1Xq"}},
 	}
 	for i, f := range cases {
 		if w := userForm(t, h, "/users/new", "admin", f); w.Code != http.StatusBadRequest {
@@ -51,11 +51,11 @@ func TestUserCreate_ValidatesAndAdds(t *testing.T) {
 		}
 	}
 	w := userForm(t, h, "/users/new", "admin", url.Values{"name": {"ops"}, "role": {"scopeadmin"}, "email": {"ops@example.org"},
-		"new_password": {"long-enough-1"}, "confirm_password": {"long-enough-1"}})
+		"new_password": {"Long-Enough#1Xq"}, "confirm_password": {"Long-Enough#1Xq"}})
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("valid user refused: %d %s", w.Code, w.Body.String())
 	}
-	if u, ok := store.Lookup("ops"); !ok || u.Role != webauth.RoleScopeAdmin || u.Email != "ops@example.org" || !webauth.VerifyPassword("long-enough-1", u.PasswordHash) {
+	if u, ok := store.Lookup("ops"); !ok || u.Role != webauth.RoleScopeAdmin || u.Email != "ops@example.org" || !webauth.VerifyPassword("Long-Enough#1Xq", u.PasswordHash) {
 		t.Errorf("created user = %+v", u)
 	}
 	if store.Meta().Version != 2 {

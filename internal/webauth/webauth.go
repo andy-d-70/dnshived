@@ -55,8 +55,17 @@ type Store struct {
 	Resets     []ResetToken  `json:"resets,omitempty"`
 	SMTP       *SMTPSettings `json:"smtp,omitempty"`
 	PublicURL  string        `json:"public_url,omitempty"`
+	// MinPasswordLength is the password policy's minimum length; 0 means the default.
+	MinPasswordLength int `json:"min_password_length,omitempty"`
 
 	mu sync.RWMutex
+}
+
+// PasswordMinLength returns the configured minimum password length (0 = default).
+func (s *Store) PasswordMinLength() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.MinPasswordLength
 }
 
 // Load reads and parses a credentials file.
