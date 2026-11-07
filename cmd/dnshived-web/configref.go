@@ -28,3 +28,13 @@ func (r *configRef) Store(cfg *WebConfig) {
 	probePinTransport.SetPins(probePinsOf(cfg.ProbeHosts))
 	r.p.Store(cfg)
 }
+
+// CompareAndSwap publishes next only if old is still the live value, so a
+// background writer never overwrites a change a handler made meanwhile.
+func (r *configRef) CompareAndSwap(old, next *WebConfig) bool {
+	if !r.p.CompareAndSwap(old, next) {
+		return false
+	}
+	probePinTransport.SetPins(probePinsOf(next.ProbeHosts))
+	return true
+}

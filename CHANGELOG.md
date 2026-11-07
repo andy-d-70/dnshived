@@ -1,5 +1,11 @@
 # dnshived Changelog
 
+## 0.9.8.9 — unreleased
+
+- The probe-host list of the web UI is now kept in step between the web instances by a revision, like the users. Before, adding, removing, renaming or pinning a probe host was sent to the other instances once; an instance that was down at that moment never learned of it. Now each instance compares its list with the others every minute, takes a newer one, and sends its own to one that is behind. A list that was never synchronised before is merged by address, so no probe host is lost. The old per-change sending stays as the fast path. Instances still on 0.9.8.8 keep working; they answer 404 on the new endpoints and catch up once upgraded.
+- A users or probe-host document received from another instance is refused with HTTP 400 when its revision is negative or absurdly large, when a field is oversized, or (probe hosts) when the list is missing; the users document is also limited to 2,000 users and 20,000 reset tokens. A role this version does not know is accepted, so a newer version can add one.
+- The users document now also carries a content hash in its revision stamp. Two different documents with the same revision are logged and written to the audit log as a conflict; one is still chosen deterministically, as before.
+
 ## 0.9.8.8 — released
 
 - One password policy for web-UI passwords, `dnshived-web -reset-user` and `dnshived-web -hash-password`. A password needs at least 12 characters (an admin can change this between 8 and 64 on the Users page), an uppercase letter, a digit and a special character, at least five different characters, no simple sequence (`abcd`, `1234`, `qwer`), no block repeated over the whole password, and must not contain the user name, the local part of the mail address or the host name. The password forms show a strength bar with the unmet requirements in its tooltip, and the console tools print the same bar. Before, the only rule was a length of 10. Existing passwords keep working: a login with a password that does not meet the policy only logs a line. The strength is judged by length and variety; there is no check against lists of known passwords. **Upgrade note:** scripts that call `-hash-password` or `-reset-user -password` with a weaker password are now refused.

@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -100,6 +101,10 @@ func main() {
 		}
 	}
 	repl.run()
+	probeDoc := newProbeHostsDoc(ref, *cfgPath, repl.selfName)
+	probeSync := newProbeHostsSyncer(ref, probeDoc, repl.selfName)
+	runProbeHostsSync(context.Background(), probeSync)
+	probeDocHandlers := probeDoc.handlers(probeSync.PushAll)
 
 	startPendingSummaryTicker(ref)
 	startVerifyCacheCleanup()
@@ -224,6 +229,9 @@ func main() {
 	mux.HandleFunc("POST /internal/auth-doc", repl.handleAuthDocPost)
 	mux.HandleFunc("GET /internal/auth-doc/meta", repl.handleAuthDocMeta)
 	mux.HandleFunc("GET /internal/auth-doc", repl.handleAuthDocGet)
+	mux.HandleFunc("POST /internal/docs/probe-hosts", probeDocHandlers.post)
+	mux.HandleFunc("GET /internal/docs/probe-hosts/meta", probeDocHandlers.meta)
+	mux.HandleFunc("GET /internal/docs/probe-hosts", probeDocHandlers.get)
 
 	mux.HandleFunc("POST /nodes/probe/add", requirePermission(store, webauth.PermEditConfig, addProbeFormHandler(*cfgPath, ref)))
 	mux.HandleFunc("POST /nodes/probe/remove", requirePermission(store, webauth.PermEditConfig, removeProbeFormHandler(*cfgPath, ref)))

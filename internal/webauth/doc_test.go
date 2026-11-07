@@ -4,6 +4,7 @@
 package webauth
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -142,5 +143,65 @@ func TestEnsureSessionKey_LegacyDocumentStaysVersionZero(t *testing.T) {
 	r := &Store{Version: 1, SessionKey: "aa"}
 	if _, err := r.EnsureSessionKey("core-1"); err != nil || r.Meta().Version != 1 {
 		t.Error("an existing key on a replicated document must stay untouched")
+	}
+}
+
+func TestMeta_HashCoversContentNotTheStamp(t *testing.T) {
+	s := &Store{Users: []User{{Name: "a", Role: RoleAdmin}}}
+	h1 := s.Meta().Hash
+	if h1 == "" || s.Meta().Hash != h1 {
+		t.Fatalf("hash empty or unstable: %q", h1)
+	}
+	if err := s.Mutate("core-1", func(d *Store) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if s.Meta().Version != 1 || s.Meta().Hash != h1 {
+		t.Errorf("a stamp-only change altered the content hash: %+v", s.Meta())
+	}
+	if err := s.Mutate("core-1", func(d *Store) error { d.Users = append(d.Users, User{Name: "b", Role: RoleReadonly}); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if s.Meta().Hash == h1 {
+		t.Error("a content change did not change the hash")
+	}
+}
+
+func TestMeta_SameContentSameHashAcrossInstances(t *testing.T) {
+	mk := func() *Store {
+		return &Store{Version: 3, Origin: "x", SessionKey: "k", Users: []User{{Name: "a", Role: RoleAdmin, PasswordHash: "h"}}, PublicURL: "https://example.invalid"}
+	}
+	a, b := mk(), mk()
+	b.Version, b.Origin, b.UpdatedAt = 9, "y", "later"
+	if a.Meta().Hash != b.Meta().Hash {
+		t.Error("equal content hashed differently")
+	}
+	b.MinPasswordLength = 14
+	if a.Meta().Hash == b.Meta().Hash {
+		t.Error("a replicated setting is not part of the hash")
+	}
+}
+
+func TestMeta_JSONShapeIsAdditive(t *testing.T) {
+	s := &Store{Version: 2, UpdatedAt: "t", Origin: "o"}
+	data, err := json.Marshal(s.Meta())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"version", "updated_at", "origin", "hash"} {
+		if _, ok := m[k]; !ok {
+			t.Errorf("meta lacks %q: %s", k, data)
+		}
+	}
+	var old struct {
+		Version   int64  `json:"version"`
+		UpdatedAt string `json:"updated_at"`
+		Origin    string `json:"origin"`
+	}
+	if err := json.Unmarshal(data, &old); err != nil || old.Version != 2 {
+		t.Errorf("a node that does not know the hash cannot read the meta: %v %+v", err, old)
 	}
 }

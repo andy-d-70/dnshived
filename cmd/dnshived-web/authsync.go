@@ -4,24 +4,29 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
+	"context"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
+	"dnshived/internal/repldoc"
 	"dnshived/internal/webauth"
 )
 
 // authSyncInterval is how often each web instance compares its users
 // document with its siblings'.
 const authSyncInterval = 60 * time.Second
+
+// Limits on an incoming users document. They are far above real use; they
+// only stop a malformed or hostile document from being installed.
+const (
+	maxReplUsers      = 2000
+	maxReplResets     = 20000
+	maxReplFieldBytes = 8192
+)
 
 // authSync replicates the users document (users, reset tokens, session
 // key, mail settings) between the web instances of a cluster. Each change
@@ -33,10 +38,24 @@ type authSync struct {
 
 	selfMu sync.Mutex
 	self   string
+
+	syncer *repldoc.Syncer
 }
 
 func newAuthSync(store *webauth.Store, ref *configRef) *authSync {
-	return &authSync{store: store, ref: ref}
+	a := &authSync{store: store, ref: ref}
+	a.syncer = &repldoc.Syncer{
+		Name:       "AUTHSYNC",
+		Path:       "/internal/auth-doc",
+		Doc:        usersDoc{a},
+		Self:       a.selfName,
+		Peers:      func() []repldoc.Peer { return replPeers(ref) },
+		Do:         replDo(ref),
+		DecodeMeta: decodeMeta,
+		OnConflict: replConflict(ref, "users"),
+		Logf:       log.Printf,
+	}
+	return a
 }
 
 // selfName names this instance in revision stamps: its core role once the
@@ -72,64 +91,40 @@ func (a *authSync) persist() error {
 	return nil
 }
 
-func (a *authSync) pushAll() {
-	cfg := a.ref.Load()
-	for _, n := range siblingNodes(cfg) {
-		if err := a.pushTo(cfg, n); err != nil {
-			log.Printf("[AUTHSYNC] push users document to %s: %v (it catches up within %s)", n.Name, err, authSyncInterval)
-		}
-	}
+func (a *authSync) pushAll() { a.syncer.PushAll() }
+
+// usersDoc is the users document as the syncer sees it.
+type usersDoc struct{ a *authSync }
+
+func (d usersDoc) Meta() repldoc.Meta       { return d.a.store.Meta() }
+func (d usersDoc) Marshal() ([]byte, error) { return d.a.store.Marshal() }
+
+func (d usersDoc) StartFirst(string) error {
+	return d.a.change(func(*webauth.Store) error { return nil })
 }
 
-func (a *authSync) pushTo(cfg *WebConfig, n NodeConfig) error {
-	data, err := a.store.Marshal()
+// Adopt takes the document in raw when it is newer than this node's and
+// saves it. A never-replicated local document is merged, so its own users
+// are kept (spread is then true).
+func (d usersDoc) Adopt(raw []byte, from string) (adopted, spread bool, err error) {
+	a := d.a
+	remote, err := webauth.Parse(raw)
 	if err != nil {
-		return err
+		return false, false, invalidDocError{err.Error()}
 	}
-	_, err = a.siblingDo(cfg, n, http.MethodPost, "/internal/auth-doc", data)
-	return err
-}
-
-// minReplicationTokenLen is the shortest shared token replication accepts (F7).
-const minReplicationTokenLen = 32
-
-func (a *authSync) siblingDo(cfg *WebConfig, n NodeConfig, method, path string, body []byte) ([]byte, error) {
-	url := siblingWebURL(n, cfg) + path
-	if !strings.HasPrefix(url, "https://") {
-		return nil, fmt.Errorf("replication refused: %s is not TLS (users and password hashes are only replicated over TLS, F7)", n.Addr)
+	if err := repldoc.ValidMeta(remote.Meta()); err != nil {
+		return false, false, invalidDocError{err.Error()}
 	}
-	if token := nodesSharedToken(cfg); len(token) < minReplicationTokenLen {
-		return nil, fmt.Errorf("replication refused: the shared token is shorter than %d characters (F7)", minReplicationTokenLen)
+	if err := validateUsersDoc(remote); err != nil {
+		return false, false, invalidDocError{err.Error()}
 	}
-	req, err := http.NewRequest(method, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if token := nodesSharedToken(cfg); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := siblingClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	out, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s", resp.Status, bytes.TrimSpace(out))
-	}
-	return out, nil
-}
-
-// adopt takes remote when it is newer and saves it.
-func (a *authSync) adopt(remote *webauth.Store, from string) (bool, error) {
 	before := a.store.Meta()
 	adopted, kept := a.store.Adopt(remote, a.selfName())
 	if !adopted {
-		return false, nil
+		return false, false, nil
 	}
 	if err := a.store.Save(a.ref.Load().UsersFile); err != nil {
-		return true, err
+		return true, false, fmt.Errorf("save users document: %w", err)
 	}
 	clearVerifyCache()
 	after := a.store.Meta()
@@ -137,122 +132,52 @@ func (a *authSync) adopt(remote *webauth.Store, from string) (bool, error) {
 	if len(kept) > 0 {
 		log.Printf("[AUTHSYNC] kept this node's own users %v while joining the replicated users document", kept)
 		auditAll(a.ref.Load(), "system", "users.merge", fmt.Sprintf("merged users %v from %s into the replicated users document", kept, a.selfName()))
-		go a.pushAll()
 	}
-	return true, nil
+	return true, len(kept) > 0, nil
 }
 
-// syncOnce compares with every sibling: pulls a newer document, pushes
-// this one to a sibling that is behind. While no instance has replicated
-// yet, the reachable instance with the lowest name starts revision 1; the
-// others merge their users into it.
-func (a *authSync) syncOnce() {
-	cfg := a.ref.Load()
-	local := a.store.Meta()
-	var legacyPeers []string
-	newerSeen := false
-	for _, n := range siblingNodes(cfg) {
-		raw, err := a.siblingDo(cfg, n, http.MethodGet, "/internal/auth-doc/meta", nil)
-		if err != nil {
-			continue
+// validateUsersDoc refuses a document whose size no real instance would
+// send. Roles are not checked: a newer version may add one.
+func validateUsersDoc(s *webauth.Store) error {
+	users := s.List()
+	if len(users) > maxReplUsers {
+		return fmt.Errorf("users document has %d users, more than the limit of %d", len(users), maxReplUsers)
+	}
+	for i, u := range users {
+		if u.Name == "" || len(u.Name) > 256 {
+			return fmt.Errorf("users document: user %d has an empty or oversized name", i)
 		}
-		var m webauth.Meta
-		if json.Unmarshal(raw, &m) != nil {
-			continue
-		}
-		switch {
-		case webauth.Newer(m, local):
-			newerSeen = true
-			doc, err := a.siblingDo(cfg, n, http.MethodGet, "/internal/auth-doc", nil)
-			if err != nil {
-				log.Printf("[AUTHSYNC] fetch users document from %s: %v", n.Name, err)
-				continue
-			}
-			remote, err := webauth.Parse(doc)
-			if err != nil {
-				log.Printf("[AUTHSYNC] users document from %s: %v", n.Name, err)
-				continue
-			}
-			if _, err := a.adopt(remote, n.Name); err != nil {
-				log.Printf("[AUTHSYNC] save users document from %s: %v", n.Name, err)
-			}
-			local = a.store.Meta()
-		case webauth.Newer(local, m):
-			if err := a.pushTo(cfg, n); err != nil {
-				log.Printf("[AUTHSYNC] push users document to %s: %v", n.Name, err)
-			}
-		}
-		if m.Version == 0 {
-			legacyPeers = append(legacyPeers, n.Name)
+		if len(u.PasswordHash) > maxReplFieldBytes || len(u.Email) > maxReplFieldBytes {
+			return fmt.Errorf("users document: user %q has an oversized field", u.Name)
 		}
 	}
-	if local.Version == 0 && !newerSeen && startsFirstRevision(a.selfName(), legacyPeers) {
-		if err := a.change(func(*webauth.Store) error { return nil }); err != nil {
-			log.Printf("[AUTHSYNC] start the replicated users document: %v", err)
-			return
-		}
-		log.Printf("[AUTHSYNC] started the replicated users document (revision 1); the other cores merge their users into it")
+	if n := s.ResetCount(); n > maxReplResets {
+		return fmt.Errorf("users document has %d reset tokens, more than the limit of %d", n, maxReplResets)
 	}
+	return nil
 }
 
 func startsFirstRevision(self string, legacyPeers []string) bool {
-	names := append([]string{self}, legacyPeers...)
-	sort.Strings(names)
-	return names[0] == self
+	return repldoc.StartsFirstRevision(self, legacyPeers)
 }
 
 func (a *authSync) run() {
-	go func() {
-		time.Sleep(5 * time.Second)
-		a.syncOnce()
-		for range time.Tick(authSyncInterval) {
-			a.syncOnce()
-		}
-	}()
+	a.syncer.Run(context.Background(), 5*time.Second, authSyncInterval)
+}
+
+func (a *authSync) handlers() replHandlers {
+	return replHandlers{ref: a.ref, doc: usersDoc{a}, push: a.pushAll}
 }
 
 // handleAuthDocPost (POST /internal/auth-doc) receives a sibling's document.
 func (a *authSync) handleAuthDocPost(w http.ResponseWriter, r *http.Request) {
-	if !checkSharedToken(a.ref.Load(), r) {
-		writeJSONWeb(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing token"})
-		return
-	}
-	data, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
-	if err != nil {
-		writeJSONWeb(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	remote, err := webauth.Parse(data)
-	if err != nil {
-		writeJSONWeb(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	if _, err := a.adopt(remote, clientAddr(r)); err != nil {
-		writeJSONWeb(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	writeJSONWeb(w, http.StatusOK, a.store.Meta())
+	a.handlers().post(w, r)
 }
 
 func (a *authSync) handleAuthDocMeta(w http.ResponseWriter, r *http.Request) {
-	if !checkSharedToken(a.ref.Load(), r) {
-		writeJSONWeb(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing token"})
-		return
-	}
-	writeJSONWeb(w, http.StatusOK, a.store.Meta())
+	a.handlers().meta(w, r)
 }
 
 func (a *authSync) handleAuthDocGet(w http.ResponseWriter, r *http.Request) {
-	if !checkSharedToken(a.ref.Load(), r) {
-		writeJSONWeb(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing token"})
-		return
-	}
-	data, err := a.store.Marshal()
-	if err != nil {
-		writeJSONWeb(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Write(data)
+	a.handlers().get(w, r)
 }

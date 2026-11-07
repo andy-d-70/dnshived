@@ -5,12 +5,15 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"dnshived/internal/repldoc"
 	"dnshived/internal/webauth"
 )
 
@@ -105,5 +108,76 @@ func TestStartsFirstRevision_LowestNameOnly(t *testing.T) {
 	}
 	if !startsFirstRevision("core-3", nil) {
 		t.Error("alone (siblings unreachable or not upgraded yet) must start")
+	}
+}
+
+func TestAuthDocPost_RefusesAnOversizedDocument(t *testing.T) {
+	a, _ := syncFixture(t, webauth.User{Name: "local"})
+	users := make([]webauth.User, maxReplUsers+1)
+	for i := range users {
+		users[i] = webauth.User{Name: fmt.Sprintf("u%d", i), Role: webauth.RoleReadonly}
+	}
+	w := postDoc(a, &webauth.Store{Version: 9, UpdatedAt: "t", Origin: "core-2", Users: users}, "shared-secret")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", w.Code)
+	}
+	if _, ok := a.store.Lookup("local"); !ok || a.store.Meta().Version != 0 {
+		t.Error("a refused document changed the store")
+	}
+	w = postDoc(a, &webauth.Store{Version: 9, UpdatedAt: "t", Origin: "core-2", Users: []webauth.User{{Name: strings.Repeat("n", 300)}}}, "shared-secret")
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("oversized name: status %d, want 400", w.Code)
+	}
+}
+
+func TestAuthDocPost_AcceptsAnUnknownRole(t *testing.T) {
+	a, _ := syncFixture(t)
+	w := postDoc(a, &webauth.Store{Version: 4, UpdatedAt: "t", Origin: "core-2", Users: []webauth.User{{Name: "future", Role: "auditor"}}}, "shared-secret")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d: a role added by a newer version must not break replication", w.Code)
+	}
+	if _, ok := a.store.Lookup("future"); !ok {
+		t.Error("user with a newer version's role not installed")
+	}
+}
+
+func TestAuthDocMeta_CarriesTheContentHash(t *testing.T) {
+	a, _ := syncFixture(t, webauth.User{Name: "a", Role: webauth.RoleAdmin})
+	r := httptest.NewRequest(http.MethodGet, "/internal/auth-doc/meta", nil)
+	r.Header.Set("Authorization", "Bearer shared-secret")
+	w := httptest.NewRecorder()
+	a.handleAuthDocMeta(w, r)
+	var m webauth.Meta
+	if err := json.Unmarshal(w.Body.Bytes(), &m); err != nil || m.Hash == "" {
+		t.Errorf("meta = %+v %v", m, err)
+	}
+}
+
+func TestAuthDocPost_RefusesAnOutOfRangeRevision(t *testing.T) {
+	a, _ := syncFixture(t)
+	w := postDoc(a, &webauth.Store{Version: 1 << 60, UpdatedAt: "t", Origin: "core-2", Users: []webauth.User{{Name: "x"}}}, "shared-secret")
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status %d, want 400", w.Code)
+	}
+	if a.store.Meta().Version != 0 {
+		t.Error("a huge revision was installed")
+	}
+}
+
+func TestReplConflict_ReportsOncePerPairOfContents(t *testing.T) {
+	cfg := &WebConfig{}
+	report := replConflict(newConfigRef(cfg), "test")
+	var logged strings.Builder
+	old := log.Writer()
+	log.SetOutput(&logged)
+	defer log.SetOutput(old)
+	l := repldoc.Meta{Version: 3, Hash: "aaaaaaaaaaaa"}
+	r := repldoc.Meta{Version: 3, Hash: "bbbbbbbbbbbb"}
+	report(l, r, "core-2")
+	report(l, r, "core-2")
+	report(l, r, "core-3")
+	report(l, repldoc.Meta{Version: 3, Hash: "cccccccccccc"}, "core-2")
+	if n := strings.Count(logged.String(), "[REPL]"); n != 3 {
+		t.Errorf("reported %d times, want 3 (once per peer and content pair):\n%s", n, logged.String())
 	}
 }

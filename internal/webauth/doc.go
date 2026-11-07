@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"dnshived/internal/repldoc"
 )
 
 // ResetToken is one pending password-reset link; only its SHA-256 is kept.
@@ -32,28 +34,37 @@ type SMTPSettings struct {
 }
 
 // Meta identifies one revision of the replicated document.
-type Meta struct {
-	Version   int64  `json:"version"`
-	UpdatedAt string `json:"updated_at"`
-	Origin    string `json:"origin"`
-}
+type Meta = repldoc.Meta
 
 // Newer reports whether a is a later revision than b. Equal versions are
 // ordered by timestamp, then origin, so every instance picks the same one.
-func Newer(a, b Meta) bool {
-	if a.Version != b.Version {
-		return a.Version > b.Version
-	}
-	if a.UpdatedAt != b.UpdatedAt {
-		return a.UpdatedAt > b.UpdatedAt
-	}
-	return a.Origin > b.Origin
-}
+func Newer(a, b Meta) bool { return repldoc.Newer(a, b) }
 
+// Meta returns the revision stamp with the content hash.
 func (s *Store) Meta() Meta {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.metaLocked()
+	m := s.metaLocked()
+	m.Hash = s.bodyHashLocked()
+	return m
+}
+
+// replicatedBody is exactly what replaceWith copies, without the stamp.
+type replicatedBody struct {
+	SessionKey        string        `json:"session_key"`
+	Users             []User        `json:"users"`
+	Resets            []ResetToken  `json:"resets"`
+	SMTP              *SMTPSettings `json:"smtp"`
+	PublicURL         string        `json:"public_url"`
+	MinPasswordLength int           `json:"min_password_length"`
+}
+
+func (s *Store) bodyHashLocked() string {
+	data, err := json.Marshal(replicatedBody{s.SessionKey, s.Users, s.Resets, s.SMTP, s.PublicURL, s.MinPasswordLength})
+	if err != nil {
+		return ""
+	}
+	return repldoc.BodyHash(data)
 }
 
 func (s *Store) metaLocked() Meta {
@@ -175,6 +186,13 @@ func (s *Store) SessionKeyBytes() []byte {
 	defer s.mu.RUnlock()
 	k, _ := hex.DecodeString(s.SessionKey)
 	return k
+}
+
+// ResetCount returns the number of pending reset tokens.
+func (s *Store) ResetCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.Resets)
 }
 
 // Lookup returns a copy of the named user.

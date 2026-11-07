@@ -150,7 +150,14 @@ its own admin token. It never writes `cluster.json` itself.
   the cores' web instances over `/internal/auth-doc` (cluster admin
   token, pinned cluster certificate); each instance compares with the
   others every 60 s. The higher revision wins; a node that never
-  replicated merges its own users in instead of losing them.
+  replicated merges its own users in instead of losing them. The
+  revision stamp carries a hash of the content; two different documents
+  with the same revision are logged and audited as `doc.conflict`, and
+  one is still chosen by timestamp and origin. A received document is
+  refused (HTTP 400) when its revision is out of range or it is
+  oversized (more than 2,000 users, 20,000 reset tokens, fields over
+  8 KiB). The probe-host list of `web.json` is replicated the same way
+  over `/internal/docs/probe-hosts`, TLS only, with the same token.
 - **Sessions:** a login form issues an HMAC-SHA256-signed cookie
   (`HttpOnly`, `SameSite=Lax`, `Secure` over TLS) naming the user and a
   per-user session epoch; it is valid on every core (shared key), for
