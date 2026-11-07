@@ -1,3 +1,11 @@
+dnshived (0.9.8.9~dev-3) unstable; urgency=medium
+
+  * Lab build: outage rules (write quorum, stale-base refusal, configuration
+    verification at start, membership epoch, dnshived --force-standalone),
+    login wait for the first users sync.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Sat, 07 Nov 2026 19:00:00 +0100
+
 dnshived (0.9.8.9~dev-2) unstable; urgency=medium
 
   * Lab build: config revision on cluster.json, catch-up of a node that missed

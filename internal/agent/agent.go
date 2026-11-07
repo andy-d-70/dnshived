@@ -94,12 +94,24 @@ type AuthorityInputs struct {
 	WitnessRequired  bool
 	CurrentlyServing bool // true if scope is already running — witness check applies
 	Now              int64
+
+	// MembershipHold is set while a peer announces a higher membership epoch (this node was
+	// removed while away); it stops serving. StartHold is set until the configuration has been
+	// compared with the peers after a start; it only stops a scope from starting.
+	MembershipHold string
+	StartHold      string
 }
 
 // scopeServeAllowed is the SINGLE safety predicate.
 func scopeServeAllowed(in AuthorityInputs) (bool, string) {
 	if in.State != fsm.StateStable {
 		return false, "not STABLE: " + string(in.State)
+	}
+	if in.MembershipHold != "" {
+		return false, "membership: " + in.MembershipHold
+	}
+	if !in.CurrentlyServing && in.StartHold != "" {
+		return false, "config not verified: " + in.StartHold
 	}
 	if !in.OwnsScope {
 		return false, "not owned in authoritative map"
@@ -146,6 +158,10 @@ type ReconcileInputs struct {
 	// only feed the unserved-scope warning.
 	DesiredOwners map[string]string
 	ServedBy      map[string]string
+
+	// MembershipHold and StartHold: see AuthorityInputs.
+	MembershipHold string
+	StartHold      string
 }
 
 // ServeState is the agent's current decision for a single scope.
@@ -2657,6 +2673,8 @@ func (a *Agent) buildAuthority(scope string, in ReconcileInputs, currentlyServin
 		WitnessRequired:  a.psk != "",
 		CurrentlyServing: currentlyServing,
 		Now:              in.Now,
+		MembershipHold:   in.MembershipHold,
+		StartHold:        in.StartHold,
 	}
 }
 
@@ -4190,6 +4208,13 @@ func (a *Agent) ExplainAuthority(scope string, in ReconcileInputs) AuthorityChec
 			Detail: leaseDetail(auth)},
 		{Name: "unfenced", Pass: !auth.SelfToken.Less(auth.Watermark),
 			Detail: fmt.Sprintf("token %s vs watermark %s", auth.SelfToken, auth.Watermark)},
+	}
+
+	if auth.MembershipHold != "" {
+		checks = append(checks, CheckResult{Name: "membership", Pass: false, Detail: auth.MembershipHold})
+	}
+	if auth.StartHold != "" && !auth.CurrentlyServing {
+		checks = append(checks, CheckResult{Name: "config_verified", Pass: false, Detail: auth.StartHold})
 	}
 
 	// Witness check — depends on context.

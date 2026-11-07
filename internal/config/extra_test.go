@@ -214,3 +214,40 @@ func TestConfigRevisionIsNotPartOfTheDocumentHash(t *testing.T) {
 		t.Error("the revision changed the content hash")
 	}
 }
+
+func TestSave_DoesNotFollowAPlantedTempFileLink(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cluster.json")
+	victim := filepath.Join(dir, "victim")
+	if err := os.WriteFile(victim, []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, path+".tmp"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(writeFixture(t, dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(path, c); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if got, _ := os.ReadFile(victim); string(got) != "keep me" {
+		t.Errorf("the file behind the planted link was overwritten: %q", got)
+	}
+	if _, err := Load(path); err != nil {
+		t.Errorf("the saved config does not load: %v", err)
+	}
+	if fi, err := os.Lstat(path); err != nil || !fi.Mode().IsRegular() {
+		t.Errorf("cluster.json is not a regular file: %v %v", fi, err)
+	}
+}
+
+func writeFixture(t *testing.T, dir string) string {
+	t.Helper()
+	p := filepath.Join(dir, "fixture.json")
+	if err := os.WriteFile(p, []byte(extraFixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}

@@ -100,6 +100,7 @@ func main() {
 			log.Fatalf("save session key: %v", err)
 		}
 	}
+	loginWaitsForSync = repl.waitingForFirstSync
 	repl.run()
 	probeDoc := newProbeHostsDoc(ref, *cfgPath, repl.selfName)
 	probeSync := newProbeHostsSyncer(ref, probeDoc, repl.selfName)

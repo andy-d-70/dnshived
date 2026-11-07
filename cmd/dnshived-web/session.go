@@ -194,11 +194,23 @@ func handleLoginGet(store *webauth.Store) http.HandlerFunc {
 	}
 }
 
+// loginWaitsForSync says whether logins must still wait for the first
+// comparison of the users with the other cores after a start. Set by main;
+// the default never waits.
+var loginWaitsForSync = func() bool { return false }
+
 func handleLoginPost(store *webauth.Store, ref *configRef) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		next := safeNext(r.FormValue("next"))
 		name := strings.TrimSpace(r.FormValue("username"))
 		data := loginData{Next: next, User: name, CanMail: mailConfigured(store)}
+		if loginWaitsForSync() {
+			w.Header().Set("Retry-After", "5")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			data.Error = "Starting up: the users are being synchronised with the other cores. Try again in a few seconds."
+			renderTemplate(w, loginTmpl, data, "login")
+			return
+		}
 		client := clientAddr(r)
 		user, res := verifyWithCache(store.Verify, name, r.FormValue("password"), client)
 		switch res {

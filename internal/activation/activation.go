@@ -16,6 +16,12 @@ import (
 // features that change the stored format switch on. Nothing consults it yet.
 const FeatureVersion = "0.9.9.0"
 
+// OutageRulesVersion is the version every core member must run before the
+// outage rules (write quorum, stale-base refusal, config verification,
+// membership epoch) are enforced. It is the first lab build that has them;
+// the release is higher.
+const OutageRulesVersion = "0.9.8.9~dev-3"
+
 // Member is one configured core member as seen by the node asking.
 type Member struct {
 	Name      string `json:"name"`
@@ -47,15 +53,21 @@ type parsed struct {
 
 func parse(v string) (parsed, bool) {
 	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	if i := strings.IndexByte(v, '+'); i >= 0 {
+		v = v[:i]
+	}
 	if v == "" {
 		return parsed{}, false
 	}
 	num := v
 	var pre string
-	if i := strings.IndexAny(v, "~-+"); i >= 0 {
+	if i := strings.IndexAny(v, "~-"); i >= 0 {
 		num, pre = v[:i], v[i+1:]
 		if pre == "" {
 			pre = "-"
+		}
+		if _, err := strconv.Atoi(pre); err == nil {
+			pre = "dev-" + pre
 		}
 	}
 	var p parsed
@@ -70,8 +82,9 @@ func parse(v string) (parsed, bool) {
 	return p, true
 }
 
-// Compare orders two version strings: -1, 0 or 1. A pre-release suffix
-// ("0.9.9.0~dev-3", "0.9.7-dev") sorts before the same number without one.
+// Compare orders two version strings: -1, 0 or 1. Build metadata after a "+"
+// is ignored. A pre-release suffix ("0.9.9.0~dev-3", a binary's "0.9.9.0-3",
+// "0.9.7-dev") sorts before the same number without one.
 // ok is false when either string is not a version.
 func Compare(a, b string) (cmp int, ok bool) {
 	pa, oka := parse(a)

@@ -128,3 +128,27 @@ sudo systemctl restart dnshived-web
 
 The allowlist is explicit; nothing is derived from
 `X-Forwarded-Host`.
+
+## Two of three cores are gone: keep the last one serving
+
+With the outage rules on (see `docs/OPERATIONS.md`) a node that sees fewer
+than a strict majority of the configured cores refuses configuration
+changes (`no_quorum`), and a restarted node waits up to 30 seconds for a
+peer before it serves its own configuration unverified. If the other cores
+are gone for good, make the surviving node the only member. Do this only
+when you are sure the others are not still running; if they are merely cut
+off, they keep serving and the same scope can be answered twice.
+
+```sh
+sudo dnshived --force-standalone     # shows what it will change, asks for the cluster id
+sudo systemctl restart dnshived
+```
+
+The command removes the node's peers from `cluster.json`, raises its
+membership epoch by one and writes a `cluster.force_standalone` line to
+the audit log. Nothing else in the configuration changes.
+
+When a core that was away comes back, it sees the higher epoch, stops
+serving and shows `OUTAGE HOLD ... removed while away` on the Overview
+page. Re-adopt it from the standalone node (Cluster Config, replace or
+onboard) so it takes over the standalone node's configuration and epoch.

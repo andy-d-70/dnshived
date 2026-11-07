@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"dnshived/internal/activation"
 	"dnshived/internal/agent"
 	"dnshived/internal/arbiter"
 	"dnshived/internal/auditlog"
@@ -169,6 +170,8 @@ func backupPayloadFor(cfg *config.Cluster, ag *agent.Agent, observer *cluster.Ob
 func main() {
 	cfgPath := flag.String("config", "/etc/dnshived/cluster.json", "cluster config path")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	forceStandalone := flag.Bool("force-standalone", false,
+		"make this node the only cluster member (console recovery when the other cores are gone; asks for confirmation, root only)")
 	checkConfig := flag.Bool("check-config", false, "validate config and exit")
 	emergencyCloseGates := flag.Bool("emergency-close-gates", false,
 		"close every configured scope's DHCP gate and exit — for ExecStopPost, not for manual use")
@@ -198,6 +201,14 @@ func main() {
 		os.Exit(0)
 	}
 
+	if *forceStandalone {
+		if err := runForceStandalone(*cfgPath, os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "force-standalone:", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
 	config.LocalName = ifname.Resolve
 	setBeaconLinkUp(defaultHelperSocket)
 
@@ -220,6 +231,7 @@ func main() {
 	}
 	go loglevel.Summarize(context.Background())
 	currentConfig.Store(cfg)
+	outage.rules.active.Store(cfg.OutageRulesActive)
 	setBeaconLinkUp(helperSocketFor(cfg))
 
 	if *checkConfig {
@@ -294,6 +306,16 @@ func main() {
 	probeInterval := cfg.ProbeInterval()
 	observer.Start(probeInterval)
 	loglevel.Infof("[CLUSTER:INIT] visibility: handshaking %d peers every %s", len(cfg.Peers), probeInterval)
+	go func() {
+		t := time.NewTicker(10 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			cur := currentConfig.Load()
+			if outage.rules.refresh(version, len(cur.Peers), peerViews(observer.Snapshot()), func() error { return persistOutageLatch(*cfgPath) }) {
+				loglevel.Infof("[OUTAGE] every configured core runs %s or newer: write quorum, stale-base refusal, config verification and the membership epoch are now enforced", activation.OutageRulesVersion)
+			}
+		}
+	}()
 
 	machine := fsm.New(self.Epoch)
 
@@ -441,6 +463,7 @@ func main() {
 		incarnation: self.Incarnation,
 		split:       desired.NewSplitTracker(),
 		splitDetail: make(map[string]string),
+		lastHoldKey: "false/false",
 	}
 	go func() {
 		ticker := time.NewTicker(lease.DefaultRenewInterval)
@@ -656,7 +679,7 @@ func main() {
 	var arbiterMgr *arbiter.Manager
 	if isCoreRole(cfg.Role) && cfg.PSK != "" {
 		arbiterMgr = arbiter.New([]byte(cfg.PSK), func() bool {
-			return observer.EffectiveQuorum().HasQuorum
+			return observer.EffectiveQuorum().HasQuorum && !outage.membershipHeld()
 		}, dataDir(cfg))
 		arbiterMgr.SetTrustedHosts(trustedHostsWithFallback)
 		arbiterMgr.SetNodeID(self.NodeID)
@@ -815,6 +838,8 @@ func main() {
 			"scopes_hash":       scopesHash,
 			"config_hash":       configHash,
 			"config_revision":   fresh.ConfigRevision,
+			"membership_epoch":  fresh.MembershipEpoch,
+			"outage_rules":      outageStatus(),
 			"configured_scopes": configuredScopes,
 			"iot_scopes":        iotScopes,
 			"disabled_scopes":   disabledScopes,
@@ -1184,6 +1209,11 @@ func main() {
 			return
 		}
 
+		if status, refusal, ok := checkWriteRules(outage.rules.Active(), observer, currentConfig.Load(), upd); !ok {
+			loglevel.Warnf("[OUTAGE] configuration push from %s refused: %s", r.RemoteAddr, refusal["code"])
+			writeJSON(w, status, refusal)
+			return
+		}
 		status, body := applyConfigUpdate(*cfgPath, upd, ag, engine, authMw)
 		writeJSON(w, status, body)
 	}))
@@ -1463,6 +1493,19 @@ type reconcileLoop struct {
 	lastWM      fencing.Token
 	split       *desired.SplitTracker
 	splitDetail map[string]string
+
+	hashFor     *config.Cluster
+	hash        string
+	lastHoldKey string
+}
+
+// configHash returns cur's content hash, recomputed only when the live
+// configuration was replaced.
+func (rl *reconcileLoop) configHash(cur *config.Cluster) string {
+	if rl.hashFor != cur {
+		rl.hash, rl.hashFor = cur.ConfigDocumentHash(), cur
+	}
+	return rl.hash
 }
 
 // once runs exactly one reconcile pass.
@@ -1525,6 +1568,26 @@ func (rl *reconcileLoop) once(reason string) {
 		}
 	}
 
+	cur := currentConfig.Load()
+	curHash := rl.configHash(cur)
+	rl.observer.UpdateConfigState(cur.ConfigRevision, curHash, cur.MembershipEpoch)
+	startHold, memberHold := outage.evaluate(cur, curHash, peerViews(rl.observer.Snapshot()), time.Now())
+	holdKey := fmt.Sprintf("%v/%v", startHold != "", memberHold != "")
+	if holdKey != rl.lastHoldKey {
+		rl.lastHoldKey = holdKey
+		if startHold != "" {
+			loglevel.Warnf("[OUTAGE] scopes are held: %s", startHold)
+			rl.events.Add("WARN", "OUTAGE", "scopes are held: "+startHold)
+		}
+		if memberHold != "" {
+			loglevel.Warnf("[OUTAGE] this node is held: %s", memberHold)
+			rl.events.Add("WARN", "OUTAGE", "this node is held: "+memberHold)
+		}
+		if startHold == "" && memberHold == "" {
+			loglevel.Infof("[OUTAGE] holds released")
+		}
+	}
+
 	prevServing := rl.ag.Serving()
 	rl.ag.Reconcile(agent.ReconcileInputs{
 		State:       st,
@@ -1536,6 +1599,9 @@ func (rl *reconcileLoop) once(reason string) {
 
 		DesiredOwners: desiredOwners,
 		ServedBy:      observedServing,
+
+		MembershipHold: memberHold,
+		StartHold:      startHold,
 	})
 	newServing := rl.ag.Serving()
 	if !stringSlicesEqual(prevServing, newServing) {
@@ -1953,6 +2019,9 @@ type configUpdate struct {
 	// ConfigCatchUp marks a push that only repairs a node which missed a commit: it is applied
 	// only if its revision is strictly higher than this node's own.
 	ConfigCatchUp bool `json:"config_catchup"`
+	// ConfigBaseRevision is the revision the change was staged on; nil means the sender does
+	// not say (an older web UI), and nothing is checked.
+	ConfigBaseRevision *int64 `json:"config_base_revision"`
 }
 
 // applyTo overwrites every editable field on c with u's values.
@@ -1987,6 +2056,8 @@ func (u configUpdate) applyTo(c *config.Cluster) {
 }
 
 func applyConfigUpdate(cfgPath string, upd configUpdate, ag *agent.Agent, engine *desired.Engine, authMw *auth.Middleware) (status int, body interface{}) {
+	cfgWriteMu.Lock()
+	defer cfgWriteMu.Unlock()
 	current, err := config.Load(cfgPath)
 	if err != nil {
 		return http.StatusInternalServerError, map[string]string{"error": "load current config: " + err.Error()}

@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -1402,5 +1403,65 @@ func TestConfigRevisionWarnings(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestOutageRulesWarnings(t *testing.T) {
+	rules := func(active bool, state, why, member string) *nodeOutageRules {
+		return &nodeOutageRules{Active: active, RequiredVersion: "0.9.8.9~dev-3", ConfigState: state, ConfigStateWhy: why, MembershipHold: member}
+	}
+	row := func(role string, r *nodeOutageRules) statusRow {
+		return statusRow{Status: nodeStatus{Role: role, OutageRules: r}}
+	}
+	tests := []struct {
+		name string
+		rows []statusRow
+		want []string
+	}{
+		{"all on and fine", []statusRow{row("core-1", rules(true, "verified", "", "")), row("core-2", rules(true, "verified", "", ""))}, nil},
+		{"one older version", []statusRow{row("core-1", rules(false, "verified", "", "")), row("core-2", nil)}, []string{"not enforced on core-1, core-2 (older version)"}},
+		{"all new but not latched yet", []statusRow{row("core-1", rules(false, "verified", "", "")), row("core-2", rules(false, "verified", "", ""))}, []string{"not enforced on core-1, core-2; they switch on when every core runs 0.9.8.9~dev-3"}},
+		{"all old", []statusRow{row("core-1", nil), row("core-2", nil)}, nil},
+		{"held for membership", []statusRow{row("core-1", rules(true, "verified", "", "removed while away: peer a is at epoch 3"))}, []string{"core-1 is held and does not serve: removed while away"}},
+		{"behind", []statusRow{row("core-1", rules(true, "behind", "peer a is at revision 9", ""))}, []string{"core-1 does not start scopes yet: peer a is at revision 9"}},
+		{"verifying", []statusRow{row("core-1", rules(true, "verifying", "comparing", ""))}, []string{"does not start scopes yet"}},
+		{"unverified", []statusRow{row("core-1", rules(true, "unverified", "no peer answered", ""))}, []string{"serves an unverified configuration"}},
+		{"rules off hide the states", []statusRow{row("core-1", rules(false, "behind", "x", "held"))}, []string{"not enforced"}},
+		{"unreachable rows ignored", []statusRow{{FetchError: "down", Status: nodeStatus{Role: "core-1"}}}, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := outageRulesWarnings(tt.rows)
+			if len(got) != len(tt.want) {
+				t.Fatalf("warnings = %v, want %d", got, len(tt.want))
+			}
+			for i := range got {
+				if !strings.Contains(got[i], tt.want[i]) {
+					t.Errorf("warning %d = %q, want it to contain %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestConfigCheckResponse_RefusalIsShownAsAnError(t *testing.T) {
+	var refused configCheckResponse
+	if err := json.Unmarshal([]byte(`{"code":"no_quorum","error":"configuration change refused: this node sees 1 of 3 cores"}`), &refused); err != nil {
+		t.Fatal(err)
+	}
+	if got := refused.refusal(); len(got) != 1 || !strings.Contains(got[0], "sees 1 of 3") {
+		t.Errorf("refusal = %v", got)
+	}
+	if (configCheckResponse{OK: true}).refusal() != nil {
+		t.Error("an accepted push has no refusal")
+	}
+	b, err := json.Marshal(configPushPayload{})
+	if err != nil || strings.Contains(string(b), "config_base_revision") {
+		t.Errorf("a payload without a base must not carry the field: %s %v", b, err)
+	}
+	base := int64(0)
+	b, _ = json.Marshal(configPushPayload{ConfigBaseRevision: &base})
+	if !strings.Contains(string(b), `"config_base_revision":0`) {
+		t.Errorf("a base of zero must still be sent: %s", b)
 	}
 }

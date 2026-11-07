@@ -69,6 +69,9 @@ type configPushPayload struct {
 	ConfigRevisionOrigin string `json:"config_revision_origin,omitempty"`
 	// ConfigCatchUp makes the daemon accept this push only if it is newer than the node's own.
 	ConfigCatchUp bool `json:"config_catchup,omitempty"`
+	// ConfigBaseRevision is the revision the change was staged on; the daemon refuses a commit
+	// when it is already further ahead.
+	ConfigBaseRevision *int64 `json:"config_base_revision,omitempty"`
 }
 
 // fetchConfig reads the full current config from one node's GET
@@ -477,6 +480,17 @@ type configCheckResponse struct {
 	Warnings []string `json:"warnings"`
 	// RestartNeeded is the daemon's own answer.
 	RestartNeeded bool `json:"restart_needed"`
+	// Error and Code are set when the daemon refuses a push outright (no quorum, stale base).
+	Error string `json:"error"`
+	Code  string `json:"code"`
+}
+
+// refusal returns the daemon's refusal message as an error list, or nil.
+func (c configCheckResponse) refusal() []string {
+	if c.Error == "" {
+		return nil
+	}
+	return []string{c.Error}
 }
 
 // nodeSaveResult is one node's outcome from pushConfigAndRenderResult.
@@ -625,7 +639,7 @@ func pushConfigDirectFanout(w http.ResponseWriter, cfg *WebConfig, payload confi
 				progress <- pushProgress{n, fmt.Sprintf(`pushing to %s… <span class="warn">unexpected response</span>`, template.HTMLEscapeString(n.Name))}
 				return
 			}
-			res.CheckErrors, res.CheckWarnings = check.Errors, check.Warnings
+			res.CheckErrors, res.CheckWarnings = append(check.Errors, check.refusal()...), check.Warnings
 			res.CheckOK = status == http.StatusOK && check.OK
 
 			if res.CheckOK {
@@ -913,7 +927,7 @@ func pushConfigViaCoordinator(w http.ResponseWriter, cfg *WebConfig, payload con
 			rendered = append(rendered, rr)
 			continue
 		}
-		rr.checkErrors, rr.checkWarnings = check.Errors, check.Warnings
+		rr.checkErrors, rr.checkWarnings = append(check.Errors, check.refusal()...), check.Warnings
 		rr.checkOK = peerRes.OK && check.OK
 		rr.reloadNeeded = check.RestartNeeded
 		rendered = append(rendered, rr)

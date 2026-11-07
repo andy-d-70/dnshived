@@ -224,7 +224,7 @@ func pushCandidateAndRenderResult(w http.ResponseWriter, cfg *WebConfig, payload
 				results[i] = res
 				return
 			}
-			res.CheckErrors, res.CheckWarnings = check.Errors, check.Warnings
+			res.CheckErrors, res.CheckWarnings = append(check.Errors, check.refusal()...), check.Warnings
 			res.CheckOK = status == http.StatusOK && check.OK
 			results[i] = res
 

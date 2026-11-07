@@ -76,6 +76,8 @@ type nodeStatus struct {
 	ScopesHash  string            `json:"scopes_hash"`
 	// ConfigHash mirrors Cluster.ConfigDocumentHash().
 	ConfigHash string `json:"config_hash"`
+	// OutageRules is nil for a daemon too old to report it.
+	OutageRules *nodeOutageRules `json:"outage_rules"`
 	// ConfigRevision is nil for a daemon too old to report one.
 	ConfigRevision   *int64            `json:"config_revision"`
 	PeersVisible     []string          `json:"peers_visible"`
@@ -105,6 +107,15 @@ type nodeStatus struct {
 	// ParallelProbing is only ever set by a probe host's own GET
 	// /api/v1/status (cmd/dnshived-probe).
 	ParallelProbing bool `json:"parallel_probing,omitempty"`
+}
+
+// nodeOutageRules mirrors the "outage_rules" object of /api/v1/status.
+type nodeOutageRules struct {
+	Active          bool   `json:"active"`
+	RequiredVersion string `json:"required_version"`
+	ConfigState     string `json:"config_state"`
+	ConfigStateWhy  string `json:"config_state_why"`
+	MembershipHold  string `json:"membership_hold"`
 }
 
 // nodePathStatus mirrors internal/cluster.FallbackStatus's own JSON shape.

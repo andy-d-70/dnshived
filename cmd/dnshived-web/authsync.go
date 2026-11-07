@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"dnshived/internal/repldoc"
@@ -40,10 +41,27 @@ type authSync struct {
 	self   string
 
 	syncer *repldoc.Syncer
+
+	startedAt time.Time
+	synced    atomic.Bool
+}
+
+// loginSyncWait is the longest a web instance holds back logins after a start
+// to compare its users with the other cores first.
+const loginSyncWait = 30 * time.Second
+
+// waitingForFirstSync reports whether logins should still be held back: there
+// are other cores, the first comparison has not finished, and the wait is not
+// over yet.
+func (a *authSync) waitingForFirstSync() bool {
+	if a.synced.Load() || time.Since(a.startedAt) >= loginSyncWait {
+		return false
+	}
+	return len(siblingNodes(a.ref.Load())) > 0
 }
 
 func newAuthSync(store *webauth.Store, ref *configRef) *authSync {
-	a := &authSync{store: store, ref: ref}
+	a := &authSync{store: store, ref: ref, startedAt: time.Now()}
 	a.syncer = &repldoc.Syncer{
 		Name:       "AUTHSYNC",
 		Path:       "/internal/auth-doc",
@@ -53,6 +71,7 @@ func newAuthSync(store *webauth.Store, ref *configRef) *authSync {
 		Do:         replDo(ref),
 		DecodeMeta: decodeMeta,
 		OnConflict: replConflict(ref, "users"),
+		AfterPass:  func() { a.synced.Store(true) },
 		Logf:       log.Printf,
 	}
 	return a

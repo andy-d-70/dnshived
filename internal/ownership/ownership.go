@@ -11,7 +11,7 @@ import (
 	"strconv"
 )
 
-// Dnshived makes the dnshived user and group the owner of path. A root writer would otherwise leave the file
+// Dnshived makes the dnshived user and group the owner of path (a symlink itself, never its target). A root writer would otherwise leave the file
 // root-owned, and the daemon could not replace it later.
 func Dnshived(path string) error {
 	u, err := user.Lookup("dnshived")
@@ -30,5 +30,5 @@ func Dnshived(path string) error {
 	if err != nil {
 		return fmt.Errorf("parse dnshived group gid %q: %w", g.Gid, err)
 	}
-	return os.Chown(path, uid, gid)
+	return os.Lchown(path, uid, gid)
 }

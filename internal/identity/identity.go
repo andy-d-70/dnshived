@@ -45,4 +45,11 @@ type Identity struct {
 	DesiredAuthoritative bool              `json:"desired_authoritative,omitempty"`
 	DesiredHash          string            `json:"desired_hash,omitempty"`
 	DesiredOwners        map[string]string `json:"desired_owners,omitempty"`
+
+	// ConfigRevision and ConfigHash describe the committed cluster configuration
+	// this node runs; MembershipEpoch is its membership epoch. Older versions
+	// announce none of them.
+	ConfigRevision  int64  `json:"config_revision,omitempty"`
+	ConfigHash      string `json:"config_hash,omitempty"`
+	MembershipEpoch int64  `json:"membership_epoch,omitempty"`
 }

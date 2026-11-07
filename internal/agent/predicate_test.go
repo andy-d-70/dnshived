@@ -4,6 +4,7 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 
 	"dnshived/internal/fencing"
@@ -276,4 +277,44 @@ func searchString(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestMembershipHoldStopsServingAndStarting(t *testing.T) {
+	for _, serving := range []bool{true, false} {
+		in := validInputs()
+		in.CurrentlyServing = serving
+		in.MembershipHold = "peer core-3 is at membership epoch 4, this node at 2"
+		allowed, reason := scopeServeAllowed(in)
+		if allowed {
+			t.Errorf("serving=%v: a node held for its membership must not serve", serving)
+		}
+		if !strings.Contains(reason, "membership") {
+			t.Errorf("serving=%v: reason = %q", serving, reason)
+		}
+	}
+}
+
+func TestStartHoldOnlyStopsAScopeFromStarting(t *testing.T) {
+	in := validInputs()
+	in.StartHold = "waiting for the peers"
+	in.CurrentlyServing = false
+	if allowed, reason := scopeServeAllowed(in); allowed || !strings.Contains(reason, "config not verified") {
+		t.Errorf("a scope that is not serving must not start while the config is unverified: %v %q", allowed, reason)
+	}
+	in.CurrentlyServing = true
+	if allowed, reason := scopeServeAllowed(in); !allowed {
+		t.Errorf("start-only: a scope that already serves must keep serving, got %q", reason)
+	}
+}
+
+func TestNoHoldChangesNothing(t *testing.T) {
+	in := validInputs()
+	if allowed, _ := scopeServeAllowed(in); !allowed {
+		t.Error("valid inputs without a hold must be allowed")
+	}
+	in.CurrentlyServing = false
+	in.Witness = WitnessState{}
+	if allowed, reason := scopeServeAllowed(in); !allowed {
+		t.Errorf("a scope that is not yet serving needs no witness, got %q", reason)
+	}
 }

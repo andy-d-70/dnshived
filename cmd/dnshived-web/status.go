@@ -591,6 +591,10 @@ func coherenceWarningTitle(w string) string {
 		return "This node's own peer list (cluster.json peers) disagrees with the cluster's current core nodes. A stale entry usually means a decommission never reached this node; a missing one means it was never told about a node that joined. Either way the nodes are no longer working from the same membership: quorum sizing, peer probing and trusted_hosts can all differ between them. Fix the node's peer list rather than waiting, it does not heal on its own."
 	case strings.HasPrefix(w, "TRUNK PATH:"):
 		return "This node sends topology beacons on this trunk but has heard none from any other core node on it, so the cluster cannot use this trunk as a path between nodes. Most common cause on Debian 13: reverse-path filtering (net.ipv4.conf.<trunk>.rp_filter, default 2) drops beacons on a trunk with no IPv4 address; dnshived sets it to 0 when it brings the trunk up, but a non-zero net.ipv4.conf.all.rp_filter still overrides that (the daemon log names it). Otherwise check cabling, switch/bridge VLAN config, and that the peers actually sit on this trunk."
+	case strings.HasPrefix(w, "OUTAGE HOLD:"):
+		return "After a start a node compares its configuration with its peers before it starts scopes, and a node that was declared removed (the operator ran force-standalone on another node) stops serving. A hold from a start clears by itself once the peers agree or the catch-up has run; a membership hold needs the node to be re-adopted from Cluster Config. A node that serves an unverified configuration found no peer within 30 seconds."
+	case strings.HasPrefix(w, "OUTAGE RULES:"):
+		return "Write quorum, the stale-base check, configuration verification at start and the membership epoch are only enforced once every core runs the version that has them, so a rolling upgrade never blocks itself. Until then these nodes behave as before."
 	case strings.HasPrefix(w, "CONFIG REVISION:"):
 		return "Every committed change raises the cluster's config revision. A node behind it missed a commit (it was down or unreachable) and is brought up to date by the web UI; a node at the same revision with different content was changed outside a commit and is left alone; a node that reports no revision runs an older version."
 	case strings.HasPrefix(w, "PARTITION:"):
@@ -734,7 +738,45 @@ func checkCoherence(rows []statusRow, tokens map[string]tokenInfo, observerName 
 	warnings = append(warnings, membershipWarnings(rows)...)
 	warnings = append(warnings, trunkPathWarnings(rows)...)
 	warnings = append(warnings, configRevisionWarnings(rows)...)
+	warnings = append(warnings, outageRulesWarnings(rows)...)
 
+	return warnings
+}
+
+// outageRulesWarnings reports what the outage rules are doing: nodes that
+// keep them off, nodes held at start or for their membership, and nodes that
+// serve an unverified configuration.
+func outageRulesWarnings(rows []statusRow) []string {
+	var warnings []string
+	var blocking []string
+	required := ""
+	for _, row := range rows {
+		if row.FetchError != "" || !isCoreRole(row.Status.Role) {
+			continue
+		}
+		r := row.Status.OutageRules
+		if r == nil {
+			blocking = append(blocking, row.Status.Role+" (older version)")
+			continue
+		}
+		required = r.RequiredVersion
+		if !r.Active {
+			blocking = append(blocking, row.Status.Role)
+			continue
+		}
+		if r.MembershipHold != "" {
+			warnings = append(warnings, fmt.Sprintf("OUTAGE HOLD: %s is held and does not serve: %s", row.Status.Role, r.MembershipHold))
+		}
+		switch r.ConfigState {
+		case "behind", "verifying":
+			warnings = append(warnings, fmt.Sprintf("OUTAGE HOLD: %s does not start scopes yet: %s", row.Status.Role, r.ConfigStateWhy))
+		case "unverified":
+			warnings = append(warnings, fmt.Sprintf("OUTAGE HOLD: %s serves an unverified configuration: %s", row.Status.Role, r.ConfigStateWhy))
+		}
+	}
+	if len(blocking) > 0 && required != "" {
+		warnings = append(warnings, fmt.Sprintf("OUTAGE RULES: not enforced on %s; they switch on when every core runs %s or newer", strings.Join(blocking, ", "), required))
+	}
 	return warnings
 }
 

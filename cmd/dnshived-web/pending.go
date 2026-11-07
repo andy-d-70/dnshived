@@ -597,6 +597,8 @@ func handlePendingCommit(cfgPath string, ref *configRef) http.HandlerFunc {
 		}
 		payload := clusterPushPayloadFrom(candidate)
 		payload.Scopes = candidate.Scopes
+		base := candidate.ConfigRevision
+		payload.ConfigBaseRevision = &base
 
 		backLink, backText := returnTarget(r)
 		pushConfigAndRenderResult(w, cfg, payload, user, backLink, withOverviewLink(backLink, backText), func() {

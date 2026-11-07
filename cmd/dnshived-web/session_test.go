@@ -134,3 +134,60 @@ func TestLogout_ClearsCookie(t *testing.T) {
 		t.Errorf("logout: cookies %+v, location %q", ck, w.Header().Get("Location"))
 	}
 }
+
+func TestLoginPost_WaitsForTheFirstSyncAfterAStart(t *testing.T) {
+	old := loginWaitsForSync
+	defer func() { loginWaitsForSync = old }()
+	s := sessionStore(t)
+	if err := s.Upsert("admin", "Correct-Horse#4Xq", webauth.RoleAdmin); err != nil {
+		t.Fatal(err)
+	}
+	post := func() *httptest.ResponseRecorder {
+		form := url.Values{"username": {"admin"}, "password": {"Correct-Horse#4Xq"}}
+		r := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		r.RemoteAddr = "192.0.2.10:5000"
+		w := httptest.NewRecorder()
+		handleLoginPost(s, newConfigRef(&WebConfig{}))(w, r)
+		return w
+	}
+	loginWaitsForSync = func() bool { return true }
+	w := post()
+	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" || len(w.Result().Cookies()) != 0 {
+		t.Errorf("while syncing: status %d, retry-after %q, cookies %v", w.Code, w.Header().Get("Retry-After"), w.Result().Cookies())
+	}
+	if !strings.Contains(w.Body.String(), "synchronised") {
+		t.Errorf("the page does not say why: %s", w.Body)
+	}
+	loginWaitsForSync = func() bool { return false }
+	if w := post(); w.Code != http.StatusSeeOther {
+		t.Errorf("after the sync: status %d", w.Code)
+	}
+}
+
+func TestWaitingForFirstSync(t *testing.T) {
+	withSiblings := &WebConfig{Nodes: []NodeConfig{{Name: "core-9", Addr: "192.0.2.9:9443"}}}
+	alone := &WebConfig{}
+	tests := []struct {
+		name    string
+		cfg     *WebConfig
+		age     time.Duration
+		synced  bool
+		waiting bool
+	}{
+		{"just started with siblings", withSiblings, time.Second, false, true},
+		{"first pass done", withSiblings, time.Second, true, false},
+		{"wait is over", withSiblings, loginSyncWait, false, false},
+		{"no siblings", alone, time.Second, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newAuthSync(&webauth.Store{}, newConfigRef(tt.cfg))
+			a.startedAt = time.Now().Add(-tt.age)
+			a.synced.Store(tt.synced)
+			if got := a.waitingForFirstSync(); got != tt.waiting {
+				t.Errorf("waiting = %v, want %v", got, tt.waiting)
+			}
+		})
+	}
+}

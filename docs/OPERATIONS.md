@@ -27,6 +27,26 @@ changes button.
   different content is repaired. A node at the same revision with
   different content (a hand edit) and a node that reports no revision
   (0.9.8.8 and older) are listed on the Overview page and left alone.
+- **Outage rules.** Once every configured core runs the version that
+  has them (the Overview says which cores are still below it), four
+  rules apply: (1) a configuration commit is refused on a node that does
+  not see a strict majority of the cores (HTTP 503, `no_quorum`), so an
+  isolated node can never accept a change; (2) a commit staged on an
+  older revision is refused on a node that is already further ahead
+  (HTTP 409, `stale_base`), stage it again; (3) after a start a node
+  compares its configuration with its peers before it starts scopes or
+  raises its VRRP priority, waits up to 30 seconds, and then serves its
+  own configuration with an "unverified" notice if nobody answers, but
+  stays held while a peer has a newer configuration until the catch-up
+  has run (already running scopes are never stopped by this); (4) a
+  membership epoch: `dnshived --force-standalone` on the console makes a
+  node the only member, and a node that sees a peer with a higher epoch
+  stops serving until it is re-adopted
+  (`docs/COOKBOOK.md`). After a start, the web UI also waits up to 30
+  seconds for the first sync of the users before it accepts a login.
+  Nothing is enforced while any core is below the required version, so a
+  rolling upgrade never blocks itself. Membership edits (add, replace,
+  remove a core) keep their own rules and do not change the epoch.
 - **Nodes** are onboarded, replaced or offboarded from Cluster Config
   (also staged); a new host's join code is required.
 - **Backups:** Back up now, automated encrypted backups replicated to
@@ -130,7 +150,7 @@ Main read endpoints:
 
 | Endpoint | Description |
 |----------|-------------|
-| `/api/v1/status` | node state, serving, configured and disabled scopes, epoch, generation, version, config revision |
+| `/api/v1/status` | node state, serving, configured and disabled scopes, epoch, generation, version, config revision, membership epoch, outage rules |
 | `/api/v1/cluster` | peers and reachability |
 | `/api/v1/cluster/snapshot` | status, system, events, daemons of every node in one call |
 | `/api/v1/cluster/activation` | whether every configured core runs at least the version a later feature needs, and which nodes do not (nothing uses it yet) |

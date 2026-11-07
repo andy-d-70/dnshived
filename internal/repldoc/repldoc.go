@@ -109,7 +109,9 @@ type Syncer struct {
 	DecodeMeta func(raw []byte) (Meta, error)
 	// OnConflict is called when a peer holds a different document with the same version.
 	OnConflict func(local, remote Meta, peer string)
-	Logf       func(format string, args ...any)
+	// AfterPass is called after every comparison started by Run.
+	AfterPass func()
+	Logf      func(format string, args ...any)
 
 	mu sync.Mutex
 }
@@ -223,6 +225,9 @@ func (s *Syncer) Run(ctx context.Context, delay, interval time.Duration) {
 				return
 			case <-t.C:
 				s.SyncOnce()
+				if s.AfterPass != nil {
+					s.AfterPass()
+				}
 				t.Reset(interval)
 			}
 		}

@@ -592,6 +592,15 @@ type Cluster struct {
 	ConfigRevisionAt     string `json:"config_revision_at,omitempty"`
 	ConfigRevisionOrigin string `json:"config_revision_origin,omitempty"`
 
+	// MembershipEpoch rises when an operator declares this node the only member
+	// (dnshived --force-standalone). A node that sees a peer with a higher epoch
+	// was removed while it was away and is held until it is re-adopted.
+	MembershipEpoch int64 `json:"membership_epoch,omitempty"`
+
+	// OutageRulesActive latches once every configured core was seen running a
+	// version that enforces the outage rules; it stays set while peers are away.
+	OutageRulesActive bool `json:"outage_rules_active,omitempty"`
+
 	ClusterID   string   `json:"cluster_id"`
 	NodeID      string   `json:"node_id"`
 	Role        string   `json:"role"`
@@ -882,8 +891,18 @@ func Save(path string, c *Cluster) error {
 		return fmt.Errorf("marshal cluster config: %w", err)
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	os.Remove(tmp)
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
 		return fmt.Errorf("write cluster config: %w", err)
+	}
+	_, werr := f.Write(data)
+	if cerr := f.Close(); werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("write cluster config: %w", werr)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
