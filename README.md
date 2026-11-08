@@ -37,19 +37,25 @@ of failure.
 
 Web UI on a three-node lab cluster (dark theme; IP addresses blurred).
 
-**Overview**: cluster state, quorum, probes and path trust at a glance.
+**Overview**: cluster state, served scopes per node, probe coverage, the worst
+cluster paths and the health checks at a glance, with the newest events below.
 
 ![Overview](artwork/screenshots/overview.png)
 
-**Cluster paths**: every core's alternate paths to its peers, with a
-trust score per path.
-
-![Cluster paths](artwork/screenshots/cluster-paths.png)
-
-**Scopes**: one row per VLAN, with serving node, pool usage and the
-probe host's live DHCP/DNS result.
+**Scopes**: one row per VLAN with serving node, pool usage and the probe host's
+live DHCP/DNS result; sortable columns and a menu per scope.
 
 ![Scopes](artwork/screenshots/scopes.png)
+
+**Probes**: the probe host's results per scope, with tabs for manual probes,
+probe hosts and TLS, history and settings.
+
+![Probes](artwork/screenshots/probes.png)
+
+**Cluster settings**: nodes, interfaces, addresses and the cluster-wide
+settings, one tab each.
+
+![Cluster settings](artwork/screenshots/cluster-settings.png)
 
 ## Components
 
@@ -73,7 +79,7 @@ See [INSTALL.md](docs/INSTALL.md) for the full walkthrough.
 ```sh
 git clone https://github.com/andy-d-70/dnshived.git
 cd dnshived
-git checkout v0.9.8.8    # latest release
+git checkout v0.9.8.9    # latest release
 
 # Debian/Ubuntu
 sudo apt install debhelper golang-go && make deb && sudo apt install ../dnshived*.deb
