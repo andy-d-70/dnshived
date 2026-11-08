@@ -1573,3 +1573,21 @@ func TestStatusTmpl_OverviewCardsCarryTheirFigures(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusTmpl_NodeStateStaysOnOneLine(t *testing.T) {
+	data := overviewData{
+		ClusterState: "STABLE", ClusterClass: "ok",
+		Rows:          []statusRow{{Node: NodeConfig{Name: "core-1"}, Status: nodeStatus{Role: "core-1", State: "STABLE", Version: "0.9.9"}, Nickname: "core-1", Class: "ok", Icon: "✔"}},
+		ProbeHostRows: []probeHostOverviewRow{{Name: "probe", Icon: "✔", Class: "ok", State: "RUNNING"}},
+	}
+	var buf strings.Builder
+	if err := statusTmpl.Execute(&buf, data); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(buf.String(), `class="ok st"`); n != 2 {
+		t.Errorf("the state cells of a node and of the probe host must carry the one-line class, found %d", n)
+	}
+	if !strings.Contains(styleHTML, "td.st{white-space:nowrap}") {
+		t.Error("the one-line state class has no style")
+	}
+}

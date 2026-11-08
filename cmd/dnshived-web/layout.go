@@ -593,7 +593,8 @@ button.btn-sm,.row-menu>summary{min-height:36px}
 .banner.crit{border-left-color:var(--crit)}
 table.small th,table.small td{padding:.3rem .5rem;font-size:.9rem}
 .kv-table td:first-child{color:var(--muted);white-space:nowrap}
-td.ver{white-space:nowrap;font-size:.85rem}
+td.ver{white-space:nowrap;font-size:.8rem}
+td.st{white-space:nowrap}
 .events li{padding:.3rem 0;overflow-wrap:anywhere}
 .ev-time{white-space:nowrap;margin-right:.3rem}
 details.card-details{padding:.05rem 1rem}

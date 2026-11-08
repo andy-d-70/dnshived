@@ -72,14 +72,12 @@ moved to <a href="/probes#settings">probes &rarr;</a>.</p>
 </section>
 <section class="tab-pane" id="tab-addresses" data-tab="DNS &amp; DHCP addresses" data-tab-order="3">
 <h2 id="dns">Core DNS/DHCP addresses</h2>
-<p class="dim">Loopback bind addresses for the two consolidated per-worker
-"core" dnsmasq instances (0.9.7 DNS/DHCP consolidation prototype) —
-dnsmasq.central (DNS) and central DHCP. Cluster-wide, identical on every
-worker (unlike node_ip). Blank = use the built-in default
-(127.0.0.42/127.0.0.21). Checked for valid syntax on save (a real IPv4
-address in 127.0.0.0/8, not colliding with 127.0.0.1 or this host's own
-systemd-resolved stub addresses, and the two must differ) — changing
-either needs a daemon restart to take effect.</p>
+<p class="dim">Loopback bind addresses of the two central dnsmasq instances on every node:
+dnsmasq.central (DNS) and the central DHCP. Cluster-wide, identical on every
+node (unlike node_ip). Blank = the built-in default (127.0.0.42 and
+127.0.0.21). Checked on save: a real IPv4 address in 127.0.0.0/8, not
+127.0.0.1 and not one of this host's systemd-resolved stub addresses, and the
+two must differ. Changing either needs a daemon restart.</p>
 <table border="1" cellpadding="4">
 <tr><td>core_dns_address</td><td><input name="core_dns_address" value="{{.Cluster.CoreDNSAddress}}" size="20" placeholder="127.0.0.42"></td></tr>
 <tr><td>core_dhcp_address</td><td><input name="core_dhcp_address" value="{{.Cluster.CoreDHCPAddress}}" size="20" placeholder="127.0.0.21"></td></tr>
@@ -134,34 +132,23 @@ plain reload can't — see cache_max_bytes' own tooltip for why).</p>
 </tr>
 {{end}}
 </table></div>
-<p class="dim">Display name is purely cosmetic — it's shown instead of
-the real name above wherever this cluster's nodes are listed, but
-never changes the real identity (routing, role-matching, etc. all keep
-using the real name). Offboard, replace, and onboard-as-probe (below)
-all now stage a pending node action instead of executing immediately —
-review and commit (or discard) it from <a href="/pending">Pending
-changes</a>, the same as every other config write in this package.
-Core roles (worker-a/worker-b/arbiter) are fixed by this project's
-architecture — there's no "add" for a role that isn't already one of
-the three; a dead core node is replaced under its existing role
-instead, from the discovered-node list below.</p>
+<p class="dim">The display name is cosmetic: it is shown instead of the real name
+wherever nodes are listed and never changes a node's identity. Offboard, replace
+and onboard-as-probe stage a pending node action; review and commit (or discard)
+it from <a href="/pending">Pending changes</a>. The core roles are fixed (core-1,
+core-2, core-3): a dead core node is replaced under its existing role from the
+discovered-node list below.</p>
 
 <h2 id="discovered">Discovered on the network</h2>
-<p class="dim">Fresh, unclaimed dnshived/dnshived-probe installs currently
-broadcasting themselves on the mgmt segment (LAN autodiscovery, 0.9.8) —
-saves typing an address by hand below. The join code itself is never
-broadcast; read it off the candidate's own console/journal as always.
-Onboarding or replacing here only STAGES the action — nothing is pushed
-to the candidate node until you commit it from Pending changes. Two
-separate actions, on purpose (2026-09-06): "Onboard as" only ever offers a
-role/probe that's currently MISSING (nothing to disrupt); "Replace" only
-ever offers one that's currently OCCUPIED (the old one is decommissioned/
-dropped as part of the same job) — a role can never appear in both.
-Real prechecks now run BEFORE any of that: click "Inspect" first — it
-physically verifies (by discovery broadcast, not by trusting names) which
-of this candidate's own interfaces line up with this cluster's own trunk
-interfaces, and reports its OS. This can take several seconds per
-interface; nothing is changed on the candidate by inspecting it.</p>
+<p class="dim">Fresh dnshived or dnshived-probe installs that announce themselves on
+the management segment. The join code is never broadcast: read it from the
+candidate's console or journal. Onboarding or replacing only stages the action;
+nothing is pushed to the candidate until you commit it from Pending changes.
+"Onboard as" offers only a role or probe that is missing, "Replace" only one that
+is occupied. Click "Inspect" first: it checks by discovery broadcast which of the
+candidate's interfaces line up with the cluster's trunk interfaces and reports
+its OS, which can take several seconds per interface. Inspecting changes nothing
+on the candidate.</p>
 {{if .Discovered}}
 <div class="table-wrap"><table border="1" cellpadding="4" data-stack>
 <tr><th>Hostname</th><th>Address</th><th>Version</th><th>Last seen</th><th>Inspect</th><th>Onboard as (missing)</th><th>Replace (occupied)</th></tr>

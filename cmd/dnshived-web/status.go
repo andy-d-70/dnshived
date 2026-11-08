@@ -1147,7 +1147,7 @@ setting once every node is reachable.</strong></p>
 <section class="card">
 <h2>Cluster nodes</h2>
 <table class="small fixed-table" data-stack>
-<colgroup><col style="width:19%"><col style="width:22%"><col style="width:33%"><col style="width:26%"></colgroup>
+<colgroup><col style="width:16%"><col style="width:25%"><col style="width:35%"><col style="width:24%"></colgroup>
 <tr><th>Name</th><th>State</th><th>Version</th><th>Info</th></tr>
 {{range .Rows}}
 <tr>
@@ -1155,7 +1155,7 @@ setting once every node is reachable.</strong></p>
   {{if .FetchError}}
   <td colspan="3" class="crit">UNREACHABLE: {{.FetchError}}</td>
   {{else}}
-  <td class="{{.Class}}">{{.Icon}} {{.Status.State}}</td>
+  <td class="{{.Class}} st">{{.Icon}} {{.Status.State}}</td>
   <td class="ver">{{.Status.Version}}</td>
   <td>{{.Info}}</td>
   {{end}}
@@ -1170,7 +1170,7 @@ setting once every node is reachable.</strong></p>
 {{range .ProbeHostRows}}
 <tr>
   <td class="node-probe" title="probe · {{.Hostname}} · {{.Addr}} · {{.SysStr}}">{{.Name}}</td>
-  <td class="{{.Class}}">{{.Icon}} {{.State}}</td>
+  <td class="{{.Class}} st">{{.Icon}} {{.State}}</td>
   <td class="ver">{{.Version}}</td>
   <td>{{.Info}}</td>
 </tr>
