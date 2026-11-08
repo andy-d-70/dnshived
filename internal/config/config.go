@@ -64,9 +64,58 @@ type Platform struct {
 
 	WorkerOverrides map[string]map[string]string `json:"worker_overrides,omitempty"`
 
+	// Serving switches an interface on or off for serving scopes. Absent: a
+	// worker serves, the management interface does not.
+	Serving map[string]bool `json:"serving,omitempty"`
+
 	// MgmtOverrides is a role's own management interface name where it
 	// differs from Mgmt.
 	MgmtOverrides map[string]string `json:"mgmt_overrides,omitempty"`
+}
+
+// Serves reports whether iface may carry scopes. Workers do unless switched
+// off; the management interface (untagged scopes only, its static address is
+// never touched) only when switched on.
+func (p *Platform) Serves(iface string) bool {
+	if p == nil {
+		return false
+	}
+	if v, ok := p.Serving[iface]; ok {
+		return v
+	}
+	if iface != p.Mgmt {
+		return true
+	}
+	for _, w := range p.Workers {
+		if w == iface {
+			return true
+		}
+	}
+	return false
+}
+
+// ServingInterfaces is every interface a scope may be put on: the serving
+// workers in their configured order, then the management interface when it
+// serves. Appending it last keeps every worker's position unchanged.
+func (p *Platform) ServingInterfaces() []string {
+	if p == nil {
+		return nil
+	}
+	var out []string
+	for _, w := range p.Workers {
+		if p.Serves(w) {
+			out = append(out, w)
+		}
+	}
+	if p.Mgmt != "" && p.Serves(p.Mgmt) {
+		for _, w := range out {
+			if w == p.Mgmt {
+				return out
+			}
+		}
+		out = append(out, p.Mgmt)
+	}
+	return out
 }
 
 // LocalName maps a configured name to this host's kernel name; dnshived
@@ -1041,6 +1090,35 @@ func (c *Cluster) validate() error {
 		for iface := range c.Platform.InterfaceLabels {
 			if !workerSet[iface] || iface == c.Platform.Mgmt {
 				return fmt.Errorf("platform.interface_labels: %q is not a configured worker interface", iface)
+			}
+		}
+	}
+
+	if c.Platform != nil {
+		for iface, on := range c.Platform.Serving {
+			if !workerSet[iface] {
+				return fmt.Errorf("platform.serving: %q is not a configured interface", iface)
+			}
+			if on {
+				continue
+			}
+			var active []string
+			for name, sc := range c.Scopes {
+				if sc.Parent == iface && !sc.DNSMasqDisabled {
+					active = append(active, name)
+				}
+			}
+			if len(active) > 0 {
+				sort.Strings(active)
+				shown := active
+				if len(shown) > 8 {
+					shown = shown[:8]
+				}
+				more := ""
+				if len(active) > len(shown) {
+					more = fmt.Sprintf(" and %d more", len(active)-len(shown))
+				}
+				return fmt.Errorf("platform.serving: %q cannot stop serving while %d active scope(s) are on it (%s%s): move them to another interface or disable them first", iface, len(active), strings.Join(shown, ", "), more)
 			}
 		}
 	}

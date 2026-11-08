@@ -449,7 +449,7 @@ func TestTopologyTmpl_SummaryLinksToTheSpecificErroringScope(t *testing.T) {
 	data := topologyPageData{
 		TotalScopes:    59,
 		ErrorScopes:    1,
-		ErrorScopeList: []topologyErrorScope{{Name: "rand-ens20-0042", Reason: "no server"}},
+		ErrorScopeList: []topologyErrorScope{{Name: "rand-ens20-0042", Iface: "ens20", Reason: "no server"}},
 		HealthyClass:   "crit",
 	}
 	var buf bytes.Buffer
@@ -457,8 +457,8 @@ func TestTopologyTmpl_SummaryLinksToTheSpecificErroringScope(t *testing.T) {
 		t.Fatalf("topologyTmpl.Execute failed: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, `<a href="#pop-rand-ens20-0042"`) {
-		t.Errorf("expected a link naming the specific erroring scope, got:\n%s", out)
+	if !strings.Contains(out, `<a href="/topology?open=ens20#pop-rand-ens20-0042"`) {
+		t.Errorf("expected a link naming the specific erroring scope that also opens its (collapsed) interface, got:\n%s", out)
 	}
 	if !strings.Contains(out, "rand-ens20-0042") {
 		t.Error("expected the erroring scope's own name to actually appear in the summary")

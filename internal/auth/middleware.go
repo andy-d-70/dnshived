@@ -28,6 +28,9 @@ var exemptPaths = map[string]bool{
 	"/api/v1/coord/config/relay": true,
 	"/api/v1/token/request":      true,
 	"/api/v1/token/renew":        true,
+	// A probe host's certificate fingerprint and TLS port: public by nature,
+	// and needed to pin the probe before any token may cross the wire.
+	"/api/v1/tls-info": true,
 	// Peer-to-peer lease sync, gated by trusted_hosts in internal/leasesync.
 	"/api/v1/leasesync":             true,
 	"/api/v1/leasesync/fingerprint": true,

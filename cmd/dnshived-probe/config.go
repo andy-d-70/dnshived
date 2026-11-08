@@ -65,6 +65,25 @@ type ProbeConfig struct {
 	// VLAN construction.
 	TrunkParents []string `json:"trunk_parents,omitempty"`
 
+	// MgmtInterface is this host's management NIC. It may serve scopes
+	// (untagged ones), but its static address and sub-interfaces are never
+	// touched: it is not a trunk and no VLAN is built or removed on it.
+	MgmtInterface string `json:"mgmt_interface,omitempty"`
+
+	// ManualProbes are operator-defined DHCP watches on any interface this
+	// host serves, tagged or untagged; see ManualProbe.
+	ManualProbes []ManualProbe `json:"manual_probes,omitempty"`
+
+	// History is what the probe host records of its own results; see HistoryConfig.
+	History *HistoryConfig `json:"history,omitempty"`
+
+	// PlainHTTP keeps the unencrypted API on listen_addr. Absent means on, so
+	// a configuration written before this key keeps working; a probe adopted
+	// with a pinned certificate has it switched off by the web UI.
+	PlainHTTP *bool `json:"plain_http,omitempty"`
+
+	manualLive atomic.Pointer[[]ManualProbe]
+
 	// KnownVLANsPath persists, across restarts, the (parent, vlan_id) set this
 	// host last actually constructed.
 	KnownVLANsPath string `json:"known_vlans_path,omitempty"`
@@ -74,6 +93,22 @@ type ProbeConfig struct {
 	ParallelProbing bool `json:"parallel_probing,omitempty"`
 
 	parallelLive atomic.Int32
+}
+
+func (c *ProbeConfig) plainHTTP() bool { return c.PlainHTTP == nil || *c.PlainHTTP }
+
+// manualProbeList returns the manual probes now in force: the live list when
+// one was applied, else the loaded one.
+func (c *ProbeConfig) manualProbeList() []ManualProbe {
+	if l := c.manualLive.Load(); l != nil {
+		return *l
+	}
+	return c.ManualProbes
+}
+
+// SetManualProbes applies a new manual probe list to the running process.
+func (c *ProbeConfig) SetManualProbes(list []ManualProbe) {
+	c.manualLive.Store(&list)
 }
 
 // Parallel reports whether sweeps should probe scopes concurrently right
@@ -142,14 +177,35 @@ func loadProbeConfig(path string) (*ProbeConfig, error) {
 	return &c, nil
 }
 
+// trunkParents are the NICs VLANs are built on; the management interface
+// never is one.
 func (c *ProbeConfig) trunkParents() []string {
+	var all []string
 	if len(c.TrunkParents) > 0 {
-		return c.TrunkParents
+		all = c.TrunkParents
+	} else if c.TrunkParent != "" {
+		all = []string{c.TrunkParent}
 	}
-	if c.TrunkParent != "" {
-		return []string{c.TrunkParent}
+	var out []string
+	for _, p := range all {
+		if p != c.MgmtInterface {
+			out = append(out, p)
+		}
 	}
-	return nil
+	return out
+}
+
+// servingParents are the NICs scopes are probed on: the trunks and the
+// management interface.
+func (c *ProbeConfig) servingParents() []string {
+	out := c.trunkParents()
+	if c.MgmtInterface != "" {
+		out = append(out, c.MgmtInterface)
+	}
+	if len(out) == 0 && c.TrunkParent != "" {
+		out = []string{c.TrunkParent}
+	}
+	return out
 }
 
 func (c *ProbeConfig) knownVLANsPath() string {

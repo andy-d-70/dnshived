@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -75,28 +76,64 @@ func poolUsageClass(pct int) string {
 	}
 }
 
+// rowMenuScriptHTML opens one row menu at a time on a click, closes it on
+// Esc, a click elsewhere, a scroll, a choice, or once the pointer has been away
+// for a moment, and places it from the button's own position so the table's
+// scrolling container cannot clip it.
+const rowMenuScriptHTML = `<script>
+(function(){
+var menus=document.querySelectorAll('details.row-menu'),DELAY=400;
+function closeAll(except){menus.forEach(function(m){if(m!==except){m.removeAttribute('open')}})}
+function place(m){
+ var btn=m.querySelector('summary'),list=m.querySelector('.row-menu-list'),r=btn.getBoundingClientRect();
+ list.style.visibility='hidden';list.style.left='0px';list.style.top='0px';
+ var w=list.offsetWidth,h=list.offsetHeight,left=Math.max(8,Math.min(r.right-w,window.innerWidth-w-8)),top=r.bottom+4;
+ if(top+h>window.innerHeight-8){top=Math.max(8,r.top-h-4)}
+ list.style.left=left+'px';list.style.top=top+'px';list.style.visibility='visible';
+}
+menus.forEach(function(m){
+ var timer=null,list=m.querySelector('.row-menu-list');
+ function clear(){if(timer){clearTimeout(timer);timer=null}}
+ m.addEventListener('toggle',function(){if(m.open){closeAll(m);place(m)}else{clear()}});
+ m.addEventListener('mouseleave',function(){if(m.open){clear();timer=setTimeout(function(){m.removeAttribute('open')},DELAY)}});
+ m.addEventListener('mouseenter',clear);
+ m.addEventListener('keydown',function(e){
+  var items=Array.prototype.slice.call(list.querySelectorAll('a,button')),i=items.indexOf(document.activeElement);
+  if(e.key==='Escape'){m.removeAttribute('open');m.querySelector('summary').focus()}
+  else if(e.key==='ArrowDown'){e.preventDefault();(items[i+1]||items[0]).focus()}
+  else if(e.key==='ArrowUp'){e.preventDefault();(items[i-1]||items[items.length-1]).focus()}
+ });
+ list.addEventListener('click',function(e){if(e.target.closest('a,button')){m.removeAttribute('open')}});
+});
+document.addEventListener('click',function(e){menus.forEach(function(m){if(m.open&&!m.contains(e.target)){m.removeAttribute('open')}})});
+window.addEventListener('scroll',function(){closeAll(null)},true);
+window.addEventListener('resize',function(){closeAll(null)});
+})();
+</script>`
+
 var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
 <title>dnshived-web — scopes</title>
 ` + styleHTML + `
 <h1>Scopes</h1>
 ` + navHTML + `
 <div class="view-tabs"><span class="active">List view</span><a href="/topology">Topology view &rarr;</a></div>
-<p><a href="/scopes/wizard">+ Add scope (guided wizard)</a></p>
-{{if gt .Total 0}}<form method="post" action="/scopes/rebalance-all" style="display:inline" onsubmit="return confirm('Approve a rebalance to each scope\'s own preferred core, cluster-wide? This stages the approval as a pending change on every configured node — nothing moves until you commit from Pending changes, and each scope only actually moves once its own preferred core is confirmed alive and stable. Continue?')" title="a scope never moves back to its preferred core automatically while a different node is already serving it correctly — this explicitly approves doing so now, for every scope at once">
-<button type="submit">Rebalance all scopes to their preferred core</button>
-</form>{{end}}
-<p>{{.Total}} configured scope(s) — page {{.Page}}/{{.TotalPages}}
-{{if gt .Page 1}}<a href="/scopes?page={{.PrevPage}}">prev</a>{{else}}<span class="dim">prev</span>{{end}}
-{{if lt .Page .TotalPages}}<a href="/scopes?page={{.NextPage}}">next</a>{{end}}
+<p><a href="/scopes/wizard">+ Add scope (guided wizard)</a> &middot; <a href="/scopes/move-all">Move all scopes from one interface to another</a></p>
+
+<div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
+<p style="margin:.5rem 0">{{.Total}} configured scope(s) — page {{.Page}}/{{.TotalPages}}
+{{if gt .Page 1}}<a href="{{.PrevURL}}">prev</a>{{else}}<span class="dim">prev</span>{{end}}
+{{if lt .Page .TotalPages}}<a href="{{.NextURL}}">next</a>{{end}}
 — <a href="/config/scopes#new-scope-slot">add via the bulk editor</a>
 </p>
+{{if gt .Total 0}}<form method="post" action="/scopes/rebalance-all" style="margin:0" onsubmit="return confirm('Approve a rebalance to each scope\'s own preferred core, cluster-wide? This stages the approval as a pending change on every configured node — nothing moves until you commit from Pending changes, and each scope only actually moves once its own preferred core is confirmed alive and stable. Continue?')" title="a scope never moves back to its preferred core automatically while a different node is already serving it correctly — this explicitly approves doing so now, for every scope at once" title="Moves every scope to its own preferred core. This is not a trivial change: it is staged as a pending change on every node and nothing happens until you review and commit it."><button type="submit" class="btn-quiet">Rebalance all scopes to their preferred core&hellip; (pending change)</button></form>{{end}}
+</div>
 ` + probeCellDefineHTML + `
 <div class="table-wrap">
 <table border="1" cellpadding="4" cellspacing="0">
-<tr><th>Scope</th><th>Worker</th><th title="the VLAN sub-interface actually constructed on the serving worker's trunk NIC — parent.vlan_id">Interface</th><th>VLAN</th><th>Subnet</th><th>Token Owner</th><th>Status</th><th title="DHCP pool usage — leased addresses out of the scope's own dhcp_range size">Pool</th>{{if .HasProbeHosts}}<th>Probe</th>{{end}}<th></th></tr>
+<tr>{{range .Headers}}<th aria-sort="{{.AriaSort}}" style="white-space:nowrap;vertical-align:middle"{{if .Title}} title="{{.Title}}"{{end}}><a href="{{.URL}}" style="color:inherit;text-decoration:none">{{.Label}}<span style="display:inline-block;width:1em">{{.Arrow}}</span></a></th>{{end}}<th></th></tr>
 {{range .Rows}}
 <tr>
-  <td>{{if .Color}}<span class="name-dot" style="background:{{.Color}}" title="color tag — change on the scope's own edit page"></span>{{end}}<a href="/scopes/{{.Name}}">{{.Display}}</a>{{if .PendingDelete}} <span class="crit" title="a pending change stages this scope's removal — still live and served until you commit from Pending changes">marked for deletion</span>{{end}}</td>
+  <td style="white-space:nowrap">{{if .Color}}<span class="name-dot" style="background:{{.Color}}" title="color tag — change on the scope's own edit page"></span>{{end}}<a href="/scopes/{{.Name}}">{{.Display}}</a>{{if .PendingDelete}} <span class="crit" title="a pending change stages this scope's removal — still live and served until you commit from Pending changes">marked for deletion</span>{{end}}</td>
   <td class="{{.WorkerClass}}">{{.Worker}}</td>
   <td title="{{.Worker}}'s trunk NIC ({{.ParentInterface}}), VLAN-tagged for this scope">{{.Interface}}</td>
   <td>{{.VLANID}}</td>
@@ -105,9 +142,13 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
   <td class="{{.Class}}"{{if .StatusTitle}} title="{{.StatusTitle}}"{{end}}>{{.Status}}</td>
   <td style="white-space:nowrap">{{if gt .PoolSize 0}}<span class="pool-bar"><span class="pool-fill {{.PoolClass}}" style="width:{{.PoolUsagePct}}%"></span></span><span class="{{.PoolClass}}">{{.PoolUsed}} of {{.PoolSize}} used</span>{{else}}<span class="dim">—</span>{{end}}</td>
   {{if $.HasProbeHosts}}<td style="white-space:nowrap">{{range .ProbeCells}}{{template "probecell" .}}<br>{{end}}</td>{{end}}
-  <td>
-  <form method="post" action="/scopes/{{.Name}}/toggle-disabled" style="display:inline" onsubmit="return confirm('This will stage a pending change on every configured node ({{if .Disabled}}enable{{else}}disable{{end}} scope {{.Name}}) — nothing is applied until you commit from Pending changes. {{if not .Disabled}}DHCP, DNS and probing stop for this scope; the VIP and VRRP are released; the VLAN interface and node addresses stay up.{{end}} Continue?')"><button type="submit" class="{{if .Disabled}}btn-success{{else}}btn-warn{{end}}">{{if .Disabled}}enable{{else}}disable{{end}}</button></form>
-  <form method="post" action="/scopes/{{.Name}}/delete" style="display:inline" onsubmit="return confirm('Really delete scope {{.Name}}? This stages its removal as a pending change on every configured node — nothing is torn down until you commit from Pending changes. Continue?')"><button type="submit" class="btn-danger">delete</button></form>
+  <td style="width:3rem;text-align:center"><details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.Name}}">&#9776;</summary>
+  <div class="row-menu-list" role="menu">
+  <a role="menuitem" href="/scopes/{{.Name}}">Open / edit</a>
+  <form method="post" action="/scopes/{{.Name}}/toggle-disabled" onsubmit="return confirm('This will stage a pending change on every configured node ({{if .Disabled}}enable{{else}}disable{{end}} scope {{.Name}}) — nothing is applied until you commit from Pending changes. {{if not .Disabled}}DHCP, DNS and probing stop for this scope; the VIP and VRRP are released; the VLAN interface and node addresses stay up.{{end}} Continue?')"><button type="submit" role="menuitem">{{if .Disabled}}Enable{{else}}Disable{{end}}</button></form>
+  <form method="post" action="/scopes/{{.Name}}/rebalance" onsubmit="return confirm('Approve a rebalance of scope {{.Name}} to its preferred core? This stages the approval as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')"><button type="submit" role="menuitem">Rebalance to preferred core</button></form>
+  <form method="post" action="/scopes/{{.Name}}/delete" onsubmit="return confirm('Really delete scope {{.Name}}? This stages its removal as a pending change on every configured node — nothing is torn down until you commit from Pending changes. Continue?')"><button type="submit" role="menuitem" class="danger">Delete&hellip;</button></form>
+  </div></details>
   </td>
 </tr>
 {{end}}
@@ -118,6 +159,7 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
 on, on the Worker column's node — parent trunk NIC + VLAN ID
 (<code>parent.vlan_id</code>), the same naming the daemon itself uses.
 Subnet is the scope's network address/prefix, not its VIP address.</p>
+` + rowMenuScriptHTML + probePopupHTML + `
 `))
 
 type scopesPageData struct {
@@ -129,6 +171,9 @@ type scopesPageData struct {
 	NextPage   int
 	// HasProbeHosts gates the Probe column entirely.
 	HasProbeHosts bool
+	Headers       []sortHeader
+	PrevURL       string
+	NextURL       string
 }
 
 // buildScopeRows builds the Scopes page's row set — extracted as a pure
@@ -216,6 +261,17 @@ func handleScopes(ref *configRef) http.HandlerFunc {
 			populateScopeProbeCells(scopes, cfg, tokens)
 		}
 
+		sortCol := r.URL.Query().Get("sort")
+		if !validScopeSortCol(sortCol) || (sortCol == "probe" && len(cfg.ProbeHosts) == 0) {
+			sortCol = "scope"
+		}
+		desc := r.URL.Query().Get("dir") == "desc"
+		sortScopeRows(scopes, sortCol, desc)
+		keep := url.Values{"sort": {sortCol}}
+		if desc {
+			keep.Set("dir", "desc")
+		}
+
 		totalPages := (len(scopes) + scopesPerPage - 1) / scopesPerPage
 		if totalPages == 0 {
 			totalPages = 1
@@ -241,9 +297,22 @@ func handleScopes(ref *configRef) http.HandlerFunc {
 			PrevPage:      page - 1,
 			NextPage:      page + 1,
 			HasProbeHosts: len(cfg.ProbeHosts) > 0,
+			Headers:       scopeSortHeaders(sortCol, desc, nil, len(cfg.ProbeHosts) > 0),
+			PrevURL:       pageURL(keep, page-1),
+			NextURL:       pageURL(keep, page+1),
 		}
 		renderTemplate(w, scopesTmpl, data, "scopes")
 	}
+}
+
+// pageURL is the scope list at page n with the current sort kept.
+func pageURL(keep url.Values, n int) string {
+	q := url.Values{}
+	for k, v := range keep {
+		q[k] = v
+	}
+	q.Set("page", strconv.Itoa(n))
+	return "/scopes?" + q.Encode()
 }
 
 // scopeSubnetCIDR returns the network CIDR for a scope's VIP.
@@ -331,7 +400,7 @@ func populateScopeProbeCells(scopes []scopeRow, cfg *WebConfig, tokens map[strin
 		var stale bool
 		if tok, ok := tokens[res.scope]; ok {
 			uptimeSec, hasUptime := ownerUptime[tok.Owner]
-			probedAt, _ := time.Parse(time.RFC3339, res.pr.ProbedAt)
+			probedAt := res.pr.oldestProbedAt()
 			stale = probeStale(probedAt, uptimeSec, hasUptime, now)
 		}
 		if scopes[j.idx].Disabled {
@@ -906,9 +975,7 @@ func handleScopeDetail(ref *configRef, store *TemplateStore) http.HandlerFunc {
 			data.ClientDNSServerText = sc.ClientDNSServer
 			data.VLANIDOptions = freeVLANIDsForEdit(c.Scopes, scope)
 			data.OtherSubnetsAttr = otherScopeSubnetsAttr(c.Scopes, scope)
-			if c.Platform != nil {
-				data.PlatformWorkers = c.Platform.Workers
-			}
+			data.PlatformWorkers = parentChoices(c)
 			data.RenderedConfig = renderScopePreview(scope, sc, c.DefaultDHCPOptions)
 			data.DHCPTemplatePicker = wizardTemplateButtonsHTML(TemplateKindDHCP, "scope_dhcp_options", buildTemplateRows(store.ByKind(TemplateKindDHCP)))
 			data.DNSTemplatePicker = wizardTemplateButtonsHTML(TemplateKindDNS, "scope_dns_records", buildTemplateRows(store.ByKind(TemplateKindDNS)))
@@ -1279,14 +1346,14 @@ func validateScopeMove(c config.Cluster, scope, parent string, vlanID int) error
 		return fmt.Errorf("vlan_id must be between 0 and 4094, got %d", vlanID)
 	}
 	known := false
-	for _, w := range c.Platform.Workers {
+	for _, w := range c.Platform.ServingInterfaces() {
 		if w == parent {
 			known = true
 			break
 		}
 	}
 	if !known {
-		return fmt.Errorf("parent %q is not a trunk interface of this cluster", parent)
+		return fmt.Errorf("parent %q is not a serving interface of this cluster", parent)
 	}
 	if parent == sc.Parent && vlanID == sc.VLANID {
 		return fmt.Errorf("scope %s is already on %s, VLAN %d — nothing to move", scope, parent, vlanID)

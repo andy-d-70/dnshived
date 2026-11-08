@@ -21,39 +21,62 @@ type probeTLSInfo struct {
 }
 
 // fetchProbeTLSInfo reads a probe host's TLS port and certificate fingerprint over its plain API.
-// The result is only checked against the fingerprint the operator typed; it is never trusted on its own.
+// It asks the public /api/v1/tls-info, which needs no token, so no token crosses the unencrypted connection;
+// a probe build that predates it is asked on /api/v1/status, which answers without a token only on a probe with no API tokens.
+// The result is only ever checked against what the operator confirms; it is never trusted on its own.
 func fetchProbeTLSInfo(host NodeConfig) (probeTLSInfo, error) {
-	var info probeTLSInfo
 	plain := NodeConfig{Name: host.Name, Addr: host.Addr}
-	req, err := http.NewRequest(http.MethodGet, plain.baseURL()+"/api/v1/status", nil)
+	info, status, err := getProbeTLSInfo(plain, "/api/v1/tls-info")
+	if err == nil && status == http.StatusOK {
+		return info, nil
+	}
+	if status != http.StatusNotFound {
+		if err == nil {
+			err = fmt.Errorf("status %d", status)
+		}
+		return probeTLSInfo{}, err
+	}
+	info, status, err = getProbeTLSInfo(plain, "/api/v1/status")
+	if err == nil && status != http.StatusOK {
+		err = fmt.Errorf("status %d (this probe host needs an upgrade to be pinned: its status needs a token)", status)
+	}
+	return info, err
+}
+
+func getProbeTLSInfo(plain NodeConfig, path string) (probeTLSInfo, int, error) {
+	var info probeTLSInfo
+	req, err := http.NewRequest(http.MethodGet, plain.baseURL()+path, nil)
 	if err != nil {
-		return info, err
+		return info, 0, err
 	}
 	resp, err := directHTTPClient.Do(req)
 	if err != nil {
-		return info, err
+		return info, 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return info, fmt.Errorf("status %s", resp.Status)
+		return info, resp.StatusCode, nil
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return info, err
+		return info, resp.StatusCode, err
 	}
 	if err := json.Unmarshal(body, &info); err != nil {
-		return info, fmt.Errorf("parse status: %w", err)
+		return info, resp.StatusCode, fmt.Errorf("parse %s: %w", path, err)
 	}
-	return info, nil
+	return info, resp.StatusCode, nil
 }
 
 // checkPinnedTLS confirms that host answers over TLS with exactly the certificate fp, before the pin is saved.
+// The pinned handshake is the proof: any HTTP answer means it succeeded, so a token-protected route may
+// answer 401 and still pass. The public tls-info route is asked, and when it answers with a fingerprint
+// that must be fp as well.
 func checkPinnedTLS(host NodeConfig, fp string) error {
 	pinned := &http.Client{
 		Timeout:   5 * time.Second,
 		Transport: &http.Transport{TLSClientConfig: probepin.Config(fp)},
 	}
-	req, err := http.NewRequest(http.MethodGet, "https://"+host.tlsAddr()+"/api/v1/status", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://"+host.tlsAddr()+"/api/v1/tls-info", nil)
 	if err != nil {
 		return err
 	}
@@ -61,9 +84,16 @@ func checkPinnedTLS(host NodeConfig, fp string) error {
 	if err != nil {
 		return err
 	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusInternalServerError {
 		return fmt.Errorf("TLS status %s", resp.Status)
+	}
+	if resp.StatusCode == http.StatusOK {
+		var info probeTLSInfo
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+		if json.Unmarshal(body, &info) == nil && info.TLSFingerprint != "" && info.TLSFingerprint != fp {
+			return fmt.Errorf("the probe reports the fingerprint %s over TLS, not the pinned one", info.TLSFingerprint)
+		}
 	}
 	return nil
 }

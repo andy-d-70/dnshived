@@ -405,8 +405,8 @@ func handleScopeWizard(ref *configRef, store *TemplateStore) http.HandlerFunc {
 		}
 
 		effectiveParent := r.PostFormValue("parent")
-		if effectiveParent == "" && c.Platform != nil && len(c.Platform.Workers) > 0 {
-			effectiveParent = c.Platform.Workers[0]
+		if effectiveParent == "" && c.Platform != nil && len(c.Platform.ServingInterfaces()) > 0 {
+			effectiveParent = c.Platform.ServingInterfaces()[0]
 		}
 
 		data := wizardData{
@@ -419,7 +419,7 @@ func handleScopeWizard(ref *configRef, store *TemplateStore) http.HandlerFunc {
 			ClientDNSTemplates: buildTemplateRows(store.ByKind(TemplateKindClientDNS)),
 		}
 		if c.Platform != nil {
-			data.Workers = c.Platform.Workers
+			data.Workers = c.Platform.ServingInterfaces()
 		}
 		var rows []scopeFormRow
 		for name, sc := range c.Scopes {

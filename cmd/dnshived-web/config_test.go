@@ -519,50 +519,32 @@ func TestProbesTmpl_ProbeParallelSectionRendersScopeCounts(t *testing.T) {
 	}
 }
 
-func TestProbesTmpl_ProbeParallelWordingSingularForOneHost(t *testing.T) {
-	one := probesPageData{
-		ProbeHostNames: []string{"probe-42"},
+func TestProbesTmpl_NoParallelProbingControlAndManualProbesSectionPresent(t *testing.T) {
+	data := probesPageData{
+		ProbeHostNames: []string{"probe"},
 		probeManagementData: probeManagementData{
-			NodeProbeHosts:        []NodeConfig{{Name: "probe-42", Addr: "192.0.2.42:9444"}},
-			ProbeParallelRows:     []probeParallelRow{{Name: "probe-42", Addr: "192.0.2.42:9444", Reachable: true, ScopeCount: 40}},
+			NodeProbeHosts:        []NodeConfig{{Name: "probe", Addr: "192.0.2.42:9444"}},
+			ProbeParallelRows:     []probeParallelRow{{Name: "probe", Addr: "192.0.2.42:9444", Reachable: true, ScopeCount: 40}},
 			ProbeHostDisplayNames: map[string]string{},
+			ManualIfaces:          []string{"ens19", "ens18"},
+			ManualProbeHosts: []manualProbeHost{{Name: "probe", Addr: "192.0.2.42:9444", Rows: []manualProbeRow{
+				{Name: "seg", Interface: "ens18", VLAN: "untagged", ResultText: "ROGUE 10.0.0.99", ResultClass: "crit",
+					Chips: []serverChip{{Server: "10.0.0.99", Label: "unknown", Class: "crit", Action: "ack", CanToggle: true}}},
+			}}},
 		},
 	}
 	var buf strings.Builder
-	if err := probesTmpl.Execute(&buf, one); err != nil {
+	if err := probesTmpl.Execute(&buf, data); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, `value="Apply"`) {
-		t.Errorf("expected the singular \"Apply\" button with exactly one probe host, got:\n%s", out)
+	if strings.Contains(out, "probe_parallel_enabled") || strings.Contains(out, "Enable parallel probing") {
+		t.Error("the parallel probing control must be gone: the per-interface runners are always on")
 	}
-	if strings.Contains(out, "Apply to all probe hosts") {
-		t.Errorf("expected the plural \"Apply to all probe hosts\" wording to be gone with only one host, got:\n%s", out)
-	}
-	if !strings.Contains(out, "Enable parallel probing on this probe host") {
-		t.Errorf("expected the singular checkbox label, got:\n%s", out)
-	}
-
-	two := probesPageData{
-		ProbeHostNames: []string{"probe-a", "probe-b"},
-		probeManagementData: probeManagementData{
-			NodeProbeHosts: []NodeConfig{
-				{Name: "probe-a", Addr: "192.0.2.42:9444"}, {Name: "probe-b", Addr: "192.0.2.43:9444"},
-			},
-			ProbeParallelRows: []probeParallelRow{
-				{Name: "probe-a", Addr: "192.0.2.42:9444", Reachable: true, ScopeCount: 40},
-				{Name: "probe-b", Addr: "192.0.2.43:9444", Reachable: true, ScopeCount: 5},
-			},
-			ProbeHostDisplayNames: map[string]string{},
-		},
-	}
-	var buf2 strings.Builder
-	if err := probesTmpl.Execute(&buf2, two); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	out2 := buf2.String()
-	if !strings.Contains(out2, "Apply to all probe hosts") {
-		t.Errorf("expected the plural wording to stay with genuinely multiple probe hosts, got:\n%s", out2)
+	for _, want := range []string{`id="manual"`, `action="/probes/manual/add"`, `action="/probes/manual/remove"`, `action="/probes/manual/ack"`, `list="manual-ifaces"`, "ROGUE 10.0.0.99", `<option value="ens18">`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in the rendered page", want)
+		}
 	}
 }
 

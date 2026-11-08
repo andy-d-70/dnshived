@@ -23,6 +23,10 @@ func newDHCPProbeScheduler() *dhcpProbeScheduler {
 // probeScopeNow) shares.
 var probeScheduler = newDHCPProbeScheduler()
 
+// dnsScheduler is the DNS legs' own per-interface queue, so a slow DHCP
+// probe never holds up a DNS query.
+var dnsScheduler = newDHCPProbeScheduler()
+
 type trunkQueue struct {
 	priority chan func()
 	normal   chan func()

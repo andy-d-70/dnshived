@@ -86,7 +86,13 @@ type probeResult struct {
 	// level config.DNSRecord.ProbeDisabled).
 	Enabled  bool   `json:"enabled"`
 	ProbedAt string `json:"probed_at"`
-	DHCP     struct {
+	// DHCPProbedAt and DNSProbedAt are when each part finished; a part that
+	// has not run yet is flagged pending. Older probe hosts send neither.
+	DHCPProbedAt string `json:"dhcp_probed_at"`
+	DNSProbedAt  string `json:"dns_probed_at"`
+	DHCPPending  bool   `json:"dhcp_pending"`
+	DNSPending   bool   `json:"dns_pending"`
+	DHCP         struct {
 		Verdict string   `json:"verdict"`
 		Servers []string `json:"servers"`
 		Error   string   `json:"error"`
@@ -98,6 +104,31 @@ type probeResult struct {
 		LatencyMS int64  `json:"latency_ms"`
 		Error     string `json:"error"`
 	} `json:"dns"`
+}
+
+// oldestProbedAt is the oldest stamp among the parts that have run, so a
+// result counts as fresh only when every part is; zero when none is known.
+func (p probeResult) oldestProbedAt() time.Time {
+	stamps := []string{p.DHCPProbedAt, p.DNSProbedAt}
+	if p.DHCPPending {
+		stamps[0] = ""
+	}
+	if p.DNSPending {
+		stamps[1] = ""
+	}
+	var oldest time.Time
+	for _, raw := range stamps {
+		if raw == "" {
+			continue
+		}
+		if at, err := time.Parse(time.RFC3339, raw); err == nil && (oldest.IsZero() || at.Before(oldest)) {
+			oldest = at
+		}
+	}
+	if oldest.IsZero() {
+		oldest, _ = time.Parse(time.RFC3339, p.ProbedAt)
+	}
+	return oldest
 }
 
 // daemonStatus mirrors GET /api/v1/daemons's per-unit entry shape.
@@ -1620,15 +1651,20 @@ func probeCell(pr probeResult, have bool) (text, color string) {
 	dhcpDual := pr.DHCP.Error == "" && pr.DHCP.Verdict == "dual_active"
 	dhcpNoAnswer := pr.DHCP.Error == "" && pr.DHCP.Verdict == "no_answer"
 	dhcpUnknown := pr.DHCP.Error != ""
+	dnsPending, dhcpPending := pr.DNSPending, pr.DHCPPending
 
 	dnsText := "DNS✖"
-	if dnsUnknown {
+	if dnsPending {
+		dnsText = "DNS…"
+	} else if dnsUnknown {
 		dnsText = "DNS?"
 	} else if dnsOK {
 		dnsText = "DNS✔"
 	}
 	dhcpText := "DHCP✖"
 	switch {
+	case dhcpPending:
+		dhcpText = "DHCP…"
 	case dhcpUnknown:
 		dhcpText = "DHCP?"
 	case dhcpOK:
@@ -1647,6 +1683,11 @@ func probeCell(pr probeResult, have bool) (text, color string) {
 		return text, cRed
 	case dnsUnknown || dhcpUnknown:
 		return text, cDim
+	case dnsPending || dhcpPending:
+		if (dnsPending || dnsOK) && (dhcpPending || dhcpOK) {
+			return text, cDim
+		}
+		return text, cYellow
 	case dnsOK && dhcpOK:
 		return text, cGreen
 	default:
@@ -1670,8 +1711,11 @@ func probeCellParts(pr probeResult, have bool, mismatch bool) (dnsText, dnsColor
 	dhcpDual := pr.DHCP.Error == "" && pr.DHCP.Verdict == "dual_active"
 	dhcpNoAnswer := pr.DHCP.Error == "" && pr.DHCP.Verdict == "no_answer"
 	dhcpUnknown := pr.DHCP.Error != ""
+	dnsPending, dhcpPending := pr.DNSPending, pr.DHCPPending
 
 	switch {
+	case dnsPending:
+		dnsText, dnsColor = "DNS…", cYellow
 	case dnsUnknown:
 		dnsText, dnsColor = "DNS?", cDim
 	case dnsOK:
@@ -1681,6 +1725,8 @@ func probeCellParts(pr probeResult, have bool, mismatch bool) (dnsText, dnsColor
 	}
 
 	switch {
+	case dhcpPending:
+		dhcpText, dhcpColor = "DHCP…", cYellow
 	case dhcpUnknown:
 		dhcpText, dhcpColor = "DHCP?", cDim
 	case dhcpOK:
@@ -1798,7 +1844,7 @@ func checkProbeHostIssues(probeHostResults map[string]map[string]probeResult, ad
 			pr := probeHostResults[addr][sc]
 			if tok, ok := tokens[sc]; ok {
 				uptimeSec, hasUptime := ownerUptime[tok.Owner]
-				probedAt, _ := time.Parse(time.RFC3339, pr.ProbedAt)
+				probedAt := pr.oldestProbedAt()
 				if probeStale(probedAt, uptimeSec, hasUptime, now) {
 					continue // predates the current owner's daemon restart
 				}
@@ -1936,7 +1982,7 @@ func renderProbes(s *appState) {
 			if have {
 				if tok, ok := s.tokens[sc]; ok {
 					uptimeSec, hasUptime := ownerUptime[tok.Owner]
-					probedAt, _ := time.Parse(time.RFC3339, result.ProbedAt)
+					probedAt := result.oldestProbedAt()
 					if probeStale(probedAt, uptimeSec, hasUptime, renderNow) {
 						result, have = probeResult{}, false
 					}

@@ -35,7 +35,7 @@ func TestValidateScopeMove(t *testing.T) {
 		{name: "nothing to move", scope: "office", parent: "ens19", vlan: 110, wantErr: "nothing to move"},
 		{name: "vlan above range", scope: "office", parent: "ens19", vlan: 4095, wantErr: "between 0 and 4094"},
 		{name: "negative vlan", scope: "office", parent: "ens19", vlan: -1, wantErr: "between 0 and 4094"},
-		{name: "unknown parent", scope: "office", parent: "ens99", vlan: 130, wantErr: "not a trunk interface"},
+		{name: "unknown parent", scope: "office", parent: "ens99", vlan: 130, wantErr: "not a serving interface"},
 		{name: "vlan used on same parent", scope: "office", parent: "ens19", vlan: 120, wantErr: "already used by scope guest"},
 		{name: "missing scope", scope: "nope", parent: "ens19", vlan: 130, wantErr: "not present"},
 	}

@@ -135,3 +135,17 @@ func TestIndex_PastMaxIndexErrors(t *testing.T) {
 		t.Error("Index() = nil error for a worker past MaxIndex, want an error")
 	}
 }
+
+func TestIndex_ManagementInterfaceComesAfterEveryWorker(t *testing.T) {
+	c := config.Cluster{Platform: &config.Platform{Mgmt: "ens18", Workers: []string{"ens19", "ens20"}, Serving: map[string]bool{"ens18": true}}}
+	for parent, want := range map[string]int{"ens19": 1, "ens20": 2, "ens18": 3} {
+		got, err := Index(c, parent)
+		if err != nil || got != want {
+			t.Errorf("Index(%s) = %d, %v, want %d", parent, got, err, want)
+		}
+	}
+	c.Platform.Serving = nil
+	if _, err := Index(c, "ens18"); err == nil {
+		t.Error("the management interface must have no index while it does not serve")
+	}
+}

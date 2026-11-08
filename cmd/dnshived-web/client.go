@@ -159,6 +159,12 @@ type nodeScopeBeaconStatus struct {
 type probeResult struct {
 	Scope    string `json:"scope"`
 	ProbedAt string `json:"probed_at"`
+	// DHCPProbedAt and DNSProbedAt are when each part finished; a part that
+	// has not run yet is flagged pending. Older probe hosts send neither.
+	DHCPProbedAt string `json:"dhcp_probed_at"`
+	DNSProbedAt  string `json:"dns_probed_at"`
+	DHCPPending  bool   `json:"dhcp_pending"`
+	DNSPending   bool   `json:"dns_pending"`
 	// Pending is true before a probe host's own sweep ticker has completed its
 	// first tick (e.g. right after a restart).
 	Pending bool `json:"pending"`
@@ -172,6 +178,8 @@ type probeResult struct {
 		Error   string   `json:"error"`
 		Valid   bool     `json:"valid"`
 		Reason  string   `json:"reason,omitempty"`
+		// OfferMS is how long the first offer took.
+		OfferMS int64 `json:"offer_ms,omitempty"`
 		// Offers is the actual offered lease IP per responding server.
 		Offers []probeDHCPOffer `json:"offers,omitempty"`
 	} `json:"dhcp"`
@@ -188,6 +196,35 @@ type probeResult struct {
 	// QueueWaitMS is only ever set by a "probe now" on-demand trigger, never
 	// the regular sweep.
 	QueueWaitMS int64 `json:"queue_wait_ms,omitempty"`
+}
+
+// anyPending is true while the probe host has not finished the whole result
+// or one of its parts for this scope.
+func (p probeResult) anyPending() bool { return p.Pending || p.DHCPPending || p.DNSPending }
+
+// oldestProbedAt is the oldest stamp among the parts that have run, so a
+// result counts as fresh only when every part is; zero when none is known.
+func (p probeResult) oldestProbedAt() time.Time {
+	stamps := []string{p.DHCPProbedAt, p.DNSProbedAt}
+	if p.DHCPPending {
+		stamps[0] = ""
+	}
+	if p.DNSPending {
+		stamps[1] = ""
+	}
+	var oldest time.Time
+	for _, raw := range stamps {
+		if raw == "" {
+			continue
+		}
+		if at, err := time.Parse(time.RFC3339, raw); err == nil && (oldest.IsZero() || at.Before(oldest)) {
+			oldest = at
+		}
+	}
+	if oldest.IsZero() {
+		oldest, _ = time.Parse(time.RFC3339, p.ProbedAt)
+	}
+	return oldest
 }
 
 // probeDHCPOffer mirrors cmd/dnshived-probe.DHCPOfferDetail.
@@ -945,6 +982,78 @@ func pushAudit(node NodeConfig, actor, action, summary string) error {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// manualProbeDef mirrors cmd/dnshived-probe.ManualProbe.
+type manualProbeDef struct {
+	Name            string   `json:"name"`
+	Interface       string   `json:"interface"`
+	VLANID          int      `json:"vlan_id,omitempty"`
+	ExpectedServers []string `json:"expected_servers,omitempty"`
+}
+
+// watchResult mirrors cmd/dnshived-probe.WatchResult.
+type watchResult struct {
+	Name            string           `json:"name"`
+	Interface       string           `json:"interface"`
+	VLANID          int              `json:"vlan_id"`
+	ExpectedServers []string         `json:"expected_servers"`
+	Pending         bool             `json:"pending"`
+	Verdict         string           `json:"verdict"`
+	Servers         []string         `json:"servers"`
+	Unexpected      []string         `json:"unexpected"`
+	Offers          []probeDHCPOffer `json:"offers"`
+	OfferMS         int64            `json:"offer_ms"`
+	Error           string           `json:"error"`
+	ProbedAt        string           `json:"probed_at"`
+}
+
+func (w watchResult) def() manualProbeDef {
+	return manualProbeDef{Name: w.Name, Interface: w.Interface, VLANID: w.VLANID, ExpectedServers: w.ExpectedServers}
+}
+
+// fetchWatch calls the probe host's GET /api/v1/watch.
+func fetchWatch(node NodeConfig) ([]watchResult, error) {
+	var out struct {
+		ManualProbes []watchResult `json:"manual_probes"`
+	}
+	status, err := doGet(httpClient, node, "/api/v1/watch", &out)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("status %d", status)
+	}
+	return out.ManualProbes, nil
+}
+
+// pushProbeHostManualProbes replaces a probe host's whole manual probe list.
+func pushProbeHostManualProbes(node NodeConfig, list []manualProbeDef) error {
+	if list == nil {
+		list = []manualProbeDef{}
+	}
+	body, err := json.Marshal(map[string]interface{}{"manual_probes": list})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, node.baseURL()+"/api/v1/config", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if node.AdminToken != "" {
+		req.Header.Set("Authorization", "Bearer "+node.AdminToken)
+	}
+	resp, err := refreshProbeClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxClientBody))
+		return fmt.Errorf("status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
 	return nil
 }

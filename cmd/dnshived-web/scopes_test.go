@@ -352,17 +352,17 @@ func TestScopesTmpl_ProbeColumn_GatedOnHasProbeHosts(t *testing.T) {
 	if err := scopesTmpl.Execute(&buf, without); err != nil {
 		t.Fatalf("scopesTmpl.Execute failed: %v", err)
 	}
-	if strings.Contains(buf.String(), "<th>Probe</th>") || strings.Contains(buf.String(), "DHCP✔") {
+	if strings.Contains(buf.String(), ">Probe<span") || strings.Contains(buf.String(), "DHCP✔") {
 		t.Error("expected no Probe column at all when HasProbeHosts is false")
 	}
 
-	with := scopesPageData{Total: 1, Page: 1, TotalPages: 1, Rows: []scopeRow{row}, HasProbeHosts: true}
+	with := scopesPageData{Total: 1, Page: 1, TotalPages: 1, Rows: []scopeRow{row}, HasProbeHosts: true, Headers: scopeSortHeaders("scope", false, nil, true)}
 	buf.Reset()
 	if err := scopesTmpl.Execute(&buf, with); err != nil {
 		t.Fatalf("scopesTmpl.Execute failed: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "<th>Probe</th>") {
+	if !strings.Contains(out, ">Probe<span") {
 		t.Error("expected a Probe column header when HasProbeHosts is true")
 	}
 	if !strings.Contains(out, "DHCP✔") {
@@ -1500,7 +1500,7 @@ func TestScopeDetailTmpl_DeleteButtonWiredWithConfirm(t *testing.T) {
 	}
 }
 
-func TestScopesTmpl_DisableButtonColorsMatchState(t *testing.T) {
+func TestScopesTmpl_RowMenuLabelsFollowTheStateAndDeleteIsMarkedDangerous(t *testing.T) {
 	data := scopesPageData{
 		Rows: []scopeRow{
 			{Name: "rw-100", Display: "rw-100", Disabled: false},
@@ -1516,14 +1516,11 @@ func TestScopesTmpl_DisableButtonColorsMatchState(t *testing.T) {
 	if !strings.Contains(out, `action="/scopes/rw-100/toggle-disabled"`) || !strings.Contains(out, `action="/scopes/rw-101/toggle-disabled"`) {
 		t.Errorf("expected a toggle-disabled form for every row, got: %s", out)
 	}
-	if !strings.Contains(out, `class="btn-danger">delete<`) {
-		t.Error("expected the list page's delete button to carry btn-danger")
+	if !strings.Contains(out, `role="menuitem" class="danger">Delete`) {
+		t.Error("expected the list page's delete item to carry the danger class")
 	}
-	if !strings.Contains(out, `class="btn-warn">disable<`) {
-		t.Errorf("expected the NOT-yet-disabled row's button to read \"disable\" with btn-warn, got: %s", out)
-	}
-	if !strings.Contains(out, `class="btn-success">enable<`) {
-		t.Errorf("expected the already-disabled row's button to read \"enable\" with btn-success, got: %s", out)
+	if strings.Count(out, ">Disable</button>") != 1 || strings.Count(out, ">Enable</button>") != 1 {
+		t.Errorf("expected exactly one Disable (the enabled row) and one Enable (the disabled row) item, got: %s", out)
 	}
 }
 

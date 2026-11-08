@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -146,10 +148,8 @@ func TestProbeOneScope_ProbeDisabledSkipsChecksButStaysReachable(t *testing.T) {
 	}
 }
 
-func TestRunProbeSweep_ParallelProbingPopulatesEveryScope(t *testing.T) {
-	origIface := ifaceExistsFn
-	ifaceExistsFn = func(name string) (*net.Interface, error) { return &net.Interface{Name: name}, nil }
-	defer func() { ifaceExistsFn = origIface }()
+func TestRefreshProbePlan_RunnersPopulateEveryScope(t *testing.T) {
+	fakeIfaces(t)
 
 	const n = 50
 	scopes := make(map[string]remoteScope, n)
@@ -163,25 +163,32 @@ func TestRunProbeSweep_ParallelProbingPopulatesEveryScope(t *testing.T) {
 	defer srv.Close()
 
 	cfg := &ProbeConfig{
-		TrunkParent:     "lo",
-		ParallelProbing: true,
-		ClusterNodes:    []ClusterNode{{Name: "core-1", Addr: strings.TrimPrefix(srv.URL, "http://")}},
+		TrunkParent:  "lo",
+		ClusterNodes: []ClusterNode{{Name: "core-1", Addr: strings.TrimPrefix(srv.URL, "http://")}},
 	}
 	store := newResultStore()
-	tracker := newProbeLogTracker(nil)
-	events := eventlog.New(100, "probe")
-	incarnations := newIncarnationTracker()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rn := newProbeRunners(ctx, cfg, store, newProbeLogTracker(nil), eventlog.New(100, "probe"), newOwnershipDebounce())
+	t.Cleanup(rn.stop)
 
-	runProbeSweep(cfg, store, tracker, events, incarnations, newOwnershipDebounce())
+	refreshProbePlan(cfg, rn, newIncarnationTracker())
 
+	if got := rn.runnerCount(); got != 2 {
+		t.Fatalf("runnerCount = %d, want 2 (one DHCP and one DNS runner for the one interface)", got)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for len(store.all()) < n && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
 	all := store.all()
 	if len(all) != n {
-		t.Fatalf("store has %d results, want %d — parallel fan-out must reach every scope", len(all), n)
+		t.Fatalf("store has %d results, want %d — the runners must reach every scope", len(all), n)
 	}
 	for name := range scopes {
 		r, ok := all[name]
 		if !ok {
-			t.Errorf("scope %s missing from store after parallel sweep", name)
+			t.Errorf("scope %s missing from store", name)
 			continue
 		}
 		if !r.Reachable {
@@ -308,8 +315,11 @@ func TestProbeOneScope_ChecksEveryCoreRoleInDNSChecks(t *testing.T) {
 
 	origDNS := dnsProbeFn
 	var queried []string
+	var queriedMu sync.Mutex
 	dnsProbeFn = func(addr, qname, qtype string, timeout time.Duration) (dnsprobe.Result, error) {
+		queriedMu.Lock()
 		queried = append(queried, addr)
+		queriedMu.Unlock()
 		return dnsprobe.Result{Answered: true}, nil
 	}
 	defer func() { dnsProbeFn = origDNS }()

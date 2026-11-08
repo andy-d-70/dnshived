@@ -21,6 +21,8 @@ type knownVLAN struct {
 	Parent string `json:"parent"`
 	VLANID int    `json:"vlan_id"`
 	VIP    string `json:"vip,omitempty"`
+	// Watch marks a VLAN built for a manual probe: it carries no address.
+	Watch bool `json:"watch,omitempty"`
 }
 
 // vlanKey is the map key both the desired and known sets use.
@@ -88,6 +90,36 @@ func desiredVLANs(byNodeID map[string]probeConfigResponse, allowed []string) map
 	return desired
 }
 
+// desiredWithWatch is desiredVLANs plus the tagged manual probes' VLANs. A
+// VLAN a scope already uses keeps the scope's entry (and its address).
+func desiredWithWatch(cfg *ProbeConfig, byNodeID map[string]probeConfigResponse) map[string]knownVLAN {
+	trunks := cfg.trunkParents()
+	desired := desiredVLANs(byNodeID, trunks)
+	isTrunk := make(map[string]bool, len(trunks))
+	for _, t := range trunks {
+		isTrunk[t] = true
+	}
+	for _, m := range cfg.manualProbeList() {
+		if m.VLANID == 0 || !isTrunk[m.Interface] {
+			continue
+		}
+		k := vlanKey(m.Interface, m.VLANID)
+		if _, taken := desired[k]; !taken {
+			desired[k] = knownVLAN{Parent: m.Interface, VLANID: m.VLANID, Watch: true}
+		}
+	}
+	return desired
+}
+
+// vlanAddr is the address the probe host puts on a VLAN it builds: none for
+// a manual probe's VLAN.
+func vlanAddr(v knownVLAN, localOctet int) string {
+	if v.Watch {
+		return ""
+	}
+	return probeSelfAddr(v.VIP, v.VLANID, localOctet)
+}
+
 func probeSelfAddr(vip string, vlanID, localOctet int) string {
 	if vip != "" {
 		if _, ipNet, err := net.ParseCIDR(vip); err == nil {
@@ -120,7 +152,7 @@ func reconcileVLANInterfaces(cfg *ProbeConfig, byNodeID map[string]probeConfigRe
 		return nil
 	}
 
-	desired := desiredVLANs(byNodeID, cfg.trunkParents())
+	desired := desiredWithWatch(cfg, byNodeID)
 	known := loadKnownVLANs(cfg.knownVLANsPath())
 	updated := make(map[string]knownVLAN, len(known))
 	for k, v := range known {
@@ -134,7 +166,7 @@ func reconcileVLANInterfaces(cfg *ProbeConfig, byNodeID map[string]probeConfigRe
 	// since this interface was created.
 	var drifted []string
 	for k, d := range desired {
-		if kv, ok := known[k]; ok && kv.VIP != d.VIP {
+		if kv, ok := known[k]; ok && (kv.VIP != d.VIP || kv.Watch != d.Watch) {
 			drifted = append(drifted, k)
 		}
 	}
@@ -145,7 +177,7 @@ func reconcileVLANInterfaces(cfg *ProbeConfig, byNodeID map[string]probeConfigRe
 	// right now.
 	var missingLive []string
 	for k, d := range desired {
-		if kv, ok := known[k]; ok && kv.VIP == d.VIP {
+		if kv, ok := known[k]; ok && kv.VIP == d.VIP && kv.Watch == d.Watch {
 			if _, err := ifaceExistsFn(realIfaceName(d.Parent, d.VLANID)); err != nil {
 				missingLive = append(missingLive, k)
 			}
@@ -191,7 +223,7 @@ func reconcileVLANInterfaces(cfg *ProbeConfig, byNodeID map[string]probeConfigRe
 
 	for _, k := range removeOrder {
 		v := known[k]
-		addr := probeSelfAddr(v.VIP, v.VLANID, cfg.LocalOctet)
+		addr := vlanAddr(v, cfg.LocalOctet)
 		if err := helper.DeleteInterface(v.Parent, v.VLANID, addr); err != nil {
 			log.Printf("[PROBE:VLAN:ERROR] delete %s: %v — will retry next sweep", k, err)
 			delete(toCreate, k)
@@ -206,7 +238,7 @@ func reconcileVLANInterfaces(cfg *ProbeConfig, byNodeID map[string]probeConfigRe
 			continue // its paired delete above failed — retry both next sweep
 		}
 		v := desired[k]
-		addr := probeSelfAddr(v.VIP, v.VLANID, cfg.LocalOctet)
+		addr := vlanAddr(v, cfg.LocalOctet)
 		if err := helper.CreateInterface(v.Parent, v.VLANID, addr); err != nil {
 			log.Printf("[PROBE:VLAN:ERROR] create %s (%s): %v — will retry next sweep", k, addr, err)
 			continue

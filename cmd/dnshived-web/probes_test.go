@@ -433,11 +433,11 @@ func TestProbeCellDisplay_FetchErrorIsDimWithErrorNote(t *testing.T) {
 	}
 }
 
-func TestProbeCellDisplay_PendingDaemonIsDimNotConfirmedFailure(t *testing.T) {
+func TestProbeCellDisplay_PendingDaemonIsOrangeNotConfirmedFailure(t *testing.T) {
 	pr := probeResult{Scope: "office", Pending: true}
 	dnsText, dnsClass, _, _, note := probeCellDisplay(time.Now(), pr, nil, true, false, false)
-	if dnsText != "pending..." || dnsClass != "dim" {
-		t.Errorf("got (%q, %q), want (pending..., dim) — a daemon that hasn't probed yet is not a confirmed failure", dnsText, dnsClass)
+	if dnsText != "pending..." || dnsClass != "warn" {
+		t.Errorf("got (%q, %q), want (pending..., warn) — a daemon that hasn't probed yet is pending (orange), not a confirmed failure", dnsText, dnsClass)
 	}
 	if note != "not yet probed" {
 		t.Errorf("note = %q, want %q", note, "not yet probed")
@@ -855,6 +855,10 @@ func TestHandleProbeRefresh_UnknownWorker404s(t *testing.T) {
 func TestHandleProbeRefresh_RendersFreshTriggeredResult(t *testing.T) {
 	var gotMethod, gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/history" {
+			http.NotFound(w, r)
+			return
+		}
 		gotMethod, gotPath = r.Method, r.URL.Path
 		var pr probeResult
 		pr.Enabled = true

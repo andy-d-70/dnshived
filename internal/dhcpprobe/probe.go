@@ -103,6 +103,11 @@ type Options struct {
 	// StopOnFirstOffer returns as soon as ONE offer is parsed, instead of
 	// always listening out the full wait window.
 	StopOnFirstOffer bool
+
+	// FirstOfferGrace, with StopOnFirstOffer, keeps listening that long after
+	// the first offer so a second server answering at about the same time is
+	// still seen.
+	FirstOfferGrace time.Duration
 }
 
 func DefaultOptions() Options {
@@ -144,7 +149,7 @@ func ProbeWithOptions(iface string, wait time.Duration, opts Options) (Result, e
 		return Result{}, fmt.Errorf("send DISCOVER: %w", err)
 	}
 
-	offers := collect(pc, xid, chaddr, wait, start, opts.StopOnFirstOffer)
+	offers := collect(pc, xid, chaddr, wait, start, opts.StopOnFirstOffer, opts.FirstOfferGrace)
 	servers := distinctServers(offers)
 
 	verdict := VerdictOK
@@ -226,7 +231,7 @@ func buildDiscover(xid uint32, chaddr []byte, bcast bool) []byte {
 	return p
 }
 
-func collect(pc net.PacketConn, xid uint32, chaddr []byte, wait time.Duration, start time.Time, stopOnFirstOffer bool) []Offer {
+func collect(pc net.PacketConn, xid uint32, chaddr []byte, wait time.Duration, start time.Time, stopOnFirstOffer bool, grace time.Duration) []Offer {
 	var out []Offer
 	deadline := time.Now().Add(wait)
 	pc.SetReadDeadline(deadline)
@@ -244,7 +249,12 @@ func collect(pc net.PacketConn, xid uint32, chaddr []byte, wait time.Duration, s
 		o.At = time.Since(start)
 		out = append(out, o)
 		if stopOnFirstOffer {
-			break
+			if grace <= 0 {
+				break
+			}
+			if g := time.Now().Add(grace); g.Before(deadline) {
+				deadline = g
+			}
 		}
 		pc.SetReadDeadline(deadline)
 	}

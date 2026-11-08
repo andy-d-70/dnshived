@@ -6,6 +6,7 @@ package main
 import (
 	"bytes"
 	"crypto/subtle"
+	"dnshived/internal/probepin"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -356,10 +357,15 @@ func executeReplaceProbe(cfgPath string, ref *configRef, userName string, op pen
 	// token (cfg.Nodes[0].AdminToken).
 	var adoptResp struct {
 		ProbeAdminToken string `json:"probe_admin_token"`
+		TLSPort         string `json:"tls_port"`
+		TLSFingerprint  string `json:"tls_fingerprint"`
 	}
 	json.Unmarshal(respBody, &adoptResp)
 
 	entry := NodeConfig{Name: "probe", Addr: resolveProbeAddr(op.Addr), AdminToken: adoptResp.ProbeAdminToken}
+	if probepin.Valid(adoptResp.TLSFingerprint) {
+		entry.TLSPort, entry.TLSFingerprint = adoptResp.TLSPort, adoptResp.TLSFingerprint
+	}
 	newCfg := *cfg
 	newCfg.ProbeHosts = append(append([]NodeConfig{}, cfg.ProbeHosts...), entry)
 	if err := saveWebConfig(cfgPath, &newCfg); err != nil {
@@ -381,6 +387,7 @@ func executeReplaceProbe(cfgPath string, ref *configRef, userName string, op pen
 	}
 
 	msg := fmt.Sprintf("Adopted %s and saved locally.\n", op.Addr)
+	msg += closePlainAfterAdopt(entry)
 	if len(fanoutErrs) > 0 {
 		msg += fmt.Sprintf("\nWarning: the other core node(s) may not show this probe yet — retry there directly: %v\n", fanoutErrs)
 	}

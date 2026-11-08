@@ -355,6 +355,24 @@ background:var(--panel);color:var(--text)}
 button,input[type=submit]{font:inherit;padding:.35rem .75rem;border:1px solid var(--accent);
 border-radius:5px;background:var(--accent);color:#fff;cursor:pointer}
 button:hover,input[type=submit]:hover{opacity:.9}
+/* btn-sm: a small button inside a table cell; keeps the normal button text colour. */
+button.btn-sm{font-size:.85em;padding:.05rem .45rem}
+/* btn-quiet: a deliberately plain button for a serious but rare action. */
+button.btn-quiet{background:transparent;color:var(--text);border:1px solid var(--warn);font-size:.85em;padding:.2rem .6rem}
+button.btn-quiet:hover{background:var(--head);opacity:1}
+/* row-menu: the per-row actions menu of the scope list (a details element). */
+.row-menu{position:relative;display:inline-block;background:transparent;border:0;box-shadow:none;padding:0;margin:0}
+.row-menu>summary{list-style:none;cursor:pointer;user-select:none;width:2rem;text-align:center;padding:.15rem 0;font-weight:400;
+border:1px solid var(--border);border-radius:5px;background:var(--panel);color:var(--text);font-size:1.1rem;line-height:1.2}
+.row-menu>summary::-webkit-details-marker{display:none}
+.row-menu[open]>summary{background:var(--head)}
+.row-menu-list{position:fixed;z-index:60;min-width:13rem;background:var(--panel);border:1px solid var(--border);
+border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.2);padding:.3rem}
+.row-menu-list form{margin:0}
+.row-menu-list a,.row-menu-list button{display:block;width:100%;box-sizing:border-box;text-align:left;padding:.4rem .6rem;
+border:0;border-radius:5px;background:transparent;color:var(--text);font:inherit;text-decoration:none;cursor:pointer}
+.row-menu-list a:hover,.row-menu-list button:hover,.row-menu-list a:focus,.row-menu-list button:focus{background:var(--head);outline:none}
+.row-menu-list .danger{color:var(--crit)}
 /* btn-success for commit-shaped actions, btn-danger for discard/delete. */
 button.btn-success{background:var(--ok);border-color:var(--ok)}
 button.btn-danger{background:var(--crit);border-color:var(--crit)}

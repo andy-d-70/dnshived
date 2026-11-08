@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -144,7 +145,7 @@ func buildTopologyNode(node NodeConfig, st nodeStatus, statErr error, c config.C
 	var ifaceNames []string
 	var labels map[string]string
 	if c.Platform != nil {
-		ifaceNames = c.Platform.Workers
+		ifaceNames = c.Platform.ServingInterfaces()
 		labels = c.Platform.InterfaceLabels
 	}
 	for _, ifname := range ifaceNames {
@@ -208,6 +209,11 @@ type topologyInterfaceCombined struct {
 	Name   string
 	Label  string
 	Scopes []topologyScopeCombined
+	// Open is whether the interface is shown expanded; ErrorCount is how many
+	// of its scopes need attention, shown on the collapsed heading so a
+	// collapsed interface never hides a problem.
+	Open       bool
+	ErrorCount int
 }
 
 // topologyRailNode is one entry in the combined view's left-hand node
@@ -228,12 +234,16 @@ type topologyPageData struct {
 	// existing #pop-<name> popup anchor.
 	ErrorScopeList []topologyErrorScope
 	HealthyClass   string
+	// SortKey is how scopes are ordered inside an interface: "vlan" or "name".
+	SortKey string
+	AllOpen bool
 }
 
 // topologyErrorScope is one erroring scope's name + reason, for the
 // combined-view summary banner's own "which one?" list.
 type topologyErrorScope struct {
 	Name   string
+	Iface  string
 	Reason string
 }
 
@@ -245,7 +255,7 @@ func summarizeCombined(combined []topologyInterfaceCombined) (total, errs int, e
 			total++
 			if sc.HasError {
 				errs++
-				errList = append(errList, topologyErrorScope{Name: sc.ScopeName, Reason: sc.ErrorReason})
+				errList = append(errList, topologyErrorScope{Name: sc.ScopeName, Iface: iface.Name, Reason: sc.ErrorReason})
 			}
 		}
 	}
@@ -288,6 +298,43 @@ func buildTopologyPageData(nodes []topologyNode) topologyPageData {
 		ErrorScopes:    errs,
 		ErrorScopeList: errList,
 		HealthyClass:   healthyClass,
+	}
+}
+
+// applyTopologyView sets which interfaces are expanded (open is a comma
+// separated list of interface names, or "all") and how the scopes inside each
+// are ordered. Everything is collapsed by default.
+func applyTopologyView(data *topologyPageData, open, sortKey string) {
+	if sortKey != "name" {
+		sortKey = "vlan"
+	}
+	data.SortKey = sortKey
+	want := map[string]bool{}
+	for _, n := range strings.Split(open, ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			want[n] = true
+		}
+	}
+	data.AllOpen = want["all"]
+	for i := range data.Combined {
+		iface := &data.Combined[i]
+		iface.Open = data.AllOpen || want[iface.Name]
+		iface.ErrorCount = 0
+		for _, sc := range iface.Scopes {
+			if sc.HasError {
+				iface.ErrorCount++
+			}
+		}
+		if sortKey == "name" {
+			sort.SliceStable(iface.Scopes, func(a, b int) bool { return naturalLess(iface.Scopes[a].ScopeName, iface.Scopes[b].ScopeName) })
+		} else {
+			sort.SliceStable(iface.Scopes, func(a, b int) bool {
+				if iface.Scopes[a].VLANID != iface.Scopes[b].VLANID {
+					return iface.Scopes[a].VLANID < iface.Scopes[b].VLANID
+				}
+				return naturalLess(iface.Scopes[a].ScopeName, iface.Scopes[b].ScopeName)
+			})
+		}
 	}
 }
 
@@ -596,7 +643,7 @@ background:currentColor;flex:none}
 .iface-branch{position:relative;padding-left:1.2rem}
 .iface-branch::before{content:"";position:absolute;top:1.7rem;bottom:.1rem;left:0;width:2px;
 background:var(--border)}
-.iface-label{font-weight:600;font-size:.8rem;color:var(--muted);text-transform:uppercase;
+.iface-label{cursor:pointer;font-weight:600;font-size:.8rem;color:var(--muted);text-transform:uppercase;
 letter-spacing:.04em;margin:0 0 .55rem}
 .scope-row{display:flex;flex-wrap:wrap;gap:.7rem}
 .scope-chip{position:relative;display:block;border:1px solid var(--border);border-left:4px solid var(--border);
@@ -646,7 +693,7 @@ node's own full tree.</p>
 <p class="topo-summary"><strong class="{{.HealthyClass}}">{{.TotalScopes}} scope(s)</strong>
 <span class="sep">&mdash;</span>
 {{if .ErrorScopes}}<span class="crit">{{.ErrorScopes}} need(s) attention:
-{{range $i, $e := .ErrorScopeList}}{{if $i}}, {{end}}<a href="#pop-{{$e.Name}}" title="{{$e.Reason}}">{{$e.Name}}</a>{{end}}</span>{{else}}<span class="ok">all healthy</span>{{end}}
+{{range $i, $e := .ErrorScopeList}}{{if $i}}, {{end}}<a href="/topology?open={{$e.Iface}}#pop-{{$e.Name}}" title="{{$e.Reason}}">{{$e.Name}}</a>{{end}}</span>{{else}}<span class="ok">all healthy</span>{{end}}
 <span class="sep">&mdash;</span> <span class="dim">chip color = which worker is serving; a red outline flags a real problem (no server, probe error)</span></p>
 <div class="topo-wrap">
 <aside class="topo-rail">
@@ -655,9 +702,11 @@ node's own full tree.</p>
 {{end}}
 </aside>
 <div class="topo-canvas">
+<p class="dim topo-controls"><a href="/topology?open=all&amp;sort={{.SortKey}}">expand all</a> &middot; <a href="/topology?sort={{.SortKey}}">collapse all</a>
+&middot; scopes inside an interface by <a href="?{{if .AllOpen}}open=all&amp;{{end}}sort=vlan"{{if eq .SortKey "vlan"}} class="active"{{end}}>VLAN</a> / <a href="?{{if .AllOpen}}open=all&amp;{{end}}sort=name"{{if eq .SortKey "name"}} class="active"{{end}}>name</a></p>
 {{range .Combined}}
-<div class="iface-branch">
-<p class="iface-label">{{.Label}}{{if ne .Label .Name}} <span class="dim">({{.Name}})</span>{{end}}</p>
+<details class="iface-branch" data-iface="{{.Name}}"{{if .Open}} open{{end}}>
+<summary class="iface-label">{{.Label}}{{if ne .Label .Name}} <span class="dim">({{.Name}})</span>{{end}} <span class="dim">&mdash; {{len .Scopes}} scope(s)</span>{{if .ErrorCount}} <span class="crit">{{.ErrorCount}} need(s) attention</span>{{else}} <span class="ok">healthy</span>{{end}}</summary>
 <div class="scope-row">
 {{range .Scopes}}
 <a href="#pop-{{.ScopeName}}" class="scope-chip {{.ChipClass}}{{if .HasError}} has-error{{end}}"{{if .Color}} style="border-top:3px solid {{.Color}}"{{end}}{{if .ErrorReason}} title="{{.ErrorReason}}"{{end}}>
@@ -685,9 +734,15 @@ node's own full tree.</p>
 </div>
 {{end}}
 </div>
-</div>
+</details>
 {{end}}
-</div>
+<script>
+(function(){var ds=document.querySelectorAll('details.iface-branch');
+function sync(){var o=[];ds.forEach(function(d){if(d.open)o.push(d.dataset.iface)});
+var u=new URL(location.href);if(o.length){u.searchParams.set('open',o.join(','))}else{u.searchParams.delete('open')}
+history.replaceState(null,'',u)}
+ds.forEach(function(d){d.addEventListener('toggle',sync)})})();
+</script>
 </div>
 </div>
 
@@ -731,6 +786,8 @@ node's own full tree.</p>
 func handleTopology(ref *configRef) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := ref.Load()
-		renderTemplate(w, topologyTmpl, buildTopology(cfg), "topology")
+		data := buildTopology(cfg)
+		applyTopologyView(&data, r.URL.Query().Get("open"), r.URL.Query().Get("sort"))
+		renderTemplate(w, topologyTmpl, data, "topology")
 	}
 }

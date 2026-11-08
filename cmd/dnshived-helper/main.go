@@ -359,7 +359,7 @@ func handleConn(conn net.Conn) {
 		log.Printf("[HELPER:OK] restart-helper throttled=%v", throttled)
 		respond(conn, Response{OK: true, Throttled: throttled})
 		if !throttled {
-			go triggerHelperSelfRestart()
+			go helperSelfRestart()
 		}
 		return
 	}
@@ -854,6 +854,9 @@ func helperSelfRestartThrottled() bool {
 	lastHelperRestartAt = time.Now()
 	return false
 }
+
+// helperSelfRestart is replaced by tests, so no test runs a real systemctl restart later in the background.
+var helperSelfRestart = triggerHelperSelfRestart
 
 func triggerHelperSelfRestart() {
 	time.Sleep(300 * time.Millisecond)

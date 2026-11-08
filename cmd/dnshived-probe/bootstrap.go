@@ -17,6 +17,7 @@ import (
 	"dnshived/internal/bootstrap"
 	"dnshived/internal/discovery"
 	"dnshived/internal/probehelper"
+	"dnshived/internal/probepin"
 )
 
 // defaultProbeHelperSocket is dnshived-probe-helper's own documented
@@ -116,9 +117,17 @@ func probeAdoptHandler(otp string) http.HandlerFunc {
 
 		log.Printf("[BOOTSTRAP:ADOPT] real probe config received and written (%d cluster node(s)) — restarting as a configured probe", len(pc.ClusterNodes))
 
+		reply := map[string]interface{}{"ok": true}
+		if _, fp, err := loadOrCreateProbeCert(probeCertDir); err != nil {
+			log.Printf("[BOOTSTRAP:ADOPT] probe certificate: %v — the adopter gets no fingerprint to pin", err)
+		} else {
+			reply["tls_port"] = probeTLSPort
+			reply["tls_fingerprint"] = fp
+			reply["tls_proof"] = probepin.AdoptProof(otp, fp)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+		json.NewEncoder(w).Encode(reply)
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}

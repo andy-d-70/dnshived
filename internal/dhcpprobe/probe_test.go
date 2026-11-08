@@ -267,3 +267,65 @@ func TestPerResourceLocking_SameResourceStillSerializes(t *testing.T) {
 		t.Errorf("elapsed = %v, want at least %v — the same resource must still fully serialize", elapsed, 2*hold)
 	}
 }
+
+func collectWithOffers(t *testing.T, gaps []time.Duration, stop bool, grace time.Duration) ([]Offer, time.Duration) {
+	t.Helper()
+	pc, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close()
+	chaddr := []byte{2, 0, 0, 0, 0, 1}
+	const xid = 7
+	go func() {
+		c, err := net.Dial("udp4", pc.LocalAddr().String())
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		for i, gap := range gaps {
+			time.Sleep(gap)
+			c.Write(buildOfferPacket(xid, chaddr, net.IPv4(10, 0, 0, byte(i+1)), net.IPv4(10, 0, 1, byte(i+1)), 3600))
+		}
+	}()
+	start := time.Now()
+	offers := collect(pc, xid, chaddr, 5*time.Second, start, stop, grace)
+	return offers, time.Since(start)
+}
+
+func TestCollect_GraceSeesSecondServerThenStops(t *testing.T) {
+	offers, took := collectWithOffers(t, []time.Duration{0, 100 * time.Millisecond}, true, 400*time.Millisecond)
+	if len(offers) != 2 {
+		t.Fatalf("offers = %d, want 2 — a second server inside the grace window must be seen", len(offers))
+	}
+	if took > 2*time.Second {
+		t.Errorf("took %v, want about the grace window, not the 5 s wait", took)
+	}
+}
+
+func TestCollect_NoGraceStopsAtFirstOffer(t *testing.T) {
+	offers, _ := collectWithOffers(t, []time.Duration{0, 100 * time.Millisecond}, true, 0)
+	if len(offers) != 1 {
+		t.Fatalf("offers = %d, want 1 — without grace the first offer ends the wait", len(offers))
+	}
+}
+
+func TestCollect_GraceIsMeasuredFromTheFirstOfferOnly(t *testing.T) {
+	offers, _ := collectWithOffers(t, []time.Duration{0, 150 * time.Millisecond, 400 * time.Millisecond}, true, 300*time.Millisecond)
+	if len(offers) != 2 {
+		t.Fatalf("offers = %d, want 2 — the third offer arrives after first offer + grace", len(offers))
+	}
+}
+
+func TestCollect_WithoutStopListensTheWholeWait(t *testing.T) {
+	pc, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close()
+	start := time.Now()
+	offers := collect(pc, 1, []byte{2, 0, 0, 0, 0, 1}, 300*time.Millisecond, start, false, 400*time.Millisecond)
+	if len(offers) != 0 || time.Since(start) < 250*time.Millisecond {
+		t.Fatalf("offers=%d took=%v, want 0 offers after the full wait", len(offers), time.Since(start))
+	}
+}

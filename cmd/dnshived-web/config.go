@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -1046,6 +1047,7 @@ func parseClusterConfigForm(r *http.Request, nodes []NodeConfig) (configPushPayl
 			Mgmt:            mgmt,
 			Workers:         splitLines(f.Get("platform_workers")),
 			InterfaceLabels: parseInterfaceLabels(f.Get("platform_worker_labels")),
+			Serving:         parseServingSwitches(f, mgmt, splitLines(f.Get("platform_workers"))),
 		}
 	}
 
@@ -1076,6 +1078,87 @@ func parseClusterConfigForm(r *http.Request, nodes []NodeConfig) (configPushPayl
 		DNSRelayCacheMaxBytes: dnsRelayCacheMaxBytes,
 		SanityCheckDisabled:   f.Get("sanity_check_disabled") != "",
 	}, nil
+}
+
+// parseServingSwitches keeps only the switches that differ from the default
+// (workers serve, the management interface does not), and only for the
+// interfaces the form showed a switch for.
+func parseServingSwitches(f url.Values, mgmt string, workers []string) map[string]bool {
+	on := make(map[string]bool)
+	for _, v := range f["platform_serve"] {
+		on[v] = true
+	}
+	isWorker := make(map[string]bool, len(workers))
+	for _, w := range workers {
+		isWorker[w] = true
+	}
+	out := make(map[string]bool)
+	for _, iface := range f["platform_serve_seen"] {
+		switch {
+		case isWorker[iface]:
+			if !on[iface] {
+				out[iface] = false
+			}
+		case iface == mgmt:
+			if on[iface] {
+				out[iface] = true
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// servingRow is one interface's "use for serving" switch on the cluster form.
+type servingRow struct {
+	Name string
+	On   bool
+	Mgmt bool
+}
+
+func servingRows(p *config.Platform) []servingRow {
+	if p == nil {
+		return nil
+	}
+	var rows []servingRow
+	for _, w := range p.Workers {
+		rows = append(rows, servingRow{Name: w, On: p.Serves(w)})
+	}
+	if p.Mgmt != "" {
+		isWorker := false
+		for _, w := range p.Workers {
+			isWorker = isWorker || w == p.Mgmt
+		}
+		if !isWorker {
+			rows = append(rows, servingRow{Name: p.Mgmt, On: p.Serves(p.Mgmt), Mgmt: true})
+		}
+	}
+	return rows
+}
+
+// parentChoices lists the interfaces a scope's parent can be picked from:
+// the serving ones plus any parent a scope already uses, so editing a scope
+// never silently moves it.
+func parentChoices(c config.Cluster) []string {
+	if c.Platform == nil {
+		return nil
+	}
+	out := c.Platform.ServingInterfaces()
+	seen := make(map[string]bool, len(out))
+	for _, o := range out {
+		seen[o] = true
+	}
+	var extra []string
+	for _, sc := range c.Scopes {
+		if sc.Parent != "" && !seen[sc.Parent] {
+			seen[sc.Parent] = true
+			extra = append(extra, sc.Parent)
+		}
+	}
+	sort.Strings(extra)
+	return append(out, extra...)
 }
 
 // clusterPushPayloadFrom carries every cluster-wide field of an
@@ -1431,8 +1514,9 @@ type tokenFormRow struct {
 
 // clusterFormData backs the cluster settings page (handleConfigGet).
 type clusterFormData struct {
-	SourceNode string
-	Cluster    config.Cluster
+	SourceNode  string
+	Cluster     config.Cluster
+	ServingRows []servingRow
 	// Tokens is always fixed-length (existing tokens + newTokenSlots blanks)
 	// — see buildClusterFormData.
 	Tokens                       []tokenFormRow
@@ -1570,6 +1654,7 @@ type dhcpDNSConfigFormData struct {
 }
 
 func buildClusterFormData(c config.Cluster, node NodeConfig, allNodes []NodeConfig) clusterFormData {
+	servingRowsForForm := servingRows(c.Platform)
 	numTokenRows := len(c.APITokens) + newTokenSlots
 	tokens := make([]tokenFormRow, numTokenRows)
 	for i := range tokens {
@@ -1583,6 +1668,7 @@ func buildClusterFormData(c config.Cluster, node NodeConfig, allNodes []NodeConf
 	c = withoutSecrets(c)
 
 	data := clusterFormData{
+		ServingRows:   servingRowsForForm,
 		SourceNode:    node.Name,
 		Cluster:       c,
 		Tokens:        tokens,
@@ -1707,9 +1793,7 @@ func buildScopesFormData(c config.Cluster, node NodeConfig) scopesFormData {
 	}
 
 	var workers []string
-	if c.Platform != nil {
-		workers = c.Platform.Workers
-	}
+	workers = parentChoices(c)
 
 	data := scopesFormData{
 		SourceNode:             node.Name,

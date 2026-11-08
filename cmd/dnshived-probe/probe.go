@@ -81,6 +81,8 @@ type ScopeProbeResult struct {
 		// (GET /api/v1/token/status), not the scope's static preferred_worker.
 		Valid  bool   `json:"valid"`
 		Reason string `json:"reason,omitempty"` // why Valid is false, or empty when Valid or unknown
+		// OfferMS is how long the first offer took.
+		OfferMS int64 `json:"offer_ms,omitempty"`
 		// Offers is every DHCPOFFER actually received, paired with what each
 		// server offered.
 		Offers []DHCPOfferDetail `json:"offers,omitempty"`
@@ -101,6 +103,17 @@ type ScopeProbeResult struct {
 	Reachable bool      `json:"reachable"` // false if this host has no local interface for the scope's VLAN
 	ProbedAt  time.Time `json:"probed_at"`
 
+	// DHCPProbedAt and DNSProbedAt are set when that part finished; ProbedAt
+	// is the newer of the two. A part that has not run yet is flagged pending.
+	DHCPProbedAt time.Time `json:"dhcp_probed_at,omitzero"`
+	DNSProbedAt  time.Time `json:"dns_probed_at,omitzero"`
+	DHCPPending  bool      `json:"dhcp_pending,omitempty"`
+	DNSPending   bool      `json:"dns_pending,omitempty"`
+
+	// Flags names what the runner did to get this result (retried,
+	// full_window, held_by_debounce, manual); history only, never sent.
+	Flags []string `json:"-"`
+
 	// QueueWaitMS is only ever set by probeScopeNow (the on-demand "probe now"
 	// trigger).
 	QueueWaitMS int64 `json:"queue_wait_ms,omitempty"`
@@ -119,6 +132,13 @@ func (s *resultStore) set(scope string, r ScopeProbeResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.results[scope] = r
+}
+
+func (s *resultStore) setLeg(leg probeLeg, scope string, fresh ScopeProbeResult) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old, have := s.results[scope]
+	s.results[scope] = mergeLeg(old, have, leg, fresh)
 }
 
 func (s *resultStore) get(scope string) (ScopeProbeResult, bool) {
@@ -198,23 +218,27 @@ func (d *ownershipDebounce) clear() {
 	d.streak = make(map[string]int)
 }
 
-// settleOwnershipResult is the single decision point both runProbeSweep
-// and probeScopeNow route every freshly-computed result through before
-// it's ever published.
+// settleOwnershipResult publishes a DHCP leg. An answer that fails only on
+// ownership is held back once, so a token hand-over does not flash red; the
+// previous DHCP leg stays until the second consecutive failure.
 func settleOwnershipResult(store *resultStore, debounce *ownershipDebounce, tracker *probeLogTracker, events *eventlog.Ring, scope string, result ScopeProbeResult) bool {
 	if !isOwnershipOnlyFailure(result) {
 		debounce.reset(scope)
 		tracker.check(events, scope, result)
-		store.set(scope, result)
+		store.setLeg(legDHCP, scope, result)
 		return true
 	}
 	if debounce.recordFailure(scope) < 2 {
-		store.delete(scope)
 		return false
 	}
 	tracker.check(events, scope, result)
-	store.set(scope, result)
+	store.setLeg(legDHCP, scope, result)
 	return true
+}
+
+func settleDNSResult(store *resultStore, tracker *probeLogTracker, events *eventlog.Ring, scope string, result ScopeProbeResult) {
+	tracker.check(events, scope, result)
+	store.setLeg(legDNS, scope, result)
 }
 
 // probeLogTracker records WHY a probe failed, not just the current tick's
@@ -223,11 +247,12 @@ type probeLogTracker struct {
 	mu      sync.Mutex
 	dhcp    map[string]string // scope -> last signature ("" = ok/unreachable)
 	dns     map[string]string // "scope|name|type|against" -> last signature
+	watch   map[string]string // manual probe name -> last signature
 	persist *probeFailureLog
 }
 
 func newProbeLogTracker(persist *probeFailureLog) *probeLogTracker {
-	return &probeLogTracker{dhcp: map[string]string{}, dns: map[string]string{}, persist: persist}
+	return &probeLogTracker{dhcp: map[string]string{}, dns: map[string]string{}, watch: map[string]string{}, persist: persist}
 }
 
 // prune mirrors resultStore.prune.
@@ -289,6 +314,15 @@ func (t *probeLogTracker) check(events *eventlog.Ring, scope string, result Scop
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	if !result.DHCPPending {
+		t.checkDHCP(events, scope, result)
+	}
+	if !result.DNSPending {
+		t.checkDNS(events, scope, result)
+	}
+}
+
+func (t *probeLogTracker) checkDHCP(events *eventlog.Ring, scope string, result ScopeProbeResult) {
 	sig := dhcpFailureSignature(result)
 	prev := t.dhcp[scope] // zero value "" for a never-seen scope
 	if sig != prev {
@@ -306,7 +340,9 @@ func (t *probeLogTracker) check(events *eventlog.Ring, scope string, result Scop
 		}
 	}
 	t.dhcp[scope] = sig
+}
 
+func (t *probeLogTracker) checkDNS(events *eventlog.Ring, scope string, result ScopeProbeResult) {
 	for _, c := range result.DNSChecks {
 		key := scope + "|" + c.Name + "|" + c.Type + "|" + c.Against
 		csig := dnsCheckFailureSignature(c)
@@ -328,6 +364,44 @@ func (t *probeLogTracker) check(events *eventlog.Ring, scope string, result Scop
 		}
 		t.dns[key] = csig
 	}
+}
+
+// checkWatch logs a manual probe's transition: a rogue server appearing,
+// the answer changing, or the segment going quiet again.
+func (t *probeLogTracker) checkWatch(events *eventlog.Ring, res WatchResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	sig := ""
+	switch {
+	case res.Verdict == "rogue":
+		sig = fmt.Sprintf("ROGUE DHCP on %s: unlisted server(s) %v answered", watchWhere(res), res.Unexpected)
+	case res.Verdict == "error":
+		sig = "error: " + res.Error
+	}
+	prev := t.watch[res.Name]
+	if sig == prev {
+		return
+	}
+	t.watch[res.Name] = sig
+	var level, prefix, message string
+	if sig == "" {
+		level, prefix = "INFO", "PROBE:WATCH_OK"
+		message = fmt.Sprintf("%s: manual probe recovered (was: %s)", res.Name, prev)
+	} else {
+		level, prefix = "WARNING", "PROBE:WATCH_FAIL"
+		message = fmt.Sprintf("%s: %s", res.Name, sig)
+	}
+	events.Add(level, prefix, message)
+	if err := t.persist.append(level, prefix, message); err != nil {
+		log.Printf("[PROBE:EVENTLOG] persist failed: %v", err)
+	}
+}
+
+func watchWhere(res WatchResult) string {
+	if res.VLANID == 0 {
+		return res.Interface + " (untagged)"
+	}
+	return fmt.Sprintf("%s VLAN %d", res.Interface, res.VLANID)
 }
 
 type incarnationTracker struct {
@@ -425,60 +499,6 @@ func refreshScopeSetTracking(cfg *ProbeConfig, store *resultStore, tracker *prob
 	return changed
 }
 
-// runProbeSweep is this binary's equivalent of Agent.RunProbes: one full
-// pass over every scope the cluster knows about, on the caller's ticker.
-func runProbeSweep(cfg *ProbeConfig, store *resultStore, tracker *probeLogTracker, events *eventlog.Ring, incarnations *incarnationTracker, debounce *ownershipDebounce) {
-	byNodeID, defaultChecks, err := fetchAllScopes(cfg)
-	if err != nil {
-		log.Printf("[PROBE:FETCH] %v", err)
-		return
-	}
-
-	if incarnations.restarted(byNodeID) {
-		log.Printf("[PROBE:INVALIDATE] a monitored cluster node restarted — clearing all stored results, forcing a fresh sweep")
-		store.clear()
-		debounce.clear()
-	}
-
-	if changed := reconcileVLANInterfaces(cfg, byNodeID); len(changed) > 0 {
-		log.Printf("[PROBE:VLAN] %v", changed)
-	}
-	if removed := reconcileOrphanVLANs(cfg, desiredVLANs(byNodeID, cfg.trunkParents())); len(removed) > 0 {
-		log.Printf("[PROBE:VLAN] %v", removed)
-	}
-
-	tokens := fetchTokens(cfg)
-
-	scopeNames := mergedScopeNames(byNodeID)
-	keep := make(map[string]bool, len(scopeNames))
-	for _, name := range scopeNames {
-		keep[name] = true
-	}
-	store.prune(keep)
-	tracker.prune(keep)
-
-	probeAndRecord := func(name string) {
-		result := probeOneScope(cfg, name, byNodeID, defaultChecks, tokens, false)
-		settleOwnershipResult(store, debounce, tracker, events, name, result)
-	}
-
-	if cfg.Parallel() {
-		var wg sync.WaitGroup
-		for _, name := range scopeNames {
-			wg.Add(1)
-			go func(name string) {
-				defer wg.Done()
-				probeAndRecord(name)
-			}(name)
-		}
-		wg.Wait()
-	} else {
-		for _, name := range scopeNames {
-			probeAndRecord(name)
-		}
-	}
-}
-
 // probeScopeNow runs an immediate, single-scope probe outside the regular
 // sweep ticker.
 func probeScopeNow(cfg *ProbeConfig, store *resultStore, tracker *probeLogTracker, events *eventlog.Ring, debounce *ownershipDebounce, scope string) (result ScopeProbeResult, published bool, err error) {
@@ -507,7 +527,18 @@ func probeScopeNow(cfg *ProbeConfig, store *resultStore, tracker *probeLogTracke
 		result.QueueWaitMS = queueWaitMS(elapsed, expectedFloor)
 	}
 
-	published = settleOwnershipResult(store, debounce, tracker, events, scope, result)
+	dhcpView, dnsView := result, result
+	dhcpView.DNSPending = true
+	dnsView.DHCPPending = true
+	published = settleOwnershipResult(store, debounce, tracker, events, scope, dhcpView)
+	settleDNSResult(store, tracker, events, scope, dnsView)
+	target := resolveScopeTarget(cfg, scope, byNodeID)
+	dhcpFlags := []string{"manual"}
+	if !published {
+		dhcpFlags = append(dhcpFlags, "held_by_debounce")
+	}
+	recordScopeLeg("dhcp", scope, target, dhcpView, dhcpFlags)
+	recordScopeLeg("dns", scope, target, dnsView, []string{"manual"})
 	return result, published, nil
 }
 
@@ -683,94 +714,22 @@ func probeDHCPOptions(iface string) dhcpprobe.Options {
 	return opts
 }
 
-// probeOneScope runs the full DHCP + DNS check set for one scope.
+// probeOneScope runs both legs for one scope, DHCP then DNS, each through its
+// own per-interface queue.
 func probeOneScope(cfg *ProbeConfig, name string, byNodeID map[string]probeConfigResponse, defaultChecks []config.DNSCheck, tokens map[string]tokenInfo, priority bool) ScopeProbeResult {
-	result := ScopeProbeResult{Scope: name, ProbedAt: time.Now()}
-
-	var vlanID int
-	var parent string
-	var dnsRecords []config.DNSRecord
-	var probeDisabled bool
-	for _, resp := range byNodeID {
-		if sc, ok := resp.Scopes[name]; ok {
-			vlanID = sc.VLANID
-			parent = sc.Parent
-			dnsRecords = sc.DNSRecords
-			probeDisabled = sc.ProbeDisabled
-			break
-		}
-	}
-	if parent == "" {
-		parent = cfg.TrunkParent
-	}
-
-	iface := realIfaceName(parent, vlanID)
-	if _, err := ifaceExistsFn(iface); err != nil {
-		result.Reachable = false
+	t := resolveScopeTarget(cfg, name, byNodeID)
+	result, run := t.base()
+	if !run {
 		return result
 	}
-	result.Reachable = true
-
-	if probeDisabled {
-		return result
-	}
-	result.Enabled = true
-
-	probeScheduler.Submit(parent, priority, func() {
-		dhcpResult, err := dhcpprobe.ProbeWithOptions(iface, time.Duration(cfg.dhcpWaitMS())*time.Millisecond, probeDHCPOptions(iface))
-		if err != nil {
-			result.DHCP.Error = err.Error()
-		} else {
-			result.DHCP.Verdict = string(dhcpResult.Verdict)
-			result.DHCP.Servers = dhcpResult.Servers
-			result.DHCP.Valid, result.DHCP.Reason = validateDHCPAnswer(name, dhcpResult, byNodeID, tokens)
-			result.DHCP.Offers = dhcpOffersToDetails(dhcpResult.Offers)
-		}
-
-		if len(defaultChecks) == 0 {
-			defaultChecks = []config.DNSCheck{{Name: config.DefaultDNSCheckName, Type: config.DefaultDNSCheckType}}
-		}
-
-		for _, resp := range byNodeID {
-			if !isCoreRole(resp.Role) {
-				continue
-			}
-			sc, ok := resp.Scopes[name]
-			if !ok || sc.NodeIP == "" {
-				continue
-			}
-			addr, err := netip.ParsePrefix(sc.NodeIP)
-			target := sc.NodeIP
-			if err == nil {
-				target = addr.Addr().String()
-			}
-
-			hasUpstream := resp.ClusterHasUpstream
-			for _, chk := range defaultChecks {
-				result.DNSChecks = append(result.DNSChecks, runOneDNSCheck(target, chk.Name, chk.Type, nil, hasUpstream))
-			}
-			for _, rec := range dnsRecords {
-				if rec.ProbeDisabled {
-					continue
-				}
-				result.DNSChecks = append(result.DNSChecks, runOneDNSCheck(target, rec.Name, rec.Type, &rec, hasUpstream))
-			}
-		}
-
-		for _, c := range result.DNSChecks {
-			if c.Skipped != "" {
-				continue
-			}
-			result.DNS.Answered = c.Answered
-			result.DNS.LatencyMS = c.LatencyMS
-			result.DNS.Error = c.Error
-			result.DNS.Valid = c.Valid
-			result.DNS.Reason = c.Reason
-			break
-		}
+	var dl, nl ScopeProbeResult
+	probeScheduler.Submit(t.parent, priority, func() {
+		dl, _ = runDHCPLeg(cfg, t, byNodeID, tokens, dhcpHint{})
 	})
-
-	return result
+	dnsScheduler.Submit(t.parent, priority, func() {
+		nl = runDNSLeg(t, byNodeID, defaultChecks)
+	})
+	return combineLegs(result, dl, nl)
 }
 
 // dnsProbeFn is runOneDNSCheck's actual query call.
@@ -783,7 +742,7 @@ func runOneDNSCheck(target, name, qtype string, expected *config.DNSRecord, hasU
 	if strings.EqualFold(qtype, "RAW") && expected != nil {
 		queryType = strconv.Itoa(expected.RRType)
 	}
-	res, err := dnsProbeFn(target, name, queryType, 5*time.Second)
+	res, err := dnsProbeFn(target, name, queryType, dnsQueryTimeout)
 	if err != nil {
 		if strings.Contains(err.Error(), "unsupported query type") {
 			r.Skipped = err.Error()

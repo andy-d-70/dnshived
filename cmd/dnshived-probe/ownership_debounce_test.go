@@ -113,9 +113,9 @@ func validResult(scope string) ScopeProbeResult {
 	return r
 }
 
-func TestSettleOwnershipResult_FirstFailureSuppressedAndCleared(t *testing.T) {
+func TestSettleOwnershipResult_FirstFailureSuppressedKeepsPriorReading(t *testing.T) {
 	store := newResultStore()
-	store.set("rand-ens19-0003", validResult("rand-ens19-0003")) // a real prior good result
+	store.setLeg(legDHCP, "rand-ens19-0003", validResult("rand-ens19-0003")) // a real prior good result
 	debounce := newOwnershipDebounce()
 	tracker := newProbeLogTracker(nil)
 	events := eventlog.New(10, "probe")
@@ -125,8 +125,9 @@ func TestSettleOwnershipResult_FirstFailureSuppressedAndCleared(t *testing.T) {
 	if published {
 		t.Error("published = true, want false — a first-occurrence ownership-only failure must not be confirmed yet")
 	}
-	if _, ok := store.get("rand-ens19-0003"); ok {
-		t.Error("store still has an entry — a not-yet-confirmed ownership failure must genuinely clear it (revert to pending), not leave the old OR the new reading visible")
+	stored, ok := store.get("rand-ens19-0003")
+	if !ok || !stored.DHCP.Valid {
+		t.Error("the prior valid reading must stay visible while a first ownership failure is unconfirmed, and the unconfirmed one must not replace it")
 	}
 }
 

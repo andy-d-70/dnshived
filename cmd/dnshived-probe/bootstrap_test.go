@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"dnshived/internal/bootstrap"
+	"dnshived/internal/probepin"
 )
 
 func TestProbeBootstrapUnits_IsEmpty(t *testing.T) {
@@ -147,6 +148,9 @@ func (e *testError) Error() string { return e.msg }
 // the golden path.
 func TestProbeAdoptHandler_ValidConfigWrittenViaHelperAndReExecScheduled(t *testing.T) {
 	written := withMockProbeHelperWrite(t, nil)
+	origCertDir := probeCertDir
+	probeCertDir = t.TempDir()
+	defer func() { probeCertDir = origCertDir }()
 
 	origReExec := probeReExecFunc
 	called := make(chan struct{}, 1)
@@ -166,6 +170,24 @@ func TestProbeAdoptHandler_ValidConfigWrittenViaHelperAndReExecScheduled(t *test
 	}
 	if !bytes.Equal(*written, raw) {
 		t.Error("content handed to probeHelperWriteConfigFunc does not match the pushed payload exactly")
+	}
+	var reply struct {
+		OK          bool   `json:"ok"`
+		TLSPort     string `json:"tls_port"`
+		Fingerprint string `json:"tls_fingerprint"`
+		Proof       string `json:"tls_proof"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &reply); err != nil {
+		t.Fatal(err)
+	}
+	if !reply.OK || reply.TLSPort != probeTLSPort || !probepin.Valid(reply.Fingerprint) {
+		t.Fatalf("reply %+v, want ok with the TLS port and a valid fingerprint", reply)
+	}
+	if !probepin.VerifyAdoptProof("REAL-CODE", reply.Fingerprint, reply.Proof) {
+		t.Error("the fingerprint must be proven with the join code, or an adopter would have to take it on trust")
+	}
+	if _, fp, err := loadOrCreateProbeCert(probeCertDir); err != nil || fp != reply.Fingerprint {
+		t.Errorf("the configured probe must reuse the certificate it reported: %v %s vs %s", err, fp, reply.Fingerprint)
 	}
 
 	select {

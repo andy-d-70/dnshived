@@ -188,6 +188,10 @@ func TestHandleConn_RestartHelper_RespondsBeforeSelfRestarting(t *testing.T) {
 	helperRestartMu.Lock()
 	lastHelperRestartAt = time.Time{}
 	helperRestartMu.Unlock()
+	restarted := make(chan struct{}, 1)
+	origRestart := helperSelfRestart
+	helperSelfRestart = func() { restarted <- struct{}{} }
+	t.Cleanup(func() { helperSelfRestart = origRestart })
 
 	server, client := net.Pipe()
 	defer client.Close()
@@ -218,6 +222,11 @@ func TestHandleConn_RestartHelper_RespondsBeforeSelfRestarting(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for a response — restart-helper must respond BEFORE triggering its own restart, not after")
+	}
+	select {
+	case <-restarted:
+	case <-time.After(2 * time.Second):
+		t.Error("the self restart was never triggered after the response")
 	}
 }
 

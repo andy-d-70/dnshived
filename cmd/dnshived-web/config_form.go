@@ -55,6 +55,9 @@ moved to <a href="/probes#settings">probes &rarr;</a>.</p>
 {{end}}{{end}}</textarea></td></tr>
 <tr><td>worker interface display names<br><small>(optional, cosmetic only — one per line, format <code>iface=Display Name</code>; blank = show the raw interface name)</small></td><td><textarea name="platform_worker_labels" rows="3" cols="30">{{if .Cluster.Platform}}{{range .Cluster.Platform.Workers}}{{$label := index $.Cluster.Platform.InterfaceLabels .}}{{if $label}}{{.}}={{$label}}
 {{end}}{{end}}{{end}}</textarea></td></tr>
+<tr><td>use for serving<br><small>(untick to keep scopes off an interface; the management interface only serves untagged scopes and its address is never touched)</small></td><td>
+{{range .ServingRows}}<label title="{{if .Mgmt}}Management interface: scopes on it are untagged and use its existing static address. Off by default.{{else}}Worker interface: scopes (VLANs) can be put on it. An interface cannot be switched off while a scope is on it.{{end}}"><input type="hidden" name="platform_serve_seen" value="{{.Name}}"><input type="checkbox" name="platform_serve" value="{{.Name}}" {{if .On}}checked{{end}}> {{.Name}}{{if .Mgmt}} (management){{end}}</label><br>
+{{end}}</td></tr>
 </table>
 
 <h2>Management VIP (web UI access)</h2>

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -74,6 +75,10 @@ func main() {
 	incarnations := newIncarnationTracker()
 	debounce := newOwnershipDebounce()
 	events := eventlog.New(2000, "probe")
+	histRec = newHistoryRecorder(historyDir, historySyslogSink())
+	if cfg.History != nil {
+		histRec.SetConfig(*cfg.History)
+	}
 	authMw := auth.New(cfg.APITokens)
 	startedAt := time.Now()
 	if err := startAPIServer(cfg, *cfgPath, store, tracker, events, debounce, startedAt, authMw); err != nil {
@@ -83,7 +88,8 @@ func main() {
 
 	waitForConvergence(cfg)
 
-	runProbeSweep(cfg, store, tracker, events, incarnations, debounce)
+	runners := newProbeRunners(context.Background(), cfg, store, tracker, events, debounce)
+	refreshProbePlan(cfg, runners, incarnations)
 
 	go func() {
 		scopeTicker := time.NewTicker(time.Duration(cfg.probeInterval()) * time.Millisecond)
@@ -103,6 +109,6 @@ func main() {
 
 	ticker := time.NewTicker(time.Duration(cfg.probeInterval()) * time.Millisecond)
 	for range ticker.C {
-		runProbeSweep(cfg, store, tracker, events, incarnations, debounce)
+		refreshProbePlan(cfg, runners, incarnations)
 	}
 }

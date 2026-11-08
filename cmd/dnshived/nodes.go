@@ -69,8 +69,8 @@ func addProbeHandler(observer *cluster.Observer) http.HandlerFunc {
 		}
 
 		cfg := currentConfig.Load()
-		if cfg.Platform == nil || len(cfg.Platform.Workers) == 0 {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cluster has no configured worker trunks (platform.workers) yet — nothing for a probe host to cover"})
+		if cfg.Platform == nil || len(cfg.Platform.ServingInterfaces()) == 0 {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cluster has no configured worker trunks (platform.workers) or management interface yet — nothing for a probe host to cover"})
 			return
 		}
 		probeToken, err := findTokenByRole(cfg, "probe")
@@ -83,8 +83,9 @@ func addProbeHandler(observer *cluster.Observer) http.HandlerFunc {
 
 		pc := generatedProbeConfig{
 			ListenAddr:        probeListenAddr,
-			TrunkParent:       cfg.Platform.Workers[0],
+			TrunkParent:       cfg.Platform.ServingInterfaces()[0],
 			TrunkParents:      cfg.Platform.Workers,
+			MgmtInterface:     mgmtIfaceIfServing(cfg.Platform),
 			ClusterToken:      probeToken,
 			ClusterNodes:      liveCoreNodes(cfg, observer.Snapshot()),
 			LocalOctet:        deriveProbeLocalOctet(req.Addr),
@@ -107,12 +108,18 @@ func addProbeHandler(observer *cluster.Observer) http.HandlerFunc {
 			return
 		}
 
-		if err := pushProbeAdopt(req.Addr, req.OTP, raw); err != nil {
+		pin, err := pushProbeAdoptInfo(req.Addr, req.OTP, raw)
+		if err != nil {
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "push to probe: " + err.Error()})
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]interface{}{"ok": true, "name": "probe", "addr": req.Addr, "probe_admin_token": probeAdminToken})
+		reply := map[string]interface{}{"ok": true, "name": "probe", "addr": req.Addr, "probe_admin_token": probeAdminToken}
+		if pin.Fingerprint != "" {
+			reply["tls_port"] = pin.Port
+			reply["tls_fingerprint"] = pin.Fingerprint
+		}
+		writeJSON(w, http.StatusOK, reply)
 	}
 }
 
@@ -1165,4 +1172,13 @@ func pushUpdatePeer(cfg *config.Cluster, addr, adminToken, oldAddr, newAddr stri
 		return fmt.Errorf("%s", resp.Status)
 	}
 	return nil
+}
+
+// mgmtIfaceIfServing is the management interface name for a probe host's
+// config, or "" while the management interface is not switched on for serving.
+func mgmtIfaceIfServing(p *config.Platform) string {
+	if p != nil && p.Mgmt != "" && p.Serves(p.Mgmt) {
+		return p.Mgmt
+	}
+	return ""
 }

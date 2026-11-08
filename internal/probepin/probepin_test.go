@@ -55,3 +55,39 @@ func TestParsePin(t *testing.T) {
 		}
 	}
 }
+
+func TestAdoptProof_OnlyTheJoinCodeHolderCanProveAFingerprint(t *testing.T) {
+	fp := "sha256:" + strings.Repeat("ab", 32)
+	proof := AdoptProof("join-code-1", fp)
+	if !VerifyAdoptProof("join-code-1", fp, proof) {
+		t.Fatal("a proof made with the same join code must verify")
+	}
+	if VerifyAdoptProof("join-code-2", fp, proof) {
+		t.Error("a different join code must not verify")
+	}
+	if VerifyAdoptProof("join-code-1", "sha256:"+strings.Repeat("cd", 32), proof) {
+		t.Error("a proof must not verify for another fingerprint")
+	}
+	if VerifyAdoptProof("join-code-1", fp, "") || VerifyAdoptProof("join-code-1", fp, "zz") {
+		t.Error("an empty or malformed proof must not verify")
+	}
+}
+
+func TestTokenProof_BoundToTokenFingerprintAndNonce(t *testing.T) {
+	fp := "sha256:" + strings.Repeat("ab", 32)
+	p := TokenProof("tok-1", fp, "n1")
+	if !VerifyTokenProof("tok-1", fp, "n1", p) {
+		t.Fatal("a proof from the same token, fingerprint and nonce must verify")
+	}
+	for name, ok := range map[string]bool{
+		"other token":       VerifyTokenProof("tok-2", fp, "n1", p),
+		"other fingerprint": VerifyTokenProof("tok-1", "sha256:"+strings.Repeat("cd", 32), "n1", p),
+		"other nonce":       VerifyTokenProof("tok-1", fp, "n2", p),
+		"empty proof":       VerifyTokenProof("tok-1", fp, "n1", ""),
+		"not hex":           VerifyTokenProof("tok-1", fp, "n1", "zz"),
+	} {
+		if ok {
+			t.Errorf("%s must not verify (a replayed or forged answer)", name)
+		}
+	}
+}

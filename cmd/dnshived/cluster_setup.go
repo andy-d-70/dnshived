@@ -24,6 +24,7 @@ import (
 	"dnshived/internal/bootstrap"
 	"dnshived/internal/config"
 	"dnshived/internal/helper"
+	"dnshived/internal/probepin"
 	"dnshived/internal/webauth"
 )
 
@@ -360,6 +361,7 @@ type generatedProbeConfig struct {
 	ListenAddr        string            `json:"listen_addr"`
 	TrunkParent       string            `json:"trunk_parent"`
 	TrunkParents      []string          `json:"trunk_parents,omitempty"`
+	MgmtInterface     string            `json:"mgmt_interface,omitempty"`
 	ClusterToken      string            `json:"cluster_token"`
 	ClusterNodes      []probeConfigNode `json:"cluster_nodes"`
 	APITokens         []config.APIToken `json:"api_tokens,omitempty"`
@@ -415,18 +417,57 @@ func buildProbeConfig(secrets generatedSecrets, allNodes []clusterNode, probeNod
 }
 
 func pushProbeAdopt(addr, otp string, probeJSON []byte) error {
+	_, err := pushProbeAdoptInfo(addr, otp, probeJSON)
+	return err
+}
+
+// probeTLSPin is the certificate a probe host reported when it was adopted.
+// It is set only when the probe proved the fingerprint with the join code.
+type probeTLSPin struct {
+	Port        string
+	Fingerprint string
+}
+
+// pushProbeAdoptInfo is pushProbeAdopt plus the probe's proven TLS
+// fingerprint, so the adopter can pin it at once. A probe that does not
+// answer with one (older build) or whose proof does not verify yields an
+// empty pin and no error.
+func pushProbeAdoptInfo(addr, otp string, probeJSON []byte) (probeTLSPin, error) {
+	var pin probeTLSPin
 	plain, err := json.Marshal(struct {
 		Config json.RawMessage `json:"config"`
 	}{Config: probeJSON})
 	if err != nil {
-		return err
+		return pin, err
 	}
 
 	target, err := probeAdoptTarget(addr)
 	if err != nil {
-		return err
+		return pin, err
 	}
-	return postSealedAdopt("http://"+target+"/api/v1/bootstrap/adopt", otp, bootstrap.PurposeProbeAdopt, plain)
+	reply, err := postSealedAdoptBody("http://"+target+"/api/v1/bootstrap/adopt", otp, bootstrap.PurposeProbeAdopt, plain)
+	if err != nil {
+		return pin, err
+	}
+	return provenProbePin(addr, otp, reply), nil
+}
+
+// provenProbePin reads the fingerprint out of a probe's adoption reply and
+// returns it only when it is well formed and proven with the join code.
+func provenProbePin(addr, otp string, reply []byte) probeTLSPin {
+	var r struct {
+		TLSPort        string `json:"tls_port"`
+		TLSFingerprint string `json:"tls_fingerprint"`
+		TLSProof       string `json:"tls_proof"`
+	}
+	if json.Unmarshal(reply, &r) != nil || r.TLSFingerprint == "" {
+		return probeTLSPin{}
+	}
+	if !probepin.Valid(r.TLSFingerprint) || !probepin.VerifyAdoptProof(otp, r.TLSFingerprint, r.TLSProof) {
+		loglevel.Warnf("[API:NODES] probe %s reported a TLS fingerprint whose proof does not match the join code — not pinning it", addr)
+		return probeTLSPin{}
+	}
+	return probeTLSPin{Port: r.TLSPort, Fingerprint: r.TLSFingerprint}
 }
 
 // probeAdoptTarget derives pushProbeAdopt's real destination.
@@ -602,29 +643,35 @@ func pushAdoptConfig(addr, otp string, payload adoptPayload) error {
 }
 
 func postSealedAdopt(url, otp, purpose string, plain []byte) error {
+	_, err := postSealedAdoptBody(url, otp, purpose, plain)
+	return err
+}
+
+// postSealedAdoptBody posts the sealed adoption and returns the node's reply body.
+func postSealedAdoptBody(url, otp, purpose string, plain []byte) ([]byte, error) {
 	sealed, err := bootstrap.Seal(otp, purpose, plain)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	body, err := json.Marshal(sealed)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	client := &http.Client{Timeout: pushConfigTimeout}
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("unreachable: %w", err)
+		return nil, fmt.Errorf("unreachable: %w", err)
 	}
 	defer resp.Body.Close()
 
+	reply, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(resp.Body)
 		if resp.StatusCode == http.StatusUnauthorized {
-			return fmt.Errorf("%s: %s (or the node runs a dnshived older than 0.9.8.6, which cannot read an encrypted push; upgrade it first)", resp.Status, strings.TrimSpace(string(msg)))
+			return nil, fmt.Errorf("%s: %s (or the node runs a dnshived older than 0.9.8.6, which cannot read an encrypted push; upgrade it first)", resp.Status, strings.TrimSpace(string(reply)))
 		}
-		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(msg)))
+		return nil, fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(reply)))
 	}
-	return nil
+	return reply, nil
 }
 
 // bootstrapCommitTmpl shows the outcome of a create-cluster attempt.

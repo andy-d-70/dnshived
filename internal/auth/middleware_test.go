@@ -278,3 +278,19 @@ func TestSetTokens_EnablingAuthLiveIsNotPermanentlyCachedAtWrapTime(t *testing.T
 		t.Errorf("same *Middleware/handler, auth enabled live, no bearer token: status = %d, want %d (auth must now actually be enforced, not permanently bypassed from the earlier disabled state)", rr2.Code, http.StatusUnauthorized)
 	}
 }
+
+func TestWrap_TLSInfoIsPublicButStatusIsNot(t *testing.T) {
+	m := New([]config.APIToken{{Name: "a", Token: "tok", Role: "admin"}})
+	h := m.Wrap(http.HandlerFunc(handlerOK))
+	for path, want := range map[string]int{
+		"/api/v1/tls-info": http.StatusOK,
+		"/api/v1/status":   http.StatusUnauthorized,
+		"/api/v1/tls":      http.StatusUnauthorized,
+	} {
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		if rr.Code != want {
+			t.Errorf("%s without a token: status %d, want %d", path, rr.Code, want)
+		}
+	}
+}

@@ -15,13 +15,14 @@ const CoreIndex = 0
 
 const MaxIndex = 255
 
-// Index returns parent's 1-based position in cluster.Platform.Workers (0
-// is reserved for the core pair, see CoreIndex).
+// Index returns parent's 1-based position among the serving interfaces (the
+// workers, then the management interface; 0 is reserved for the core pair,
+// see CoreIndex).
 func Index(cluster config.Cluster, parent string) (int, error) {
 	if cluster.Platform == nil {
 		return 0, fmt.Errorf("trunkaddr: cluster has no platform configuration")
 	}
-	for i, w := range cluster.Platform.Workers {
+	for i, w := range cluster.Platform.ServingInterfaces() {
 		if w == parent {
 			idx := i + 1
 			if idx > MaxIndex {
@@ -30,7 +31,7 @@ func Index(cluster config.Cluster, parent string) (int, error) {
 			return idx, nil
 		}
 	}
-	return 0, fmt.Errorf("trunkaddr: parent %q is not a configured worker interface", parent)
+	return 0, fmt.Errorf("trunkaddr: parent %q is not a configured serving interface", parent)
 }
 
 // DHCPAddress returns the loopback bind address central DHCP uses for idx.

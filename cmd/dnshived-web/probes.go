@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"html/template"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -36,15 +37,20 @@ func probeClass(pr probeResult, have bool) (text, class string) {
 	dhcpDual := pr.DHCP.Error == "" && pr.DHCP.Verdict == "dual_active"
 	dhcpNoAnswer := pr.DHCP.Error == "" && pr.DHCP.Verdict == "no_answer"
 	dhcpUnknown := pr.DHCP.Error != ""
+	dnsPending, dhcpPending := pr.DNSPending, pr.DHCPPending
 
 	dnsText := "DNS✖"
-	if dnsUnknown {
+	if dnsPending {
+		dnsText = "DNS…"
+	} else if dnsUnknown {
 		dnsText = "DNS?"
 	} else if dnsOK {
 		dnsText = "DNS✔"
 	}
 	dhcpText := "DHCP✖"
 	switch {
+	case dhcpPending:
+		dhcpText = "DHCP…"
 	case dhcpUnknown:
 		dhcpText = "DHCP?"
 	case dhcpOK:
@@ -63,6 +69,11 @@ func probeClass(pr probeResult, have bool) (text, class string) {
 		return text, "crit"
 	case dnsUnknown || dhcpUnknown:
 		return text, "dim"
+	case dnsPending || dhcpPending:
+		if (dnsPending || dnsOK) && (dhcpPending || dhcpOK) {
+			return text, "dim"
+		}
+		return text, "warn"
 	case dnsOK && dhcpOK:
 		return text, "ok"
 	default:
@@ -89,8 +100,11 @@ func probeClassParts(pr probeResult, have bool, mismatch bool) (dnsText, dnsClas
 	dhcpDual := pr.DHCP.Error == "" && pr.DHCP.Verdict == "dual_active"
 	dhcpNoAnswer := pr.DHCP.Error == "" && pr.DHCP.Verdict == "no_answer"
 	dhcpUnknown := pr.DHCP.Error != ""
+	dnsPending, dhcpPending := pr.DNSPending, pr.DHCPPending
 
 	switch {
+	case dnsPending:
+		dnsText, dnsClass = "DNS…", "warn"
 	case dnsUnknown:
 		dnsText, dnsClass = "DNS?", "dim"
 	case dnsOK:
@@ -100,6 +114,8 @@ func probeClassParts(pr probeResult, have bool, mismatch bool) (dnsText, dnsClas
 	}
 
 	switch {
+	case dhcpPending:
+		dhcpText, dhcpClass = "DHCP…", "warn"
 	case dhcpUnknown:
 		dhcpText, dhcpClass = "DHCP?", "dim"
 	case dhcpOK:
@@ -150,7 +166,7 @@ func probeCellDisplay(now time.Time, pr probeResult, fetchErr error, queried boo
 		return "pending...", "dim", "", "", fetchErr.Error()
 	}
 	if pr.Pending {
-		return "pending...", "dim", "", "", "not yet probed"
+		return "pending...", "warn", "", "", "not yet probed"
 	}
 	if stale {
 		return "pending...", "dim", "", "", "settling — reading predates the current owner's restart"
@@ -165,6 +181,12 @@ func probeCellDisplay(now time.Time, pr probeResult, fetchErr error, queried boo
 			age = 0
 		}
 		note = fmt.Sprintf("%ds ago", age)
+	}
+	if pr.DHCPPending {
+		note = strings.TrimSpace(note + " DHCP not probed yet")
+	}
+	if pr.DNSPending {
+		note = strings.TrimSpace(note + " DNS not probed yet")
 	}
 	if reason := probeReasonSuffix(pr, true); reason != "" {
 		note = strings.TrimSpace(note + " " + strings.Trim(reason, " []"))
@@ -308,6 +330,7 @@ func checkProbeHostIssuesWithCoverage(scopeNames []string, probeHosts []NodeConf
 		}
 	}
 	issues, mismatches, pendingCount = classifyProbeResults(active, tokens, ownerUptime, serving)
+	issues = append(issues, manualProbeIssues(probeHosts)...)
 	return issues, mismatches, pendingCount, probeCoverageOf(results, time.Now(), disabled)
 }
 
@@ -341,14 +364,14 @@ func probeCoverageOf(results []probeFetch, now time.Time, disabledScopes map[str
 			c.ScopeDisabled++
 		case res.err != nil:
 			c.Unknown++
-		case res.pr.Pending:
+		case res.pr.anyPending():
 			c.Pending++
 		case !res.pr.Reachable:
 			c.NoCoverage++
 		case !res.pr.Enabled && res.pr.DHCP.Error == "" && res.pr.DNS.Error == "":
 			c.Disabled++
 		default:
-			if at, err := time.Parse(time.RFC3339, res.pr.ProbedAt); err == nil && now.Sub(at) > probeStaleAfter {
+			if at := res.pr.oldestProbedAt(); !at.IsZero() && now.Sub(at) > probeStaleAfter {
 				c.Stale++
 			} else {
 				c.Probed++
@@ -448,7 +471,7 @@ func classifyProbeResults(results []probeFetch, tokens map[string]tokenInfo, own
 	mismatches = make(map[string]bool)
 	now := time.Now()
 	for _, res := range results {
-		if res.err == nil && res.pr.Pending {
+		if res.err == nil && res.pr.anyPending() {
 			pendingCount++
 		}
 		if res.err != nil || res.pr.Pending {
@@ -456,7 +479,7 @@ func classifyProbeResults(results []probeFetch, tokens map[string]tokenInfo, own
 		}
 		if tok, ok := tokens[res.scope]; ok {
 			uptimeSec, hasUptime := ownerUptime[tok.Owner]
-			probedAt, _ := time.Parse(time.RFC3339, res.pr.ProbedAt)
+			probedAt := res.pr.oldestProbedAt()
 			if probeStale(probedAt, uptimeSec, hasUptime, now) {
 				continue
 			}
@@ -583,20 +606,46 @@ type probeCellData struct {
 const probeAutoRefreshSeconds = 20
 
 // probeCellDefineHTML is the "probecell" named template.
-const probeCellDefineHTML = `{{define "probecell"}}<span class="{{.DNSClass}}"{{if .Title}} title="{{.Title}}"{{end}}>{{.DNSText}}</span>{{if .DHCPText}} <span class="{{.DHCPClass}}">{{.DHCPText}}</span>{{end}}{{if .Note}} <span class="dim">({{.Note}})</span>{{end}} <a class="dim" href="/probes/{{.Scope}}/{{.Worker}}">detail</a> <form method="post" action="/probes/{{.Scope}}/{{.Worker}}/refresh" style="display:inline"><button type="submit" class="dim" style="font-size:.85em;padding:0 .3em">probe now</button></form>{{end}}`
+const probeCellDefineHTML = `{{define "probecell"}}<span class="{{.DNSClass}}"{{if .Title}} title="{{.Title}}"{{end}}>{{.DNSText}}</span>{{if .DHCPText}} <span class="{{.DHCPClass}}">{{.DHCPText}}</span>{{end}}{{if .Note}} <span class="dim">({{.Note}})</span>{{end}} <a class="dim probe-detail" href="/probes/{{.Scope}}/{{.Worker}}">detail</a> <form class="probe-now-form" method="post" action="/probes/{{.Scope}}/{{.Worker}}/refresh" style="display:inline"><button type="submit" class="btn-sm">probe now</button></form>{{end}}`
+
+// probePopupHTML is the dialog and the script that fill it with the probe
+// detail; without JavaScript the "detail" link and "probe now" still open the
+// full page.
+const probePopupHTML = `<dialog id="probe-dialog" style="max-width:min(60rem,92vw);max-height:85vh;overflow:auto;border:1px solid var(--border);border-radius:10px;background:var(--panel);color:var(--text)">
+<form method="dialog" style="text-align:right;margin:0"><button type="submit" class="btn-sm">Close</button></form>
+<div id="probe-dialog-body"></div>
+</dialog>
+<script>
+(function(){
+var dlg=document.getElementById('probe-dialog');
+if(!dlg||!dlg.showModal){return}
+var body=document.getElementById('probe-dialog-body');
+function show(html){body.innerHTML=html;if(!dlg.open){dlg.showModal()}}
+function note(cls,text){var p=document.createElement('p');p.className=cls;p.textContent=text;body.replaceChildren(p);if(!dlg.open){dlg.showModal()}}
+function load(url,opts,busy){
+ note('dim',busy);
+ fetch(url,opts).then(function(r){return r.text().then(function(t){if(!r.ok){throw new Error(r.status+' '+t.slice(0,200))}return t})}).then(show).catch(function(e){note('crit','Could not load the probe detail: '+e.message)})
+}
+function withFragment(u){return u+(u.indexOf('?')<0?'?':'&')+'fragment=1'}
+document.addEventListener('click',function(e){
+ var a=e.target.closest&&e.target.closest('a.probe-detail');
+ if(a&&e.button===0&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey){e.preventDefault();load(withFragment(a.href),{credentials:'same-origin'},'Loading the probe detail…')}
+});
+document.addEventListener('submit',function(e){
+ var f=e.target;
+ if(f.classList&&f.classList.contains('probe-now-form')){e.preventDefault();load(withFragment(f.action),{method:'POST',credentials:'same-origin'},'Probing now… this takes up to about 20 seconds')}
+});
+dlg.addEventListener('click',function(e){if(e.target===dlg){dlg.close()}});
+})();
+</script>`
 
 const probeManagementHTML = `<h2 id="settings">Probe hosts &amp; settings</h2>
-<p class="dim">A probe host checks every configured scope's DHCP/DNS
-one at a time (~9s each) — at 40 scopes that's already ~6 minutes for
-a full sweep; at 500 scopes it would be well over an hour, too slow to
-reflect current reality. Parallel probing lets a probe host check
-scopes on DIFFERENT physical trunk NICs concurrently (scopes sharing
-ONE physical NIC still run one at a time — that part can't be sped up
-safely). Verified locally (100/100 trials, see
-tools/probe-parallel-rig.sh) and live on the real lab (~2x faster, zero
-errors across 40 scopes). Applies to EVERY probe host listed below at
-once and restarts each one to take effect — expect a brief gap in
-probe results right after saving.</p>
+<p class="dim">A probe host runs one DHCP check and one DNS check per physical
+interface at a time, each interface on its own, and moves to the next scope as
+soon as a DHCP server has offered a lease. Every scope is therefore checked
+again within a few minutes however many interfaces carry scopes. DHCP and DNS
+results are shown as soon as each is available: a part that has not run yet is
+shown in orange as pending.</p>
 {{if .NodeProbeHosts}}<div class="table-wrap"><table border="1" cellpadding="4">
 <tr><th>Name</th><th>Display name</th><th>Address</th><th>State</th><th>Scopes</th><th>Rename</th><th></th></tr>
 {{range .ProbeParallelRows}}
@@ -605,8 +654,7 @@ probe results right after saving.</p>
   <td>{{index $.ProbeHostDisplayNames .Addr}}</td>
   <td>{{.Addr}}</td>
   <td>{{if not .Reachable}}<span class="crit">unreachable{{if .Err}} — {{.Err}}{{end}}</span>
-      {{else if .Enabled}}<span class="ok">parallel</span>
-      {{else}}serial{{end}}</td>
+      {{else}}<span class="ok">running</span>{{end}}</td>
   <td>{{.ScopeCount}}</td>
   <td><form method="post" action="/nodes/rename" style="display:inline">
     <input type="hidden" name="addr" value="{{.Addr}}">
@@ -617,30 +665,29 @@ probe results right after saving.</p>
 </tr>
 {{end}}
 </table></div>
-{{if .NodeProbeHosts}}<div class="table-wrap"><table border="1" cellpadding="4">
-<tr><th>Probe host</th><th>TLS</th><th>Pin certificate</th></tr>
-{{range .NodeProbeHosts}}
+{{if .ProbeTLSStates}}<div class="table-wrap"><table border="1" cellpadding="4">
+<tr><th>Probe host</th><th>TLS</th><th>Plain HTTP</th><th></th></tr>
+{{range .ProbeTLSStates}}
 <tr>
   <td>{{.Addr}}</td>
-  <td>{{if .TLSFingerprint}}<span class="ok">pinned</span> <code>{{.TLSFingerprint}}</code>{{else}}<span class="warn" title="plain HTTP: traffic to this probe is not encrypted until its certificate is pinned. Type the fingerprint from the probe host's log (journalctl -u dnshived-probe | grep 'TLS API').">not pinned — plain HTTP</span>{{end}}</td>
-  <td><form method="post" action="/probes/pin" style="display:inline">
-    <input type="hidden" name="addr" value="{{.Addr}}">
-    <input type="text" name="tls_fingerprint" size="72" placeholder="sha256:…" pattern="sha256:[0-9a-f]{64}" required title="SHA-256 fingerprint from the probe host's log at start">
-    <button type="submit">Pin</button>
-  </form>{{if .TLSFingerprint}}<form method="post" action="/probes/unpin" style="display:inline">
-    <input type="hidden" name="addr" value="{{.Addr}}">
-    <button type="submit" class="btn-warn" title="go back to plain HTTP for this probe until it is pinned again">Unpin</button>
-  </form>{{end}}</td>
+  <td>{{if .Pinned}}<span class="ok">pinned</span> <code>{{.Fingerprint}}</code>{{else}}<span class="warn" title="Traffic to this probe is not encrypted until its certificate is pinned. Use Pin now: the probe proves its certificate with its admin token; if it cannot, the fingerprint is shown to compare with the probe host's log.">not pinned</span>{{end}}</td>
+  <td>{{if not .Pinned}}<span class="warn" title="The unencrypted port answers until the certificate is pinned and the port is closed.">open (unencrypted)</span>
+      {{else if .Err}}<span class="dim" title="{{.Err}}">unknown</span>
+      {{else if not .PlainKnown}}<span class="dim" title="This probe host does not report it; upgrade it.">unknown</span>
+      {{else if .PlainOpen}}<span class="warn" title="The unencrypted port is still open although the certificate is pinned.">open</span>
+      <form method="post" action="/probes/plain-http" style="display:inline"><input type="hidden" name="addr" value="{{.Addr}}"><input type="hidden" name="enabled" value="0"><button type="submit" title="The probe restarts once to close the port. Only this web UI and dnshived-top with the pinned fingerprint can reach it afterwards.">Close plain HTTP</button></form>
+      {{else}}<span class="ok">closed</span>{{end}}</td>
+  <td>{{if not .Pinned}}<form method="post" action="/probes/pin-now" style="display:inline"><input type="hidden" name="addr" value="{{.Addr}}"><button type="submit">Pin now</button></form>
+      {{else}}{{if .PlainOpen}}<form method="post" action="/probes/unpin" style="display:inline"><input type="hidden" name="addr" value="{{.Addr}}"><button type="submit" class="btn-warn" title="go back to plain HTTP for this probe until it is pinned again">Unpin</button></form>{{end}}
+      <details><summary class="dim">Replace the certificate</summary>
+        <form method="post" action="/probes/tls/upload" onsubmit="return confirm('Replace the certificate of this probe host? The new fingerprint is pinned here at once; dnshived-top and dnshived-validate need the new fingerprint.')">
+        <input type="hidden" name="addr" value="{{.Addr}}">
+        <p class="dim">Certificate (PEM, the first one is the server certificate):<br><textarea name="cert_pem" rows="5" cols="70" required></textarea></p>
+        <p class="dim">Private key (PEM, sent over the pinned connection and never shown again):<br><textarea name="key_pem" rows="5" cols="70" required autocomplete="off"></textarea></p>
+        <button type="submit">Replace certificate</button></form></details>{{end}}</td>
 </tr>
 {{end}}
 </table></div>{{end}}
-<form method="post" action="/config/probe-parallel">
-<p><label><input type="checkbox" name="probe_parallel_enabled" {{if .AllProbeHostsParallel}}checked{{end}}>
-{{if gt (len .ProbeParallelRows) 1}}Enable parallel probing on every probe host listed above{{else}}Enable parallel probing on this probe host{{end}}</label>
-<span class="info-ico" title="off (serial) probes one scope at a time — slow at real scale (40 scopes ≈ 6 minutes, measured; 500 scopes ≈ 75 minutes, too stale to be useful) but the most conservative. on (parallel) probes concurrently, still serialized per physical trunk NIC (never two probes racing on the same wire), letting different trunks run at once — a real speedup, but scopes-sharing-a-trunk safety is the only part independently verified so far.">ⓘ</span></p>
-<p><input type="submit" value="{{if gt (len .ProbeParallelRows) 1}}Apply to all probe hosts{{else}}Apply{{end}}"></p>
-<p class="dim">Takes effect from the next probe sweep — no restart, existing results are kept.</p>
-</form>
 {{else}}<p>None adopted.</p>{{end}}
 <form method="post" action="/nodes/probe/add">
 <label>Address (host:port): <input type="text" name="addr" placeholder="192.0.2.43:9444"></label><br>
@@ -649,6 +696,52 @@ probe results right after saving.</p>
 <button type="submit">Add probe</button>
 </form>
 
+<h3 id="manual">Manual probes</h3>
+<p class="dim">Watch an interface for DHCP servers, tagged or untagged, also where no scope is served.
+A DISCOVER is sent and no lease is ever taken. Every DHCP server that answers is listed; click "ack" on one that belongs on
+that segment (your router, for example) and it is known from then on. Any other server is a rogue. A segment where a scope is served
+never accepts a second server.</p>
+{{range .ManualProbeHosts}}
+<h4>{{.Name}}</h4>
+{{if .Err}}<p class="warn" title="The probe host did not answer GET /api/v1/watch; it may run an older version.">Manual probes not available: {{.Err}}</p>{{end}}
+{{if .Rows}}<div class="table-wrap"><table border="1" cellpadding="4">
+<tr><th>Name</th><th>Interface</th><th>VLAN</th><th>Result</th><th>DHCP servers seen</th><th>Probed</th><th></th></tr>
+{{$addr := .Addr}}{{range .Rows}}{{$name := .Name}}<tr>
+  <td>{{.Name}}</td><td>{{.Interface}}</td><td>{{.VLAN}}</td>
+  <td><span class="{{.ResultClass}}"{{if .Title}} title="{{.Title}}"{{end}}>{{.ResultText}}</span></td>
+  <td>{{range .Chips}}<span class="{{.Class}}" title="{{.Title}}">{{.Server}} <small>{{.Label}}</small></span>{{if .CanToggle}} <form method="post" action="/probes/manual/ack" style="display:inline"><input type="hidden" name="addr" value="{{$addr}}"><input type="hidden" name="name" value="{{$name}}"><input type="hidden" name="server" value="{{.Server}}"><input type="hidden" name="action" value="{{.Action}}"><button type="submit" class="btn-sm">{{.Action}}</button></form>{{end}}&nbsp; {{end}}{{if not .Served}}<form method="post" action="/probes/manual/ack" style="display:inline"><input type="hidden" name="addr" value="{{$addr}}"><input type="hidden" name="name" value="{{$name}}"><input type="hidden" name="action" value="ack"><input type="text" name="server" size="14" placeholder="add address" pattern="[0-9]{1,3}(\.[0-9]{1,3}){3}" required title="An IPv4 address to acknowledge as a known DHCP server on this segment, also one that is not answering now."> <button type="submit" class="btn-sm">add</button></form>{{end}}</td>
+  <td class="dim">{{.Age}}</td>
+  <td><form method="post" action="/probes/manual/remove" style="display:inline"><input type="hidden" name="addr" value="{{$addr}}"><input type="hidden" name="name" value="{{.Name}}"><button type="submit">Remove</button></form></td>
+</tr>{{end}}
+</table></div>{{end}}
+{{if not .Err}}<form method="post" action="/probes/manual/add">
+<input type="hidden" name="addr" value="{{.Addr}}">
+<label>Name: <input type="text" name="name" size="14" pattern="[a-z0-9][a-z0-9_-]{0,31}" required title="lowercase letters, digits, - and _"></label>
+<label>Interface: <input type="text" name="interface" list="manual-ifaces" size="10" required></label>
+<label>VLAN (0 = untagged): <input type="number" name="vlan_id" min="0" max="4094" value="0" class="narrow"></label>
+<button type="submit">Add manual probe</button>
+</form>{{end}}
+{{end}}
+<datalist id="manual-ifaces">{{range .ManualIfaces}}<option value="{{.}}">{{end}}</datalist>
+
+<h3 id="history">Probe history</h3>
+<p class="dim">The probe host can keep what it finds: every result, or only failures (with a "recovered" line when a failing scope answers again), separately for DHCP and DNS. Manual probes follow the DHCP setting. Off by default. Each record is also written to the probe host's syslog (tag dnshived-probe-history) unless that is switched off here.
+<a href="/probes/history">Open the history</a>.</p>
+{{range .HistoryHosts}}
+<h4>{{.Name}}</h4>
+{{if .Err}}<p class="warn" title="The probe host did not answer GET /api/v1/history; it may run an older version.">History not available: {{.Err}}</p>{{else}}
+<form method="post" action="/probes/history">
+<input type="hidden" name="addr" value="{{.Addr}}">
+<p>DHCP: <label><input type="radio" name="dhcp" value="none"{{if eq .Settings.DHCP "none"}} checked{{end}}> none</label> <label><input type="radio" name="dhcp" value="failures"{{if eq .Settings.DHCP "failures"}} checked{{end}}> failures only</label> <label><input type="radio" name="dhcp" value="all"{{if eq .Settings.DHCP "all"}} checked{{end}}> all</label></p>
+<p>DNS: <label><input type="radio" name="dns" value="none"{{if eq .Settings.DNS "none"}} checked{{end}}> none</label> <label><input type="radio" name="dns" value="failures"{{if eq .Settings.DNS "failures"}} checked{{end}}> failures only</label> <label><input type="radio" name="dns" value="all"{{if eq .Settings.DNS "all"}} checked{{end}}> all</label> <span class="warn" title="DNS is probed for every scope every 20 seconds: with 100 scopes, all results are on the order of 100 MB a day. The size and age limits below bound it.">&#9888; "all" is a lot of data</span></p>
+<p><label><input type="checkbox" name="syslog"{{if .Settings.Syslog}} checked{{end}}> also write every record to syslog</label></p>
+<details><summary class="dim">Limits (defaults: 25 MB per file, 4 files, 7 days)</summary>
+<p><label>largest file, MB: <input type="number" name="max_file_mb" min="1" max="1024" value="{{.Settings.MaxFileMB}}" class="narrow"></label>
+<label>files kept: <input type="number" name="max_files" min="1" max="50" value="{{.Settings.MaxFiles}}" class="narrow"></label>
+<label>days kept: <input type="number" name="max_age_days" min="1" max="365" value="{{.Settings.MaxAgeDays}}" class="narrow"></label></p></details>
+<p><button type="submit">Save history settings</button> <span class="dim">now {{.Size}} on disk{{if .Dropped}}, {{.Dropped}} record(s) dropped because the disk could not keep up{{end}}; applies at once, no restart</span></p>
+</form>{{end}}
+{{end}}
 <h3>Probe behavior settings</h3>
 <form method="post" action="/probes/settings" onsubmit="return confirm('This will stage these probe settings as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">
 <p class="dim">Generic (name, type) DNS queries a probe host runs against
@@ -691,8 +784,8 @@ var probesTmpl = template.Must(template.New("probes").Parse(`<!doctype html>
 ` + probeManagementHTML + `
 <h2 id="results">Results</h2>
 <p>{{.Total}} scope(s), {{.ErrorCount}} error(s){{if .PendingCount}}, <span class="dim">{{.PendingCount}} pending</span>{{end}}{{if .CoverageText}} — <span class="dim">{{.CoverageText}}</span>{{end}} — page {{.Page}}/{{.TotalPages}}
-{{if gt .Page 1}}<a href="/probes?page={{.PrevPage}}">prev</a>{{else}}<span class="dim">prev</span>{{end}}
-{{if lt .Page .TotalPages}}<a href="/probes?page={{.NextPage}}">next</a>{{end}}
+{{if gt .Page 1}}<a href="/probes?page={{.PrevPage}}#results">prev</a>{{else}}<span class="dim">prev</span>{{end}}
+{{if lt .Page .TotalPages}}<a href="/probes?page={{.NextPage}}#results">next</a>{{end}}
 </p>
 ` + probeCellDefineHTML + `
 <table border="1" cellpadding="4" cellspacing="0">
@@ -707,7 +800,8 @@ var probesTmpl = template.Must(template.New("probes").Parse(`<!doctype html>
 {{if eq .Total 0}}<p class="dim">(no scopes configured)</p>{{end}}
 <p class="dim">Ages are as of the probe host's own check, not when this page loaded.
 Next auto-refresh: {{.NextRefreshAt}} (every ` + fmt.Sprint(probeAutoRefreshSeconds) + `s) —
-<a href="?page={{.Page}}">refresh now</a>.</p>
+<a href="?page={{.Page}}#results">refresh now</a>.</p>
+` + probePopupHTML + `
 `))
 
 // noProbeHostTmpl is the page shown when zero probe hosts are configured.
@@ -752,6 +846,116 @@ type probeManagementData struct {
 	DefaultDNSChecksText string
 	GlobalDNSNames       []dnsCheckOption
 	ProbeIntervalMS      int
+
+	ManualProbeHosts []manualProbeHost
+	ManualIfaces     []string
+	ProbeTLSStates   []probeTLSState
+	HistoryHosts     []historyHostRow
+}
+
+// manualProbeHost is one probe host's manual probes as the page shows them.
+type manualProbeHost struct {
+	Name, Addr string
+	Err        string
+	Rows       []manualProbeRow
+}
+
+type manualProbeRow struct {
+	Name, Interface         string
+	VLAN                    string
+	ResultText, ResultClass string
+	Title, Age              string
+	Chips                   []serverChip
+	Served                  bool
+}
+
+// serverChip is one DHCP server beside a manual probe: known (acknowledged),
+// unknown (answered but not acknowledged) or known but silent this time.
+type serverChip struct {
+	Server, Label, Class, Title, Action string
+	CanToggle                           bool
+}
+
+// manualProbeRowOf turns one result into the table row; the same wording and
+// colors are used wherever a manual probe is shown. served says a scope sits
+// on this interface and VLAN: an unknown server there cannot be acknowledged.
+func manualProbeRowOf(w watchResult, now time.Time, served bool) manualProbeRow {
+	row := manualProbeRow{Name: w.Name, Interface: w.Interface, VLAN: "untagged", Served: served}
+	if w.VLANID != 0 {
+		row.VLAN = strconv.Itoa(w.VLANID)
+	}
+	switch {
+	case w.Pending:
+		row.ResultText, row.ResultClass = "pending…", "warn"
+		row.Title = "This manual probe has not run yet."
+	case w.Verdict == "rogue":
+		row.ResultText, row.ResultClass = "ROGUE "+strings.Join(w.Unexpected, ", "), "crit"
+		row.Title = "A DHCP server that is not acknowledged answered on this interface."
+	case w.Verdict == "ok":
+		row.ResultText, row.ResultClass = "only known servers", "ok"
+	case w.Verdict == "clear":
+		row.ResultText, row.ResultClass = "no DHCP server answered", "ok"
+	default:
+		row.ResultText, row.ResultClass = "error: "+w.Error, "warn"
+		row.Title = "The probe could not run on this interface, so nothing is known about it."
+	}
+	if at, err := time.Parse(time.RFC3339, w.ProbedAt); err == nil && !w.Pending {
+		row.Age = fmt.Sprintf("%ds ago", max(0, int(now.Sub(at).Seconds())))
+	}
+	known := make(map[string]bool, len(w.ExpectedServers))
+	for _, e := range w.ExpectedServers {
+		known[e] = true
+	}
+	seen := make(map[string]bool, len(w.Servers))
+	for _, s := range w.Servers {
+		seen[s] = true
+		if known[s] {
+			row.Chips = append(row.Chips, serverChip{Server: s, Label: "known", Class: "ok", Action: "unack", CanToggle: true,
+				Title: "Acknowledged: this server is expected on this segment. Click to stop treating it as known."})
+			continue
+		}
+		chip := serverChip{Server: s, Label: "unknown", Class: "crit", Action: "ack", CanToggle: !served,
+			Title: "Answered but is not acknowledged. Acknowledge it if it belongs on this segment."}
+		if served {
+			chip.Title = "A scope is served on this interface and VLAN, so a second DHCP server here is never acceptable and cannot be acknowledged."
+		}
+		row.Chips = append(row.Chips, chip)
+	}
+	for _, e := range w.ExpectedServers {
+		if !seen[e] {
+			row.Chips = append(row.Chips, serverChip{Server: e, Label: "known, silent", Class: "dim", Action: "unack", CanToggle: true,
+				Title: "Acknowledged but did not answer this time. Click to remove it from the known servers."})
+		}
+	}
+	return row
+}
+
+// manualProbeIssues lists every manual probe that found a rogue server, in
+// the shape the probe issue list uses.
+func manualProbeIssues(probeHosts []NodeConfig) []probeIssue {
+	var out []probeIssue
+	for _, host := range probeHosts {
+		results, err := fetchWatch(host)
+		if err != nil {
+			continue
+		}
+		for _, w := range results {
+			if w.Verdict != "rogue" {
+				continue
+			}
+			where := w.Interface + " (untagged)"
+			if w.VLANID != 0 {
+				where = fmt.Sprintf("%s VLAN %d", w.Interface, w.VLANID)
+			}
+			out = append(out, probeIssue{
+				Scope: "manual probe " + w.Name, Worker: host.Name,
+				DHCPText: "DHCP✖ROGUE", DHCPClass: "crit",
+				Detail: fmt.Sprintf("ROGUE DHCP on %s: unlisted server(s) %s answered", where, strings.Join(w.Unexpected, ", ")),
+				Rogue:  true,
+			})
+		}
+	}
+	return out
 }
 
 // buildProbeManagementData fetches everything probeManagementData needs.
@@ -766,7 +970,50 @@ func buildProbeManagementData(c config.Cluster, node NodeConfig, probeHosts []No
 		DefaultDNSChecksText:  dns.DefaultDNSChecksText,
 		GlobalDNSNames:        dns.GlobalDNSNames,
 		ProbeIntervalMS:       c.ProbeIntervalMS,
+		ManualProbeHosts:      buildManualProbeHosts(probeHosts, c.Scopes),
+		ManualIfaces:          manualInterfaceChoices(c),
+		ProbeTLSStates:        buildProbeTLSStates(probeHosts),
+		HistoryHosts:          buildHistoryHostRows(probeHosts),
 	}
+}
+
+// scopeServed reports whether any scope sits on this interface and VLAN.
+func scopeServed(scopes map[string]config.ScopeConfig, iface string, vlan int) bool {
+	for _, sc := range scopes {
+		if sc.Parent == iface && sc.VLANID == vlan {
+			return true
+		}
+	}
+	return false
+}
+
+func buildManualProbeHosts(probeHosts []NodeConfig, scopes map[string]config.ScopeConfig) []manualProbeHost {
+	now := time.Now()
+	out := make([]manualProbeHost, 0, len(probeHosts))
+	for _, h := range probeHosts {
+		mh := manualProbeHost{Name: h.Name, Addr: h.Addr}
+		results, err := fetchWatch(h)
+		if err != nil {
+			mh.Err = err.Error()
+		}
+		for _, w := range results {
+			mh.Rows = append(mh.Rows, manualProbeRowOf(w, now, scopeServed(scopes, w.Interface, w.VLANID)))
+		}
+		out = append(out, mh)
+	}
+	return out
+}
+
+// manualInterfaceChoices is every interface of the cluster, serving or not.
+func manualInterfaceChoices(c config.Cluster) []string {
+	if c.Platform == nil {
+		return nil
+	}
+	out := append([]string(nil), c.Platform.Workers...)
+	if c.Platform.Mgmt != "" {
+		out = append(out, c.Platform.Mgmt)
+	}
+	return out
 }
 
 type probeFetch struct {
@@ -843,6 +1090,7 @@ func handleProbes(ref *configRef) http.HandlerFunc {
 			}
 		}
 		errIssues, mismatches, pendingCount := classifyProbeResults(activeResults, tokens, ownerUptime, serving)
+		errIssues = append(errIssues, manualProbeIssues(cfg.ProbeHosts)...)
 		confirmedLines := debounceProbeMismatches(mismatches)
 		errorCount := len(errIssues) + len(confirmedLines)
 
@@ -858,7 +1106,7 @@ func handleProbes(ref *configRef) http.HandlerFunc {
 				var stale bool
 				if hasToken {
 					uptimeSec, hasUptime := ownerUptime[tok.Owner]
-					probedAt, _ := time.Parse(time.RFC3339, res.pr.ProbedAt)
+					probedAt := res.pr.oldestProbedAt()
 					stale = probeStale(probedAt, uptimeSec, hasUptime, renderNow)
 				}
 				if disabledSet[sc] {
@@ -931,6 +1179,10 @@ type probeDetailData struct {
 	JustRefreshed bool
 	QueueWaitMS   int64
 
+	DHCPPending bool
+	DNSPending  bool
+	DHCPOfferMS int64
+
 	DHCPVerdict string
 	DHCPServers []string
 	DHCPValid   bool
@@ -944,6 +1196,10 @@ type probeDetailData struct {
 	DNSLatencyMS int64
 	DNSError     string
 	DNSChecks    []probeDNSCheck
+
+	HistoryOff  bool
+	HistoryErr  string
+	HistoryRows []historyRow
 }
 
 // findProbeHost looks up worker by name among cfg.ProbeHosts.
@@ -972,6 +1228,7 @@ func buildProbeDetailData(scope, worker string, pr probeResult, err error, probe
 		Scope: scope, Worker: worker,
 		Pending: pr.Pending, Enabled: pr.Enabled, Reachable: pr.Reachable, ProbedAt: formatProbedAt(pr.ProbedAt),
 		ProbeDisabled: probeDisabled, ProbeDisabledKnown: probeDisabledKnown, CandidatePending: candidatePending,
+		DHCPPending: pr.DHCPPending, DNSPending: pr.DNSPending, DHCPOfferMS: pr.DHCP.OfferMS,
 		DHCPVerdict: pr.DHCP.Verdict, DHCPServers: pr.DHCP.Servers,
 		DHCPValid: pr.DHCP.Valid, DHCPReason: pr.DHCP.Reason, DHCPError: pr.DHCP.Error,
 		DHCPOffers:  pr.DHCP.Offers,
@@ -1003,6 +1260,26 @@ func fetchScopeProbeDisabled(nodes []NodeConfig, scope string) (disabled bool, k
 
 // handleProbeDetail serves one (scope, probe host) pair's full raw probe
 // result — linked from every cell on the Probes grid.
+// probeDetailFragmentTmpl is the detail content without the page around it,
+// for the popup on the scope list and the Probes page.
+var probeDetailFragmentTmpl = template.Must(template.Must(probeDetailTmpl.Clone()).New("fragment").Parse(`<h2>Probe detail: {{.Scope}} <span class="dim">(from {{.Worker}})</span></h2>
+<form class="probe-now-form" method="post" action="/probes/{{.Scope}}/{{.Worker}}/refresh"><button type="submit">Probe now</button>
+<span class="dim">checks DHCP and DNS now; takes up to about 20 seconds</span></form>
+{{template "probe-detail-body" .}}`))
+
+func wantsFragment(r *http.Request) bool { return r.URL.Query().Get("fragment") == "1" }
+
+func renderProbeDetail(w http.ResponseWriter, r *http.Request, data probeDetailData) {
+	if wantsFragment(r) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := probeDetailFragmentTmpl.ExecuteTemplate(w, "fragment", data); err != nil {
+			fmt.Fprintf(w, "<p class=\"crit\">render error: %v</p>", err)
+		}
+		return
+	}
+	renderTemplate(w, probeDetailTmpl, data, "probe-detail")
+}
+
 func handleProbeDetail(ref *configRef) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := ref.Load()
@@ -1018,7 +1295,8 @@ func handleProbeDetail(ref *configRef) http.HandlerFunc {
 		pr, err := fetchProbe(*node, scope)
 		probeDisabled, known, pending := fetchScopeProbeDisabled(nodesIncludingSelf(cfg), scope)
 		data := buildProbeDetailData(scope, worker, pr, err, probeDisabled, known, pending)
-		renderTemplate(w, probeDetailTmpl, data, "probe-detail")
+		attachScopeHistory(&data, *node)
+		renderProbeDetail(w, r, data)
 	}
 }
 
@@ -1106,7 +1384,8 @@ func handleProbeRefresh(ref *configRef) http.HandlerFunc {
 		probeDisabled, known, pending := fetchScopeProbeDisabled(nodesIncludingSelf(cfg), scope)
 		data := buildProbeDetailData(scope, worker, pr, err, probeDisabled, known, pending)
 		data.JustRefreshed = err == nil && pr.Reachable
-		renderTemplate(w, probeDetailTmpl, data, "probe-detail")
+		attachScopeHistory(&data, *node)
+		renderProbeDetail(w, r, data)
 	}
 }
 
@@ -1120,6 +1399,8 @@ var probeDetailTmpl = template.Must(template.New("probe-detail").Parse(`<!doctyp
 <button type="submit">Probe now</button>
 </form>
 <p class="dim">A manual probe blocks for the real DHCP/DNS check duration (roughly 10-20 seconds) — the page will show the fresh result once it completes.</p>
+{{template "probe-detail-body" .}}
+{{define "probe-detail-body"}}
 {{if .ProbeDisabledKnown}}
 <form method="post" action="/probes/{{.Scope}}/toggle-probe" onsubmit="return confirm('This will stage a pending change on every configured node ({{if .ProbeDisabled}}enable{{else}}disable{{end}} probing for scope {{.Scope}}) — nothing is applied until you commit from Pending changes. Continue?')">
 <input type="hidden" name="worker" value="{{.Worker}}">
@@ -1134,10 +1415,13 @@ var probeDetailTmpl = template.Must(template.New("probe-detail").Parse(`<!doctyp
 {{if .ProbedAt}}<p class="dim">Probed at: {{.ProbedAt}}</p>{{end}}
 
 <h2>DHCP</h2>
+{{if .DHCPPending}}<p class="warn" title="The DHCP probe runs one scope after another on each interface; this scope has not had its turn yet.">Pending &mdash; the DHCP probe has not run for this scope yet.</p>
+{{else}}
 <table border="1" cellpadding="4" cellspacing="0">
 <tr><th>Verdict</th><th>Valid</th><th>Reason</th><th>Error</th></tr>
 <tr><td>{{.DHCPVerdict}}</td><td>{{.DHCPValid}}</td><td>{{.DHCPReason}}</td><td>{{.DHCPError}}</td></tr>
 </table>
+{{if .DHCPOfferMS}}<p class="dim">First offer after {{.DHCPOfferMS}} ms.</p>{{end}}
 {{if .DHCPOffers}}
 <p>Offers received:</p>
 <table border="1" cellpadding="4" cellspacing="0">
@@ -1145,8 +1429,11 @@ var probeDetailTmpl = template.Must(template.New("probe-detail").Parse(`<!doctyp
 {{range .DHCPOffers}}<tr><td>{{.ServerID}}</td><td>{{.OfferedIP}}</td></tr>{{end}}
 </table>
 {{else}}<p class="dim">(no offers received)</p>{{end}}
+{{end}}
 
 <h2>DNS</h2>
+{{if .DNSPending}}<p class="warn" title="The DNS probe runs one scope after another on each interface; this scope has not had its turn yet.">Pending &mdash; the DNS probe has not run for this scope yet.</p>
+{{else}}
 <p>Summary: answered={{.DNSAnswered}} valid={{.DNSValid}} latency={{.DNSLatencyMS}}ms{{if .DNSError}} error={{.DNSError}}{{end}}{{if .DNSReason}} — {{.DNSReason}}{{end}}</p>
 {{if .DNSChecks}}
 <table border="1" cellpadding="4" cellspacing="0">
@@ -1160,4 +1447,210 @@ var probeDetailTmpl = template.Must(template.New("probe-detail").Parse(`<!doctyp
 </tr>{{end}}
 </table>
 {{else}}<p class="dim">(no per-record DNS checks)</p>{{end}}
+{{end}}
+
+<h2>Recent history</h2>
+{{if .HistoryErr}}<p class="dim">History is not available from this probe host: {{.HistoryErr}}</p>
+{{else if .HistoryOff}}<p class="dim">History is off for this probe host. <a href="/probes#history">Switch it on</a>.</p>
+{{else if .HistoryRows}}<table border="1" cellpadding="4" cellspacing="0">
+<tr><th>Time</th><th>Check</th><th>Result</th><th>Detail</th></tr>
+{{range .HistoryRows}}<tr><td style="white-space:nowrap">{{.Time}}</td><td>{{.Leg}}</td><td class="{{.Class}}">{{.Outcome}}{{if .Failing}} <span class="dim">after {{.Failing}}</span>{{end}}</td><td>{{.Detail}}{{if .Flags}} <span class="dim">({{.Flags}})</span>{{end}}</td></tr>{{end}}
+</table>
+<p><a href="/probes/history?scope={{.Scope}}&amp;range=7d">full history of this scope</a></p>
+{{else}}<p class="dim">(nothing recorded yet)</p>{{end}}
+{{end}}
 `))
+
+// parseExpectedServers reads one IPv4 address per line or separated by
+// commas or spaces.
+func parseExpectedServers(raw string) []string {
+	var out []string
+	for _, f := range strings.FieldsFunc(raw, func(r rune) bool { return r == '\n' || r == '\r' || r == ',' || r == ' ' || r == '\t' }) {
+		out = append(out, f)
+	}
+	return out
+}
+
+func probeHostByAddr(cfg *WebConfig, addr string) (NodeConfig, bool) {
+	for _, h := range cfg.ProbeHosts {
+		if h.Addr == addr {
+			return h, true
+		}
+	}
+	return NodeConfig{}, false
+}
+
+// handleManualProbeAdd adds one manual probe to a probe host.
+func handleManualProbeAdd(ref *configRef) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cfg := ref.Load()
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		host, ok := probeHostByAddr(cfg, r.FormValue("addr"))
+		if !ok {
+			http.Error(w, "unknown probe host", http.StatusBadRequest)
+			return
+		}
+		vlan, err := strconv.Atoi(strings.TrimSpace(r.FormValue("vlan_id")))
+		if r.FormValue("vlan_id") == "" {
+			vlan, err = 0, nil
+		}
+		if err != nil {
+			http.Error(w, "vlan_id must be a number (0 = untagged)", http.StatusBadRequest)
+			return
+		}
+		current, err := fetchWatch(host)
+		if err != nil {
+			http.Error(w, "could not read the probe host's manual probes: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		list := make([]manualProbeDef, 0, len(current)+1)
+		for _, c := range current {
+			list = append(list, c.def())
+		}
+		list = append(list, manualProbeDef{
+			Name: strings.TrimSpace(r.FormValue("name")), Interface: strings.TrimSpace(r.FormValue("interface")),
+			VLANID: vlan, ExpectedServers: parseExpectedServers(r.FormValue("expected_servers")),
+		})
+		user, _ := userFromContext(r)
+		err = pushProbeHostManualProbes(host, list)
+		summary := fmt.Sprintf("manual probe %q added on %s", list[len(list)-1].Name, host.Name)
+		if err != nil {
+			summary = fmt.Sprintf("manual probe %q on %s FAILED: %v", list[len(list)-1].Name, host.Name, err)
+		}
+		pushAudit(host, user.Name, "probe.manual_add", summary)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Redirect(w, r, "/probes#manual", http.StatusSeeOther)
+	}
+}
+
+// handleManualProbeRemove removes one manual probe from a probe host.
+func handleManualProbeRemove(ref *configRef) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cfg := ref.Load()
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		host, ok := probeHostByAddr(cfg, r.FormValue("addr"))
+		if !ok {
+			http.Error(w, "unknown probe host", http.StatusBadRequest)
+			return
+		}
+		name := r.FormValue("name")
+		current, err := fetchWatch(host)
+		if err != nil {
+			http.Error(w, "could not read the probe host's manual probes: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		list := make([]manualProbeDef, 0, len(current))
+		for _, c := range current {
+			if c.Name != name {
+				list = append(list, c.def())
+			}
+		}
+		user, _ := userFromContext(r)
+		err = pushProbeHostManualProbes(host, list)
+		summary := fmt.Sprintf("manual probe %q removed from %s", name, host.Name)
+		if err != nil {
+			summary = fmt.Sprintf("removing manual probe %q from %s FAILED: %v", name, host.Name, err)
+		}
+		pushAudit(host, user.Name, "probe.manual_remove", summary)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		http.Redirect(w, r, "/probes#manual", http.StatusSeeOther)
+	}
+}
+
+// handleManualProbeAck acknowledges or un-acknowledges one DHCP server on a
+// manual probe, by editing that probe's expected_servers.
+func handleManualProbeAck(ref *configRef) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cfg := ref.Load()
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		host, ok := probeHostByAddr(cfg, r.FormValue("addr"))
+		if !ok {
+			http.Error(w, "unknown probe host", http.StatusBadRequest)
+			return
+		}
+		name, server, action := r.FormValue("name"), strings.TrimSpace(r.FormValue("server")), r.FormValue("action")
+		if action != "ack" && action != "unack" {
+			http.Error(w, "action must be ack or unack", http.StatusBadRequest)
+			return
+		}
+		if ip := net.ParseIP(server); ip == nil || ip.To4() == nil {
+			http.Error(w, "server must be an IPv4 address", http.StatusBadRequest)
+			return
+		}
+		current, err := fetchWatch(host)
+		if err != nil {
+			http.Error(w, "could not read the probe host's manual probes: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		if action == "ack" {
+			c, _, _, cerr := currentEditableConfig(nodesIncludingSelf(cfg))
+			if cerr != nil {
+				http.Error(w, "fetch current config: "+cerr.Error(), http.StatusBadGateway)
+				return
+			}
+			for _, w0 := range current {
+				if w0.Name == name && scopeServed(c.Scopes, w0.Interface, w0.VLANID) {
+					http.Error(w, "a scope is served on this interface and VLAN: a second DHCP server here cannot be acknowledged", http.StatusConflict)
+					return
+				}
+			}
+		}
+		list, found := editExpected(current, name, server, action == "ack")
+		if !found {
+			http.Error(w, "unknown manual probe", http.StatusNotFound)
+			return
+		}
+		user, _ := userFromContext(r)
+		err = pushProbeHostManualProbes(host, list)
+		summary := fmt.Sprintf("manual probe %q: server %s %sed on %s", name, server, action, host.Name)
+		if err != nil {
+			summary = fmt.Sprintf("manual probe %q: %s of %s on %s FAILED: %v", name, action, server, host.Name, err)
+		}
+		pushAudit(host, user.Name, "probe.manual_"+action, summary)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		http.Redirect(w, r, "/probes#manual", http.StatusSeeOther)
+	}
+}
+
+// editExpected returns the whole manual probe list with server added to or
+// removed from the named probe's expected servers.
+func editExpected(current []watchResult, name, server string, add bool) ([]manualProbeDef, bool) {
+	list := make([]manualProbeDef, 0, len(current))
+	found := false
+	for _, c := range current {
+		d := c.def()
+		if c.Name == name {
+			found = true
+			var kept []string
+			for _, e := range d.ExpectedServers {
+				if e != server {
+					kept = append(kept, e)
+				}
+			}
+			if add {
+				kept = append(kept, server)
+			}
+			d.ExpectedServers = kept
+		}
+		list = append(list, d)
+	}
+	return list, found
+}
