@@ -137,8 +137,7 @@ rendered and validated, and the helper is reachable.
 VIP ownership alone does not make DHCP exclusive. A DHCP server bound
 to a VLAN interface answers broadcast `DHCPDISCOVER`s on that segment
 whether or not it holds the VIP; VRRP only controls unicast delivery to
-an address. Reproduced with `tools/dhcp-gate-rig.sh baseline`: two
-servers, one VIP, two offers.
+an address. Reproduced in a lab: two servers, one VIP, two offers.
 
 Exclusivity therefore comes from one gate per scope on every node that
 must not answer. The gate is inside `dnshived-relay`: it refuses to
@@ -150,7 +149,7 @@ when the authorization's deadline passes.
   silent window, never a dual-answer window, because each node's gate
   is its own local default. Opening first would be a code mistake, not
   something the gate itself prevents, so the order is a frozen rule
-  (`docs/FREEZE.md`) and verified with `dhcp-gate-rig.sh handoff`.
+  (`docs/FREEZE.md`).
 - Opening or closing the gate is a message over the relay's local
   socket, with no firewall rule involved.
 - dnsmasq's own `dhcp-relay=` was evaluated first and rejected: relay

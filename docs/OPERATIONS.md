@@ -8,10 +8,11 @@ and monitoring. Connection flags can be stored in `~/.dnshived/rc`
 ## Web UI (`dnshived-web`)
 
 Reachable at `https://<mgmt-vip>:8443/` or on any core node's own
-address; ports 80/443 redirect there. Menu: Overview, Scopes (list and
-topology view), Scope options, Probes, Cluster Config (settings, nodes,
-daemons), DNS, Security (API tokens), Backup, Logs, and the Pending
-changes button.
+address; ports 80/443 redirect there. Menu: the dnshived logo (Overview),
+Scopes (list, topology view, defaults for new scopes), Probes, DHCP & DNS,
+Security (API tokens, users, mail), Maintenance (backup, restore, export),
+Cluster settings (nodes, interfaces, addresses) and Logs (with the daemon
+list), plus the Pending changes button. Long pages are split into tabs.
 
 - **Changes are staged, then committed.** Every edit becomes a pending
   change on all nodes; nothing applies until you commit it on Pending
@@ -51,7 +52,7 @@ changes button.
   Nothing is enforced while any core is below the required version, so a
   rolling upgrade never blocks itself. Membership edits (add, replace,
   remove a core) keep their own rules and do not change the epoch.
-- **Nodes** are onboarded, replaced or offboarded from Cluster Config
+- **Nodes** are onboarded, replaced or offboarded from Cluster settings
   (also staged); a new host's join code is required.
 - **Backups:** Back up now, automated encrypted backups replicated to
   peers, restore from a node or an uploaded file.
@@ -182,7 +183,7 @@ codes 0=OK, 1=WARNING, 2=CRITICAL.
 
 ## Log levels
 
-`log_level` in `cluster.json` (Cluster Config in the web UI):
+`log_level` in `cluster.json` (Cluster settings in the web UI):
 
 | Level | Behavior |
 |-------|----------|

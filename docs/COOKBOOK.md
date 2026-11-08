@@ -9,7 +9,7 @@ Only a PBKDF2 hash is stored, so a password cannot be shown, only
 reset. In order of preference:
 
 1. "Forgot password?" on the login page mails a reset link (needs the
-   user's email address and Cluster config → Mail).
+   user's email address and Security → Mail & reset).
 2. An admin sets a new password on the Users page.
 3. On any core node (also re-enables a disabled account):
 
@@ -49,7 +49,7 @@ recipe.
 
 ## Return a node to bootstrap mode
 
-Use **Offboard** on Cluster Config and commit. The node tears down its
+Use **Offboard** on Cluster settings → Nodes and commit. The node tears down its
 scopes, wipes its config and restarts in bootstrap mode with a new join
 code; the survivors drop it from their peer lists.
 
@@ -150,5 +150,5 @@ the audit log. Nothing else in the configuration changes.
 
 When a core that was away comes back, it sees the higher epoch, stops
 serving and shows `OUTAGE HOLD ... removed while away` on the Overview
-page. Re-adopt it from the standalone node (Cluster Config, replace or
-onboard) so it takes over the standalone node's configuration and epoch.
+page. Re-adopt it from the standalone node (Cluster settings → Nodes,
+replace or onboard) so it takes over the standalone node's configuration and epoch.

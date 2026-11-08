@@ -37,15 +37,26 @@ API (9443) and the web UI (8443). To use your own, set
 }
 ```
 
-Client tools support `-tls` and `-tls-skip-verify`. The probe host's
-plain API (9444) stays for probes that are not upgraded yet. Every probe
-also serves its API over HTTPS on 9445 with its own self-signed
-certificate, and that certificate can be pinned by its SHA-256
-fingerprint (`-probe-pin host:port=sha256:...` in `dnshived-top` and
-`dnshived-validate`, or the Pin action on the web UI's Probes page). A
-pinned probe is reached only over HTTPS with that certificate; the
-fingerprint is logged by the probe at start. A regenerated certificate
-(after a self-decommission or a state wipe) must be pinned again.
+Client tools support `-tls` and `-tls-skip-verify`.
+
+Every probe serves its API over HTTPS (9445) with its own self-signed
+certificate, which the web UI pins by its SHA-256 fingerprint. When a probe
+host is adopted it reports the fingerprint with a proof made from the join
+code, the web UI pins it at once and then closes the probe's plain HTTP port
+(9444) once the pinned API answers (`plain_http` in `probe.json`; absent means
+open, so a probe adopted by an older release keeps working until it is
+pinned). A probe adopted earlier is pinned from the Probes page: the probe's
+public `tls-info` call, asked with a fresh nonce, returns a proof made with
+each of its admin tokens, and the web UI recomputes it. Right after pinning, the
+web UI replaces the probe's admin token over the pinned connection
+(`POST /api/v1/rotate-token`, TLS only), because the old token was sent in
+cleartext while the probe was not pinned. A certificate of your own can be
+installed from the Probes page (the key travels only over the pinned
+connection and is checked on the probe); the new fingerprint is pinned and the
+probe serves the new certificate without a restart. `dnshived-top` and
+`dnshived-validate` take the fingerprint with `-probe-pin host:port=sha256:...`.
+A regenerated certificate (after a self-decommission or a state wipe) must be
+pinned again.
 
 ## API authentication
 

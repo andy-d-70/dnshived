@@ -17,7 +17,7 @@ replace it with a new host:
 1. Install the dnshived package on the new host. Without a config it
    starts in bootstrap mode; read its join code with
    `journalctl -u dnshived | grep "join code"`.
-2. In the web UI's Cluster Config page the new host appears among the
+2. In the web UI's Cluster settings page (Nodes tab) the new host appears among the
    discovered nodes (or enter its address). Use **Inspect** to check
    it, then **Onboard as** the missing role (or **Replace** an occupied
    one) with the join code. The change is staged; commit it on Pending

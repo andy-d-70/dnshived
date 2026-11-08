@@ -79,7 +79,7 @@ is what the predicate governs.
 ### Gate ordering
 For every scope transition the OLD owner's DHCP gate closes before the
 NEW owner's opens. This produces a silent window on overlap, never a
-dual-answer window (`tools/dhcp-gate-rig.sh handoff`). Nothing in the
+dual-answer window. Nothing in the
 mechanism enforces the order on its own, so it is a rule.
 
 ---
@@ -105,6 +105,11 @@ GET /api/v1/authority/<scope>  five-condition predicate breakdown
 GET /api/v1/readiness/<scope>  network-plane state (interface, node IP,
                        VRRP, DHCP gate, config, helper reachability)
 ```
+Probe host API additions in 0.9.8.9 (new, so they follow the same rules):
+`GET /api/v1/tls-info` (public, certificate proof), `POST /api/v1/rotate-token`
+(TLS only), `POST /api/v1/tls` (certificate upload), `GET /api/v1/watch` and
+`GET /api/v1/history`; the probe config gains the optional keys `plain_http`,
+`manual_probes` and `history`.
 
 **Contract break, 0.9.8.1:** dry-run was removed. `dry_run` is gone
 from `/api/v1/status` and `/api/v1/agent` and from cluster.json (the
@@ -125,6 +130,11 @@ bind_addr       string  optional: listener bind (default: all ifaces on port)
 data_dir        string  optional: state dir (default /var/lib/dnshived)
 peers           []string  other nodes' control addrs
 psk             string  required (since 0.9.8.1)
+config_revision int     optional (0.9.8.9): raised by one on every committed
+                        change, used for catch-up and the outage rules
+platform.serving map    optional (0.9.8.9): interface -> bool, "use for
+                        serving"; absent keeps the old behaviour (worker
+                        interfaces serve, the management interface does not)
 ```
 
 ---
