@@ -84,7 +84,7 @@ func TestScopesAndProbesPages_CarryTheProbeDetailPopup(t *testing.T) {
 
 func TestProbeDetailFragment_IsTheContentWithoutThePage(t *testing.T) {
 	data := probeDetailData{Scope: "alpha", Worker: "probe", Enabled: true, Reachable: true, ProbedAt: "2026-11-08 10:00:00 CET",
-		DHCPVerdict: "ok", DHCPValid: true, DNSAnswered: true, DNSValid: true}
+		DHCPVerdict: "ok", DHCPValid: true, DNSAnswered: true, DNSValid: true, BackHref: "/probes", BackText: "back to Probes"}
 	var frag, page strings.Builder
 	if err := probeDetailFragmentTmpl.ExecuteTemplate(&frag, "fragment", data); err != nil {
 		t.Fatal(err)

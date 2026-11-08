@@ -161,8 +161,9 @@ func handleRollout(ref *configRef, store *TemplateStore) http.HandlerFunc {
 var rolloutTmpl = template.Must(template.New("rollout").Parse(`<!doctype html>
 <title>dnshived-web — Mass-rollout</title>
 ` + styleHTML + `
-<h1>Mass-rollout</h1>
 ` + navHTML + `
+<h1>Mass-rollout</h1>
+
 <p class="dim">Apply one <a href="/config/dns#templates">Template</a> or
 <a href="/optionsets">Option set</a> to many scopes at once. This LINKS
 each selected scope's own field(s) to the source — editing the

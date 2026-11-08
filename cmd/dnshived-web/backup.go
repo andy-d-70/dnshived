@@ -82,13 +82,16 @@ type backupPageData struct {
 }
 
 var backupTmpl = template.Must(template.New("backup").Parse(`<!doctype html>
-<title>dnshived-web — config management</title>
+<title>dnshived-web — maintenance</title>
 ` + styleHTML + `
-<h1>Config management</h1>
 ` + navHTML + `
+<h1>Maintenance</h1>
+
 <p>Snapshot from node: <strong>{{.SourceNode}}</strong> (cluster:
 <strong>{{.ClusterID}}</strong>).</p>
 
+<div class="tab-host">
+<section class="tab-pane" id="tab-export" data-tab="Export" data-tab-order="3">
 <h2>Export</h2>
 <p>
 <a href="/config/export?mode=all">Export all</a> —
@@ -96,6 +99,8 @@ var backupTmpl = template.Must(template.New("backup").Parse(`<!doctype html>
 <a href="/config/export?mode=scopes">Export scopes only</a> (no PSK/tokens)
 </p>
 
+</section>
+<section class="tab-pane" id="tab-backup" data-tab="Backup" data-tab-order="1" data-tab-default>
 <h2>Backup</h2>
 {{range .CheckErrors}}<p class="crit">error: {{.}}</p>{{end}}
 {{range .CheckWarnings}}<p class="warn">warning: {{.}}</p>{{end}}
@@ -159,7 +164,7 @@ node in one click, not one at a time.</p>
 {{range .NodeErrors}}<p class="dim">{{.}}</p>{{end}}
 {{if .Groups}}
 <div class="table-wrap">
-<table>
+<table data-stack>
 <tr><th>Filename</th><th>Source</th><th>Comment</th><th>Size</th><th>Written</th><th>On</th><th></th><th></th></tr>
 {{range .Groups}}
 <tr>
@@ -185,14 +190,20 @@ node in one click, not one at a time.</p>
 <p class="dim">No backups yet on any reachable node.</p>
 {{end}}
 
+</section>
+<section class="tab-pane" id="tab-restore" data-tab="Restore" data-tab-order="2">
 <h2>Restore</h2>
 <p><a href="/backup/restore">Restore from a backup file</a> — decrypts an
 uploaded backup and stages the difference against the current live
 config as an ordinary pending change, reviewed and committed exactly
 like any other config edit.</p>
 
+</section>
+<section class="tab-pane" id="tab-import" data-tab="Import" data-tab-order="4">
 <h2>Import</h2>
 <p class="dim">Not built yet — no design exists for this either.</p>
+</section>
+</div>
 `))
 
 func handleBackup(ref *configRef) http.HandlerFunc {
@@ -629,9 +640,10 @@ const reliabilityRestoreFieldHTML = `<p><label><input type="checkbox" name="rest
 var restoreTmpl = template.Must(template.New("restore").Parse(`<!doctype html>
 <title>dnshived-web — restore from backup</title>
 ` + styleHTML + `
-<h1>Restore from backup</h1>
 ` + navHTML + `
-<p><a href="/backup">&larr; back to config management</a></p>
+<h1>Restore from backup</h1>
+
+<p><a href="/backup#tab-restore">&larr; back to maintenance</a></p>
 
 {{if .DecryptError}}<p class="crit">{{.DecryptError}}</p>{{end}}
 {{range .CheckErrors}}<p class="crit">error: {{.}}</p>{{end}}
@@ -765,11 +777,13 @@ func handleBackupRestorePost(ref *configRef) http.HandlerFunc {
 			return
 		}
 		compressed, err := backupcrypt.Decrypt(password, blob)
+		// The failure is counted while the slot is still held, so the next waiting guess
+		// sees it when it checks the lock.
+		if err != nil && errors.Is(err, backupcrypt.ErrWrongPasswordOrCorrupt) {
+			restoreLimiter.fail(key, time.Now())
+		}
 		<-restoreSlot
 		if err != nil {
-			if errors.Is(err, backupcrypt.ErrWrongPasswordOrCorrupt) {
-				restoreLimiter.fail(key, time.Now())
-			}
 			renderTemplate(w, restoreTmpl, restorePageData{DecryptError: err.Error(), Node: nodeName, Name: name}, "restore")
 			return
 		}

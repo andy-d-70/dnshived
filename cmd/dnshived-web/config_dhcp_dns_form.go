@@ -8,15 +8,18 @@ import "html/template"
 var dhcpDNSConfigFormTmpl = template.Must(template.New("config-dhcp-dns").Parse(`<!doctype html>
 <title>dnshived-web — DHCP &amp; DNS</title>
 ` + styleHTML + templateBuilderStyleHTML + `
-<h1>DHCP &amp; DNS</h1>
 ` + navHTML + pendingBannerHTML + `
+<h1>DHCP &amp; DNS</h1>
+
 <p>Snapshot from node: <strong>{{.SourceNode}}</strong>. Any save below
 stages a <a href="/pending">pending change</a> — nothing applies until
-you commit it. Elsewhere: <a href="/config">cluster config</a>,
-<a href="/security">security</a>, <a href="/backup">config management</a>,
+you commit it. Elsewhere: <a href="/config">cluster settings</a>,
+<a href="/security">security</a>, <a href="/backup">maintenance</a>,
 <a href="/config/scopes">scopes</a>, <a href="/scopes/options">scope
 options</a>, <a href="/probes#settings">DNS probe checks</a>.</p>
 
+<div class="tab-host">
+<section class="tab-pane" id="tab-domains" data-tab="Local domains" data-tab-order="4">
 <h2 id="domains">Local domains &amp; hostnames</h2>
 <p class="dim">Named DNS zones (e.g. <code>foo.lan</code>) — resolve
 cluster-wide, same as Global DNS records below. TTL: per-domain default,
@@ -31,7 +34,7 @@ until unlinked. Click a domain's own summary line below to edit it.</p>
 <form method="post" action="{{.SaveHref}}" onsubmit="return confirm('This will stage this domain\'s records as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">
 <label>Domain TTL (seconds, blank/0 = dnsmasq default)<br><input type="number" name="ttl" min="0" value="{{.TTL}}"></label>
 {{.Builder}}
-<textarea name="records" id="{{.TextareaID}}" rows="6" cols="70">{{.RecordsText}}</textarea>
+<textarea name="records" id="{{.TextareaID}}" rows="6" cols="70" data-line-list>{{.RecordsText}}</textarea>
 <p><input type="submit" value="Stage {{.Name}} as pending change"></p>
 </form>
 
@@ -58,6 +61,8 @@ until unlinked. Click a domain's own summary line below to edit it.</p>
 <button type="submit">+ add domain</button>
 </form>
 
+</section>
+<section class="tab-pane" id="tab-dns" data-tab="DNS records &amp; checks" data-tab-order="2">
 <h2 id="dns">DNS defaults</h2>
 <form method="post" action="/config/dns" onsubmit="return confirm('This will stage these DNS defaults as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">
 
@@ -76,7 +81,7 @@ better. Named boilerplate lives under <a href="#templates">Templates</a>
 — apply per-scope from that scope's page or the
 <a href="/scopes/wizard">wizard</a>, not here.</p>
 {{.GlobalDNSBuilder}}
-<textarea name="global_dns_records" id="global_dns_records" rows="6" cols="70">{{.DNS.GlobalDNSRecordsText}}</textarea>
+<textarea name="global_dns_records" id="global_dns_records" rows="6" cols="70" data-line-list>{{.DNS.GlobalDNSRecordsText}}</textarea>
 
 <p><input type="submit" value="Stage DNS defaults as pending change"></p>
 </form>
@@ -85,6 +90,8 @@ better. Named boilerplate lives under <a href="#templates">Templates</a>
 <a href="/probes#settings">Probes &rarr;</a> — the checks that DRIVE
 probing now live next to the probing RESULTS.</p>
 
+</section>
+<section class="tab-pane" id="tab-dhcp" data-tab="Default DHCP options" data-tab-order="1" data-tab-default>
 <h2 id="dhcp">DHCP defaults</h2>
 <form method="post" action="/config/dhcp" onsubmit="return confirm('This will stage this DHCP default as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">
 
@@ -97,7 +104,7 @@ setting replaces this entirely, doesn't add to it). One raw
 <code>252,http://wpad.corp.local/wpad.dat</code> (WPAD has no symbolic
 name in dnsmasq).</p>
 {{.DefaultDHCPBuilder}}
-<textarea name="default_dhcp_options" rows="4" cols="60">{{.DHCP.DefaultDHCPOptionsText}}</textarea>
+<textarea name="default_dhcp_options" rows="4" cols="60" data-line-list>{{.DHCP.DefaultDHCPOptionsText}}</textarea>
 
 <p><input type="submit" value="Stage DHCP default as pending change"></p>
 </form>
@@ -117,6 +124,8 @@ name in dnsmasq).</p>
 {{end}}
 </table></div>
 
+</section>
+<section class="tab-pane" id="tab-templates" data-tab="Templates" data-tab-order="3">
 <h2 id="templates">Templates</h2>
 <p class="dim">Reusable, named sets of DHCP options or DNS records —
 applied per scope from the <a href="/scopes/wizard">Add Scope
@@ -128,22 +137,28 @@ sets</a>, <a href="/rollout">mass-rollout</a>, and <a href="/groups">scope
 groups</a>.</p>
 
 <h3>DHCP option sets</h3>
-<div class="table-wrap"><table><tr><th>name</th><th>preview</th><th></th></tr>
+<div class="table-wrap"><table data-stack><tr><th>name</th><th>preview</th><th></th></tr>
 {{range .DHCPTemplates}}
 <tr><td><span class="name-dot" style="background:{{.Color}}"></span>{{.Name}}</td>
 <td class="dim"><pre style="margin:0;white-space:pre-wrap">{{.Body}}</pre></td>
-<td><a href="{{.EditHref}}">edit</a>
-<form method="post" action="{{.DeleteHref}}" style="display:inline" onsubmit="return confirm('Delete template {{.Name}}?')"><button type="submit">delete</button></form></td></tr>
+<td style="width:3rem;text-align:center"><details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.Name}}">&#9776;</summary>
+<div class="row-menu-list" role="menu">
+<a role="menuitem" href="{{.EditHref}}">Edit</a>
+<form method="post" action="{{.DeleteHref}}" onsubmit="return confirm('Delete template {{.Name}}?')"><button type="submit" role="menuitem" class="danger">Delete…</button></form>
+</div></details></td></tr>
 {{else}}<tr><td colspan="3" class="dim">none yet</td></tr>{{end}}
 </table></div>
 
 <h3>DNS record sets</h3>
-<div class="table-wrap"><table><tr><th>name</th><th>preview</th><th></th></tr>
+<div class="table-wrap"><table data-stack><tr><th>name</th><th>preview</th><th></th></tr>
 {{range .DNSTemplates}}
 <tr><td><span class="name-dot" style="background:{{.Color}}"></span>{{.Name}}</td>
 <td class="dim"><pre style="margin:0;white-space:pre-wrap">{{.Body}}</pre></td>
-<td><a href="{{.EditHref}}">edit</a>
-<form method="post" action="{{.DeleteHref}}" style="display:inline" onsubmit="return confirm('Delete template {{.Name}}?')"><button type="submit">delete</button></form></td></tr>
+<td style="width:3rem;text-align:center"><details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.Name}}">&#9776;</summary>
+<div class="row-menu-list" role="menu">
+<a role="menuitem" href="{{.EditHref}}">Edit</a>
+<form method="post" action="{{.DeleteHref}}" onsubmit="return confirm('Delete template {{.Name}}?')"><button type="submit" role="menuitem" class="danger">Delete…</button></form>
+</div></details></td></tr>
 {{else}}<tr><td colspan="3" class="dim">none yet</td></tr>{{end}}
 </table></div>
 
@@ -152,14 +167,19 @@ groups</a>.</p>
 Named "dnshived vs. other" overrides — a single value, picking one
 REPLACES a scope's own choice rather than adding to it (unlike the
 sets above).</p>
-<div class="table-wrap"><table><tr><th>name</th><th>preview</th><th></th></tr>
+<div class="table-wrap"><table data-stack><tr><th>name</th><th>preview</th><th></th></tr>
 {{range .ClientDNSTemplates}}
 <tr><td><span class="name-dot" style="background:{{.Color}}"></span>{{.Name}}</td>
 <td class="dim">{{.Body}}</td>
-<td><a href="{{.EditHref}}">edit</a>
-<form method="post" action="{{.DeleteHref}}" style="display:inline" onsubmit="return confirm('Delete template {{.Name}}?')"><button type="submit">delete</button></form></td></tr>
+<td style="width:3rem;text-align:center"><details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.Name}}">&#9776;</summary>
+<div class="row-menu-list" role="menu">
+<a role="menuitem" href="{{.EditHref}}">Edit</a>
+<form method="post" action="{{.DeleteHref}}" onsubmit="return confirm('Delete template {{.Name}}?')"><button type="submit" role="menuitem" class="danger">Delete…</button></form>
+</div></details></td></tr>
 {{else}}<tr><td colspan="3" class="dim">none yet</td></tr>{{end}}
 </table></div>
 
 <p><a href="/templates/new">+ New template</a></p>
-`))
+</section>
+</div>
+` + rowMenuScriptHTML + ``))

@@ -17,8 +17,9 @@ import (
 var scopeDefaultsFormTmpl = template.Must(template.New("scope_defaults").Parse(`<!doctype html>
 <title>dnshived-web — scope general options</title>
 ` + styleHTML + `
-<h1>Scope — general options</h1>
 ` + navHTML + pendingBannerHTML + `
+<h1>Scope — general options</h1>
+
 <p>Snapshot from node: <strong>{{.SourceNode}}</strong>. Saving stages a
 PENDING change on every configured node — nothing is applied until you
 commit it from <a href="/pending">pending changes</a>. Scope

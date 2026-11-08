@@ -36,8 +36,9 @@ type usersPageData struct {
 var usersTmpl = template.Must(template.New("users").Parse(`<!doctype html>
 <title>dnshived-web — users</title>
 ` + styleHTML + `
-<h1>Users</h1>
 ` + navHTML + `
+<h1>Security</h1>
+` + securityTabs("/users") + `
 <p class="dim">Web-UI logins. Changes apply at once on every core (no commit needed).
 <strong>admin</strong>: everything. <strong>scopeadmin</strong>: everything served to clients — scopes, DHCP/DNS settings,
 templates, local domains — but no cluster settings, nodes, users, tokens, backups or daemon restarts.
@@ -62,7 +63,7 @@ templates, local domains — but no cluster settings, nodes, users, tokens, back
 <form method="post" action="/users/{{.Edit.Name}}/delete" style="display:inline;margin-left:1.5rem" onsubmit="return confirm('Delete user {{.Edit.Name}} on every core? This cannot be undone.')"><button type="submit" class="btn-danger">Delete user</button></form>
 {{end}}
 {{else}}
-<table border="1" cellpadding="4">
+<table border="1" cellpadding="4" data-stack>
 <tr><th>User</th><th>Role</th><th>Email</th><th>Status</th><th></th></tr>
 {{range .Users}}<tr><td style="white-space:nowrap">{{.Name}}{{if .Self}} <span class="dim">(you)</span>{{end}}</td><td>{{.Role}}</td><td>{{if .Email}}{{.Email}}{{else}}<span class="dim" title="No email address: this user cannot reset a forgotten password by email.">—</span>{{end}}</td><td>{{if .Disabled}}<span class="warn">disabled</span>{{else}}<span class="ok">active</span>{{end}}</td><td><a href="/users/{{.Name}}">edit</a></td></tr>
 {{end}}

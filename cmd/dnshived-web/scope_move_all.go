@@ -116,8 +116,9 @@ type moveAllPageData struct {
 var moveAllTmpl = template.Must(template.New("moveall").Parse(`<!doctype html>
 <title>dnshived-web — move scopes</title>
 ` + styleHTML + `
-<h1>Move all scopes from one interface to another</h1>
 ` + navHTML + `
+<h1>Move all scopes from one interface to another</h1>
+
 <p class="dim">Every scope on the source interface moves to the target with its VLAN ID, VIP, addresses and pool unchanged.
 Nothing is renumbered: the check below lists every VLAN, subnet or address clash first, and nothing is staged until it is clean.
 The move is staged as a pending change; you review and commit it from Pending changes. A source interface can be switched off

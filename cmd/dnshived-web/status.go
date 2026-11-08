@@ -1119,8 +1119,9 @@ var statusTmpl = template.Must(template.New("status").Funcs(template.FuncMap{
 }).Parse(`<!doctype html>
 <title>dnshived-web — overview</title>
 ` + styleHTML + `
-<h1>dnshived cluster overview</h1>
 ` + navHTML + `
+<h1>Overview</h1>
+
 
 {{if .Mismatch}}
 <p><strong class="crit">WARNING: scopes_hash differs between nodes — config is not
@@ -1140,73 +1141,131 @@ setting once every node is reachable.</strong></p>
 <p class="{{.ResetMessageClass}}"><strong>{{.ResetMessage}}</strong></p>
 {{end}}
 
-<p class="{{.BannerClass}}"><strong>{{.BannerText}}</strong></p>
+<p class="banner {{.BannerClass}}"><strong>{{.BannerText}}</strong></p>
 
-<h2>Cluster</h2>
-<table border="1" cellpadding="4">
-<tr><td>State <span class="info-ico" title="the cluster's own quorum/failover state machine: STABLE means every serving decision has settled and held for the required settling window; DEGRADED/GETTING THERE/NOT CONVERGING mean scopes are still starting, rebalancing, or stuck — not necessarily an outage, but worth watching">ⓘ</span></td><td class="{{.ClusterClass}}">{{.ClusterState}}</td></tr>
-<tr><td>Configuration sane <span class="info-ico" title="every node's own real, live-observed state (interfaces, sockets, ...) checked against what's actually configured/intended — separate from State above, which is FSM/quorum health only">ⓘ</span></td><td class="{{.ConfigSaneClass}}"{{if .ConfigSaneTitle}} title="{{.ConfigSaneTitle}}"{{end}}>{{.ConfigSaneText}}</td></tr>
-<tr><td>Interfaces <span class="info-ico" title="physical trunk carrier state (link up/down) per node — a link-down trunk force-closes DHCP for every scope on it">ⓘ</span></td><td class="{{.InterfaceHealthClass}}">{{.InterfaceHealthText}}</td></tr>
-<tr><td>Trunks <span class="info-ico" title="every configured trunk on every stable core: verified once that node has heard a topology beacon from another core on it, assumed while nothing has been heard (the configured interface name is then unconfirmed)">ⓘ</span></td><td class="{{.TrunksClass}}"{{if .TrunksTitle}} title="{{.TrunksTitle}}"{{end}}>{{.TrunksText}}</td></tr>
-{{if .StableSince}}<tr><td>Stable since</td><td class="dim">{{.StableSince}} ({{.StableFor}} ago)</td></tr>{{end}}
-<tr><td>Node IDs</td><td class="dim">{{.NodeIDsLine}}</td></tr>
-<tr><td>Witness <span class="info-ico" title="the time-limited token that authorizes a node to keep a scope's DHCP gate open — renewed continuously while healthy; a node that stops renewing (crash, network loss) has its gate close automatically once its current token expires, which is what actually prevents two nodes serving the same scope at once">ⓘ</span></td><td>{{.Witness}}</td></tr>
-<tr><td>Arbiter quorum <span class="info-ico" title="every core node also runs its own arbiter instance since 0.9.8 — a witness grant needs 2 of these 3 to agree, so this is 'who is arbiter now', not a single node">ⓘ</span></td><td class="{{.ArbiterQuorumClass}}">{{.ArbiterQuorumText}}</td></tr>
-<tr><td>Serving <span class="info-ico" title="how many of the cluster's configured scopes currently have exactly one node authoritatively serving DHCP for them — by design, never two at once; a scope can be temporarily unserved during startup/failover/rebalancing without that being an outage. Disabled scopes are not counted as serving and are listed separately">ⓘ</span></td><td class="{{.ServingClass}}">{{.ServingText}}</td></tr>
-<tr><td>Unreachable nodes</td><td>{{.Unreachable}}{{if .UnreachableNames}} ({{.UnreachableNames}}){{end}}</td></tr>
-<tr><td>Daemons <span class="info-ico" title="systemd unit health (dnshived itself, dnsmasq, keepalived, relays, ...) on every node — a daemon issue here is independent of State above: a unit can be unhealthy while the cluster's own quorum/serving logic stays fine, and vice versa">ⓘ</span></td><td class="{{.DaemonSummaryClass}}">{{.DaemonSummary}}</td></tr>
-<tr><td>Probes <span class="info-ico" title="real DHCP/DNS validation performed from an external probe host, on each scope's own client-facing VLAN — the closest thing to 'does this actually work for a real client', not just 'does the cluster believe it's serving'">ⓘ</span></td><td class="{{.ProbeSummaryClass}}">{{.ProbeSummary}}</td></tr>
-<tr><td>Cluster paths <span class="info-ico" title="each worker trunk's own alternate path to every other core role — continuously monitored, not actively used until a peer's primary (mgmt) path goes down">ⓘ</span></td><td class="{{.PathsSummaryClass}}">{{.PathsSummaryText}}{{if .PathRows}} <a href="#" onclick="document.getElementById('paths-modal').showModal();return false;">details</a>{{end}}</td></tr>
-</table>
-
+<div class="card-grid">
+<section class="card">
 <h2>Cluster nodes</h2>
-<div class="table-wrap">
-<table border="1" cellpadding="4" cellspacing="0" class="fixed-table">
-<colgroup>
-<col style="width:9%"><col style="width:7%"><col style="width:11%">
-<col style="width:13%"><col style="width:9%"><col style="width:13%">
-<col style="width:13%"><col style="width:25%">
-</colgroup>
-<tr><th>Name</th><th>Role</th><th>Host</th><th>Addr</th><th>State</th><th>Info</th><th>Version</th><th>System</th></tr>
+<table class="small fixed-table" data-stack>
+<colgroup><col style="width:19%"><col style="width:22%"><col style="width:33%"><col style="width:26%"></colgroup>
+<tr><th>Name</th><th>State</th><th>Version</th><th>Info</th></tr>
 {{range .Rows}}
 <tr>
-  <td class="{{.RoleClass}}">{{.Nickname}}{{if .HoldsMgmtVIP}} <span class="vip-badge" title="currently answering as the management-VIP's VRRP MASTER">VIP</span>{{end}}</td>
+  <td class="{{.RoleClass}}"{{if not .FetchError}} title="{{.Status.Role}} · {{.Status.Hostname}} · {{.Node.Addr}} · {{.SysStr}}"{{end}}>{{.Nickname}}{{if .HoldsMgmtVIP}} <span class="vip-badge" title="currently answering as the management-VIP's VRRP MASTER">VIP</span>{{end}}</td>
   {{if .FetchError}}
-  <td colspan="7" class="crit">UNREACHABLE: {{.FetchError}}</td>
+  <td colspan="3" class="crit">UNREACHABLE: {{.FetchError}}</td>
   {{else}}
-  <td class="{{.RoleClass}}">{{.Status.Role}}</td>
-  <td class="dim">{{.Status.Hostname}}</td>
-  <td style="white-space:nowrap">{{.Node.Addr}}</td>
   <td class="{{.Class}}">{{.Icon}} {{.Status.State}}</td>
+  <td class="ver">{{.Status.Version}}</td>
   <td>{{.Info}}</td>
-  <td>{{.Status.Version}}</td>
-  <td class="dim">{{.SysStr}}</td>
   {{end}}
 </tr>
 {{end}}
 {{range .MissingRoles}}
 <tr>
   <td class="dim">{{.}}</td>
-  <td colspan="7" class="warn">not configured — offboarded or never onboarded. <a href="/config#discovered">Discovered on the network</a> can onboard or replace it.</td>
+  <td colspan="3" class="warn">not configured — offboarded or never onboarded. <a href="/config#discovered">Discovered on the network</a> can onboard or replace it.</td>
 </tr>
 {{end}}
-{{if .ProbeHostRows}}
-<tr><td colspan="8" style="border-top:3px solid var(--muted);border-bottom:none;padding:0"></td></tr>
 {{range .ProbeHostRows}}
 <tr>
-  <td class="node-probe">{{.Name}}</td>
-  <td class="node-probe">probe</td>
-  <td class="dim">{{.Hostname}}</td>
-  <td style="white-space:nowrap">{{.Addr}}</td>
+  <td class="node-probe" title="probe · {{.Hostname}} · {{.Addr}} · {{.SysStr}}">{{.Name}}</td>
   <td class="{{.Class}}">{{.Icon}} {{.State}}</td>
+  <td class="ver">{{.Version}}</td>
   <td>{{.Info}}</td>
-  <td>{{.Version}}</td>
-  <td class="dim">{{.SysStr}}</td>
 </tr>
 {{end}}
-{{end}}
 </table>
+</section>
+
+<section class="card">
+<h2>Scopes <span class="info-ico" title="how many of the cluster's configured scopes currently have exactly one node authoritatively serving DHCP for them — by design, never two at once; a scope can be temporarily unserved during startup/failover/rebalancing without that being an outage. Disabled scopes are not counted as serving and are listed separately">ⓘ</span></h2>
+<p class="{{.ServingClass}} card-big">{{.ServingText}}</p>
+<div class="meter {{.ServingMeter}}"><i style="width:{{.ServingPct}}%"></i></div>
+<table class="small kv-table">
+{{if .UnservedCount}}<tr><td>Not served</td><td class="warn">{{.UnservedCount}}</td></tr>{{end}}
+{{if .DisabledCount}}<tr><td>Paused (disabled)</td><td>{{.DisabledCount}}</td></tr>{{end}}
+{{range .ServingNodes}}<tr><td class="{{.Class}}">{{.Name}}</td><td><span class="meter mini"><i style="width:{{.Pct}}%"></i></span> {{.Count}} serving</td></tr>
+{{end}}</table>
+<p><a href="/scopes">Open the scope list →</a></p>
+</section>
+
+<section class="card">
+<h2>Probes <span class="info-ico" title="real DHCP/DNS validation performed from an external probe host, on each scope's own client-facing VLAN — the closest thing to 'does this actually work for a real client', not just 'does the cluster believe it's serving'">ⓘ</span></h2>
+<p class="{{.ProbeSummaryClass}} card-big">{{.ProbeSummary}}</p>
+{{with .ProbeFig}}{{if .Total}}<div class="meter {{.Meter}}"><i style="width:{{.Pct}}%"></i></div>
+<table class="small kv-table">
+<tr><td>Probed</td><td>{{.Probed}} of {{.Total}}</td></tr>
+{{if .Issues}}<tr><td>With issues</td><td class="crit">{{.Issues}}{{if .Rogue}} ({{.Rogue}} rogue DHCP){{end}}</td></tr>{{end}}
+{{if .Pending}}<tr><td>Pending first sweep</td><td class="warn">{{.Pending}}</td></tr>{{end}}
+{{if .Stale}}<tr><td>Stale result</td><td class="warn">{{.Stale}}</td></tr>{{end}}
+{{if .NoCoverage}}<tr><td>No VLAN on probe</td><td class="warn">{{.NoCoverage}}</td></tr>{{end}}
+{{if .Unknown}}<tr><td>Probe host silent</td><td class="warn">{{.Unknown}}</td></tr>{{end}}
+</table>{{end}}{{end}}
+{{range .ProbeHostRows}}<p class="dim" style="margin:.2rem 0"><span class="node-probe">{{.Name}}</span> <span class="{{.Class}}">{{.Icon}} {{.State}}</span>{{if .Version}} · {{.Version}}{{end}}</p>
+{{end}}<p><a href="/probes">Open the probe results →</a></p>
+</section>
+
+<section class="card card-attn">
+<h2>Needs attention</h2>
+{{if or .ProbeIssues .DaemonIssues .Coherence .Unreachable}}
+<ul class="card-list">
+{{if .Unreachable}}<li class="crit">{{.Unreachable}} node(s) unreachable{{if .UnreachableNames}}: {{.UnreachableNames}}{{end}}</li>{{end}}
+{{range .DaemonIssues}}<li class="crit">{{.}}</li>{{end}}
+{{range .ProbeIssues}}<li>{{if .Rogue}}<span class="rogue-badge">⚠ ROGUE DHCP SERVER</span> {{end}}<a href="/probes/{{.Scope}}/{{.Worker}}">{{.Scope}}</a> (from {{.Worker}}):
+{{if .DNSText}} <span class="{{.DNSClass}}">{{.DNSText}}</span>{{end}}
+{{if .DHCPText}} <span class="{{.DHCPClass}}">{{.DHCPText}}</span>{{end}}
+{{if .Detail}} <span class="{{if .Rogue}}crit{{else}}dim{{end}}">{{.Detail}}</span>{{end}}</li>{{end}}
+{{range .Coherence}}<li class="crit" title="{{coherenceTitle .}}">{{.}}</li>{{end}}
+</ul>
+{{else}}
+<p class="ok">✔ Nothing needs attention.</p>
+{{end}}
+</section>
+
+<section class="card">
+<h2>Cluster paths <span class="info-ico" title="each worker trunk's own alternate path to every other core role — continuously monitored, not actively used until a peer's primary (mgmt) path goes down">ⓘ</span></h2>
+<p class="{{.PathsSummaryClass}} card-big">{{.PathsSummaryText}}</p>
+{{if .PathDigest}}<table class="small kv-table">
+{{range .PathDigest}}<tr><td>{{.From}} → {{.To}} <span class="dim">{{.Trunk}}</span></td><td class="{{.Class}}">{{.Text}} · {{.Score}} %</td></tr>
+{{end}}</table>
+{{if .PathDigestMore}}<p class="dim">+ {{.PathDigestMore}} more trunk path(s)</p>{{end}}
+{{if .VLANPaths}}<p class="dim">{{.VLANPaths}} VLAN path(s) run over these trunks.</p>{{end}}{{end}}
+{{if .PathRows}}<p><a href="#" onclick="document.getElementById('paths-modal').showModal();return false;">Details →</a></p>{{end}}
+</section>
+
+<section class="card">
+<h2>Health checks</h2>
+<table class="small kv-table">
+<tr><td>State <span class="info-ico" title="the cluster's own quorum/failover state machine: STABLE means every serving decision has settled and held for the required settling window; DEGRADED/GETTING THERE/NOT CONVERGING mean scopes are still starting, rebalancing, or stuck — not necessarily an outage, but worth watching">ⓘ</span></td><td class="{{.ClusterClass}}">{{.ClusterState}}</td></tr>
+<tr><td>Configuration sane <span class="info-ico" title="every node's own real, live-observed state (interfaces, sockets, ...) checked against what's actually configured/intended — separate from State above, which is FSM/quorum health only">ⓘ</span></td><td class="{{.ConfigSaneClass}}"{{if .ConfigSaneTitle}} title="{{.ConfigSaneTitle}}"{{end}}>{{.ConfigSaneText}}</td></tr>
+<tr><td>Interfaces <span class="info-ico" title="physical trunk carrier state (link up/down) per node — a link-down trunk force-closes DHCP for every scope on it">ⓘ</span></td><td class="{{.InterfaceHealthClass}}">{{.InterfaceHealthText}}</td></tr>
+<tr><td>Trunks <span class="info-ico" title="every configured trunk on every stable core: verified once that node has heard a topology beacon from another core on it, assumed while nothing has been heard (the configured interface name is then unconfirmed)">ⓘ</span></td><td class="{{.TrunksClass}}"{{if .TrunksTitle}} title="{{.TrunksTitle}}"{{end}}>{{.TrunksText}}</td></tr>
+<tr><td>Arbiter quorum <span class="info-ico" title="every core node also runs its own arbiter instance since 0.9.8 — a witness grant needs 2 of these 3 to agree, so this is 'who is arbiter now', not a single node">ⓘ</span></td><td class="{{.ArbiterQuorumClass}}">{{.ArbiterQuorumText}}</td></tr>
+<tr><td>Daemons <span class="info-ico" title="systemd unit health (dnshived itself, dnsmasq, keepalived, relays, ...) on every node — a daemon issue here is independent of State above: a unit can be unhealthy while the cluster's own quorum/serving logic stays fine, and vice versa">ⓘ</span></td><td class="{{.DaemonSummaryClass}}">{{.DaemonSummary}} <a href="/daemons">details →</a></td></tr>
+</table>
+</section>
 </div>
+
+<section class="card card-wide">
+<h2>Recent events <a href="/logs" style="font-weight:400;font-size:.9em">open the logs →</a></h2>
+{{if .RecentEvents}}
+<div class="scrollbox"><ul class="card-list events">
+{{range .RecentEvents}}<li><span class="dim ev-time">{{.Time}}</span> <span class="{{.NodeClass}}">{{.Node}}</span> <span class="{{.Class}}">{{.Level}}</span> {{if .Prefix}}<span class="dim">{{.Prefix}}</span> {{end}}{{.Message}}</li>
+{{end}}</ul></div>
+{{else}}<p class="dim">(no events yet)</p>{{end}}
+</section>
+
+<details class="card-details">
+<summary>More cluster details</summary>
+<table class="small kv-table">
+{{if .StableSince}}<tr><td>Stable since</td><td class="dim">{{.StableSince}} ({{.StableFor}} ago)</td></tr>{{end}}
+<tr><td>Node IDs</td><td class="dim">{{.NodeIDsLine}}</td></tr>
+<tr><td>Witness <span class="info-ico" title="the time-limited token that authorizes a node to keep a scope's DHCP gate open — renewed continuously while healthy; a node that stops renewing (crash, network loss) has its gate close automatically once its current token expires, which is what actually prevents two nodes serving the same scope at once">ⓘ</span></td><td>{{.Witness}}</td></tr>
+<tr><td>Tokens</td><td>{{.ActiveTokens}} active, {{.ExpiredTokens}} expired</td></tr>
+<tr><td>Unreachable nodes</td><td>{{.Unreachable}}{{if .UnreachableNames}} ({{.UnreachableNames}}){{end}}</td></tr>
+</table>
+</details>
 
 {{if .PathRows}}
 <dialog id="paths-modal">
@@ -1266,33 +1325,6 @@ setting once every node is reachable.</strong></p>
 {{end}}
 </dialog>
 {{end}}
-
-<h2>Tokens</h2>
-<p>{{.ActiveTokens}} active, {{.ExpiredTokens}} expired</p>
-
-{{if .DaemonIssues}}
-<h2>Daemon issues</h2>
-<ul>
-{{range .DaemonIssues}}<li class="crit">{{.}}</li>{{end}}
-</ul>
-{{end}}
-
-{{if .ProbeIssues}}
-<h2>Probe issues</h2>
-<ul>
-{{range .ProbeIssues}}<li>{{if .Rogue}}<span class="rogue-badge">⚠ ROGUE DHCP SERVER</span> {{end}}<a href="/probes/{{.Scope}}/{{.Worker}}">{{.Scope}}</a> (from {{.Worker}}):
-{{if .DNSText}} <span class="{{.DNSClass}}">{{.DNSText}}</span>{{end}}
-{{if .DHCPText}} <span class="{{.DHCPClass}}">{{.DHCPText}}</span>{{end}}
-{{if .Detail}} <span class="{{if .Rogue}}crit{{else}}dim{{end}}">{{.Detail}}</span>{{end}}</li>{{end}}
-</ul>
-{{end}}
-
-{{if .Coherence}}
-<h2>Coherence</h2>
-<ul>
-{{range .Coherence}}<li class="crit" title="{{coherenceTitle .}}">{{.}}</li>{{end}}
-</ul>
-{{end}}
 `))
 
 type overviewData struct {
@@ -1332,8 +1364,19 @@ type overviewData struct {
 	ProbeSummaryClass  string
 	ProbeIssues        []probeIssue
 	Coherence          []string
-	StableSince        string // empty when not currently, fully cluster-stable
-	StableFor          string
+	RecentEvents       []logRow
+
+	ServingPct     int
+	ServingMeter   string
+	UnservedCount  int
+	DisabledCount  int
+	ServingNodes   []nodeServingRow
+	ProbeFig       probeFigures
+	PathDigest     []pathDigestRow
+	PathDigestMore int
+	VLANPaths      int
+	StableSince    string // empty when not currently, fully cluster-stable
+	StableFor      string
 
 	ProbeHostRows []probeHostOverviewRow
 
@@ -1440,6 +1483,120 @@ func servingText(serving, configured, disabled, mgmtOnlyDown int) string {
 		text += fmt.Sprintf(", %d disabled", disabled)
 	}
 	return text
+}
+
+// nodeServingRow is one core node's share of the served scopes on the Overview.
+type nodeServingRow struct {
+	Name, Class string
+	Count, Pct  int
+}
+
+// buildServingNodes counts the enabled scopes each reachable core node serves;
+// Pct is relative to the busiest node, so an even spread shows equal bars.
+func buildServingNodes(rows []statusRow, disabled map[string]bool) []nodeServingRow {
+	var out []nodeServingRow
+	maxCount := 0
+	for _, row := range rows {
+		if row.FetchError != "" || !isCoreRole(row.Status.Role) {
+			continue
+		}
+		n := 0
+		for _, sc := range row.Status.Serving {
+			if !disabled[sc] {
+				n++
+			}
+		}
+		name := row.Nickname
+		if name == "" {
+			name = row.Status.Role
+		}
+		out = append(out, nodeServingRow{Name: name, Class: row.RoleClass, Count: n})
+		if n > maxCount {
+			maxCount = n
+		}
+	}
+	for i := range out {
+		if maxCount > 0 {
+			out[i].Pct = out[i].Count * 100 / maxCount
+		}
+	}
+	return out
+}
+
+// probeFigures are the numbers behind the Overview's Probes card.
+type probeFigures struct {
+	Total, Probed, Pending, Stale, NoCoverage, Unknown int
+	Issues, Rogue, Pct                                 int
+	Class, Meter                                       string
+}
+
+// buildProbeFigures turns the probe coverage and the issue list into the card's
+// numbers. Deliberately switched-off probing is left out of the total.
+func buildProbeFigures(cov probeCoverage, issues []probeIssue) probeFigures {
+	f := probeFigures{
+		Total: cov.Total - cov.ScopeDisabled - cov.Disabled, Probed: cov.Probed, Pending: cov.Pending,
+		Stale: cov.Stale, NoCoverage: cov.NoCoverage, Unknown: cov.Unknown, Issues: len(issues),
+	}
+	for _, is := range issues {
+		if is.Rogue {
+			f.Rogue++
+		}
+	}
+	if f.Total > 0 {
+		f.Pct = f.Probed * 100 / f.Total
+		if f.Pct > 100 {
+			f.Pct = 100
+		}
+	}
+	f.Meter = "ok"
+	if f.Pending > 0 || f.Stale > 0 || f.Unknown > 0 || f.NoCoverage > 0 {
+		f.Meter = "warn"
+	}
+	switch {
+	case f.Issues > 0:
+		f.Class = "crit"
+	case f.Meter == "warn":
+		f.Class = "warn"
+	default:
+		f.Class = "ok"
+	}
+	return f
+}
+
+// pathDigestRow is one line of the Overview's compact path list.
+type pathDigestRow struct {
+	From, To, Trunk, Class, Text string
+	Score                        int
+}
+
+// buildPathDigest lists the trunk paths worst first, at most limit of them, and
+// says how many more there are and how many VLAN paths run on top.
+func buildPathDigest(rows []clusterPathRow, limit int) (digest []pathDigestRow, more, vlan int) {
+	var trunks []clusterPathRow
+	for _, r := range rows {
+		if r.IsVLAN {
+			vlan++
+			continue
+		}
+		trunks = append(trunks, r)
+	}
+	sort.SliceStable(trunks, func(i, j int) bool {
+		if trunks[i].Score != trunks[j].Score {
+			return trunks[i].Score < trunks[j].Score
+		}
+		if trunks[i].From != trunks[j].From {
+			return trunks[i].From < trunks[j].From
+		}
+		return trunks[i].To < trunks[j].To
+	})
+	for i, r := range trunks {
+		if i >= limit {
+			more = len(trunks) - limit
+			break
+		}
+		digest = append(digest, pathDigestRow{From: r.From, To: r.To, Trunk: r.Trunk, Class: r.Class, Text: r.Text, Score: r.Score})
+	}
+	return digest, more, vlan
 }
 
 func handleStatus(ref *configRef) http.HandlerFunc {
@@ -1632,6 +1789,10 @@ func handleStatus(ref *configRef) http.HandlerFunc {
 			ProbeSummaryClass:    probeSummaryClass,
 			ProbeIssues:          probeIssues,
 			Coherence:            append(checkCoherence(rows, tokens, selfObserverName(cfg)), checkPendingCoherence(cfg)...),
+			RecentEvents:         recentEventRows(cfg, nodesIncludingSelf(cfg), rows, 20),
+			ServingNodes:         buildServingNodes(rows, disabledScopes),
+			DisabledCount:        len(disabledScopes),
+			ProbeFig:             buildProbeFigures(probeCov, probeIssues),
 			StableSince:          stableSinceText,
 			StableFor:            stableForText,
 			ProbeHostRows:        probeHostRows,
@@ -1643,6 +1804,15 @@ func handleStatus(ref *configRef) http.HandlerFunc {
 			TopoSightingRows:     topoSightRows,
 		}
 		data.ResetMessage, data.ResetMessageClass = resetResultBanner(r.URL.Query())
+		if n := len(configuredScopes); n > 0 {
+			data.ServingPct = len(servingScopes) * 100 / n
+			data.UnservedCount = n - len(servingScopes)
+		}
+		data.ServingMeter = servingClass
+		if data.UnservedCount > 0 && servingClass == "ok" {
+			data.ServingMeter = "warn"
+		}
+		data.PathDigest, data.PathDigestMore, data.VLANPaths = buildPathDigest(pathRows, 6)
 		renderTemplate(w, statusTmpl, data, "overview")
 	}
 }

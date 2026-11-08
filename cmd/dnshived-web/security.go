@@ -15,13 +15,14 @@ import (
 var securityFormTmpl = template.Must(template.New("security").Parse(`<!doctype html>
 <title>dnshived-web — security</title>
 ` + styleHTML + `
-<h1>Security</h1>
 ` + navHTML + pendingBannerHTML + `
+<h1>Security</h1>
+` + securityTabs("/security") + `
 <p>Snapshot from node: <strong>{{.SourceNode}}</strong>. Saving stages a
 PENDING change on every configured node — nothing is applied until you
 commit it from <a href="/pending">pending changes</a>. Cluster-wide
 settings (PSK, TLS, platform, management VIP, ...) live on their own
-page: <a href="/config">cluster config &rarr;</a>. To change your own
+page: <a href="/config">cluster settings &rarr;</a>. To change your own
 login password: <a href="/password">change password &rarr;</a>.</p>
 
 <form method="post" action="/security" onsubmit="return confirm('This will stage these API tokens as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">

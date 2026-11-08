@@ -31,6 +31,61 @@ func levelClass(level string) string {
 	}
 }
 
+// mergeEventRows merges the events of several nodes, newest first, into at most
+// limit rows. roles[i] names node i for the Node column; an empty role falls back
+// to the configured node name.
+func mergeEventRows(results []nodeResult[[]event], roles []string, limit int) []logRow {
+	type tagged struct {
+		e     event
+		label string
+	}
+	var all []tagged
+	for i, res := range results {
+		if res.Err != nil {
+			continue
+		}
+		label := res.Node.Name
+		if i < len(roles) && roles[i] != "" {
+			label = roles[i]
+		}
+		for _, e := range res.Value {
+			all = append(all, tagged{e, label})
+		}
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].e.Timestamp.After(all[j].e.Timestamp) })
+	if len(all) > limit {
+		all = all[:limit]
+	}
+	rows := make([]logRow, 0, len(all))
+	for _, t := range all {
+		rows = append(rows, logRow{
+			Time:      t.e.Timestamp.Local().Format("01-02 15:04:05"),
+			Node:      t.label,
+			NodeClass: roleClass(t.label),
+			Level:     t.e.Level,
+			Class:     levelClass(t.e.Level),
+			Prefix:    t.e.Prefix,
+			Message:   t.e.Message,
+		})
+	}
+	return rows
+}
+
+// recentEventRows is the Overview's event list. It reads the cluster snapshot the
+// status page has already fetched, so it costs no extra request; without a snapshot
+// the list is simply empty and the Logs page stays the place to look.
+func recentEventRows(cfg *WebConfig, nodes []NodeConfig, status []statusRow, limit int) []logRow {
+	results, ok := fetchAllEvents(cfg, nodes, logsFetchPerNode)
+	if !ok {
+		return nil
+	}
+	roles := make([]string, len(status))
+	for i, st := range status {
+		roles[i] = st.Status.Role
+	}
+	return mergeEventRows(results, roles, limit)
+}
+
 type logRow struct {
 	Time string
 	Node string
@@ -46,9 +101,12 @@ type logRow struct {
 var logsTmpl = template.Must(template.New("logs").Parse(`<!doctype html>
 <title>dnshived-web — logs</title>
 ` + styleHTML + logModalScriptHTML + `
-<h1>Logs</h1>
 ` + navHTML + `
-<details><summary><h2 style="display:inline" id="logs">General logs</h2></summary>
+<h1>Logs</h1>
+
+<div class="tab-host" data-extra-tabs='[["Daemons","/daemons"]]'>
+<section class="tab-pane" id="tab-general" data-tab="General" data-tab-order="1" data-tab-default>
+<h2 id="logs">General logs</h2>
 <p>Node filter:
 {{range .Filters}}
 {{if eq . $.Current}}<strong>[{{.}}]</strong>{{else}}<a href="/logs?node={{.}}">{{.}}</a>{{end}}
@@ -67,9 +125,10 @@ var logsTmpl = template.Must(template.New("logs").Parse(`<!doctype html>
 {{end}}
 </table>
 {{if not .Rows}}<p class="dim">(no events yet)</p>{{end}}
-</details>
+</section>
 
-<details><summary><h2 style="display:inline" id="audit">Audit logs</h2></summary>
+<section class="tab-pane" id="tab-audit" data-tab="Audit" data-tab-order="2">
+<h2 id="audit">Audit logs</h2>
 <p class="dim">Every node's own persisted, append-only config-change
 trail — no merging/de-duplication across nodes. Raw text export (for
 scripting/diffing): <a href="/audit" onclick="return showLogModal('Audit log (raw)', '/audit', this)">/audit &rarr;</a>.</p>
@@ -79,9 +138,10 @@ scripting/diffing): <a href="/audit" onclick="return showLogModal('Audit log (ra
 {{else if .Body}}<div class="table-wrap"><pre style="margin:0">{{.Body}}</pre></div>
 {{else}}<p class="dim">(no audit entries yet)</p>{{end}}
 {{end}}
-</details>
+</section>
 
-<details id="daemons"><summary><h2 style="display:inline">Daemon logs (incl. dnsmasq)</h2></summary>
+<section class="tab-pane" id="daemons" data-tab="Daemon logs" data-tab-order="3">
+<h2>Daemon logs (incl. dnsmasq)</h2>
 
 <h3>dnsmasq (shared central instances)</h3>
 <p class="dim">The shared central dnsmasq instances every scope's real
@@ -122,7 +182,8 @@ operation already uses. Links open the real tail in a popup.</p>
 </ul>
 {{end}}
 {{end}}
-</details>
+</section>
+</div>
 
 <dialog id="log-modal">
 <h3 id="log-modal-title" style="margin-top:0"></h3>

@@ -678,8 +678,9 @@ width:100%;box-shadow:0 10px 30px rgba(0,0,0,.28);position:relative}
 var topologyTmpl = template.Must(template.New("topology").Parse(`<!doctype html>
 <title>dnshived-web — topology</title>
 ` + styleHTML + topologyStyleHTML + `
-<h1>Topology</h1>
 ` + navHTML + `
+<h1>Topology</h1>
+
 <div class="view-tabs"><a href="/scopes">&larr; List view</a><span class="active">Topology view</span></div>
 <p class="dim">Physical wiring: interface &rarr; VLAN &rarr; IP &rarr; VRRP &rarr; dnsmasq. Combined
 view groups every scope with its worker(s) and probe status in one card; split view shows each

@@ -107,3 +107,62 @@ func TestReturnTargetOr_PrefersRememberedPage(t *testing.T) {
 		t.Errorf("no cookie: (%q, %q), want the handler's own link", link, text)
 	}
 }
+
+func TestBackTarget_FollowsTheRealCookieSequence(t *testing.T) {
+	jar := map[string]*http.Cookie{}
+	// visit plays one browser navigation: the handler reads the request's cookies,
+	// then the middleware's response cookies replace them, as a browser would.
+	visit := func(path string) (string, string) {
+		req := browserGet(path)
+		for _, c := range jar {
+			req.AddCookie(c)
+		}
+		link, text := backTarget(req, "/logs", "back to logs")
+		rec := httptest.NewRecorder()
+		rememberReturnPage(rec, req)
+		for _, c := range rec.Result().Cookies() {
+			jar[c.Name] = c
+		}
+		return link, text
+	}
+	if link, _ := visit("/"); link != "/logs" {
+		t.Errorf("the first page has no way back, want the fallback, got %q", link)
+	}
+	if link, text := visit("/daemons"); link != "/" || text != "back to overview" {
+		t.Errorf("first visit of daemons from the overview = (%q, %q), want the overview", link, text)
+	}
+	if link, _ := visit("/daemons"); link != "/" {
+		t.Errorf("a reload must keep the way back, got %q", link)
+	}
+	if link, _ := visit("/daemons"); link != "/" {
+		t.Errorf("a second reload must keep the way back, got %q", link)
+	}
+	visit("/logs")
+	if link, text := visit("/daemons"); link != "/logs" || text != "back to logs" {
+		t.Errorf("daemons from the logs = (%q, %q), want the logs", link, text)
+	}
+	visit("/config")
+	if link, text := visit("/daemons"); link != "/config" || text != "back to cluster settings" {
+		t.Errorf("daemons from the cluster settings = (%q, %q)", link, text)
+	}
+	// An unsafe value is never followed.
+	bad := browserGet("/daemons")
+	bad.AddCookie(&http.Cookie{Name: returnCookieName, Value: "%2F%2Fevil.example"})
+	if link, _ := backTarget(bad, "/logs", "back to logs"); link != "/logs" {
+		t.Errorf("an unsafe page must fall back, got %q", link)
+	}
+}
+
+func TestBackLinks_ViewPagesUseTheCameFromTarget(t *testing.T) {
+	var buf strings.Builder
+	data := daemonsPageData{BackHref: "/", BackText: "back to overview"}
+	if err := daemonsTmpl.Execute(&buf, data); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), `<a href="/">&larr; back to overview</a>`) {
+		t.Error("the Daemons page must show the came-from link")
+	}
+	if strings.Contains(buf.String(), `href="/config">`) {
+		t.Error("the Daemons page must not link to the cluster settings as a fixed back target")
+	}
+}

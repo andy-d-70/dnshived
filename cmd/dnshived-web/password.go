@@ -26,8 +26,9 @@ type passwordData struct {
 var passwordTmpl = template.Must(template.New("password").Parse(`<!doctype html>
 <title>dnshived-web — change password</title>
 ` + styleHTML + `
-<h1>Change password</h1>
 ` + navHTML + `
+<h1>Change password</h1>
+
 {{if .Success}}<p><strong>Password changed</strong> on every core. All your sessions have ended — <a href="/login">log in again</a> with the new password.</p>
 {{else}}
 {{if .Error}}<p><strong>{{.Error}}</strong></p>{{end}}

@@ -461,8 +461,9 @@ function submitNodeOpCommit(form, title, steps){
   return submitFormAsConsole(form, title, steps);
 }
 </script>
-<h1>Pending changes</h1>
 ` + navHTML + `
+<h1>Pending changes</h1>
+
 {{if .Error}}<p class="crit">{{.Error}}</p>{{else}}
 <p class="dim">Every save on the config/scopes/DNS/DHCP editors and a scope's own
 edit page stages a change here first ("Palo Alto style" candidate config) — nothing
@@ -525,7 +526,7 @@ nothing runs until you confirm it here either way.</p>
 <tr><th>Field</th><th>Change</th></tr>
 {{range .ClusterDiffs}}<tr><td>{{.Label}}</td><td>{{.Detail}}</td></tr>{{end}}
 </table>
-<p class="dim">Edit on <a href="/config">cluster config</a> or <a href="/config/dns">DHCP &amp; DNS</a>.</p>
+<p class="dim">Edit on <a href="/config">cluster settings</a> or <a href="/config/dns">DHCP &amp; DNS</a>.</p>
 {{end}}
 
 {{if .ScopeDiffs}}

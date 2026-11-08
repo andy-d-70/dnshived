@@ -208,8 +208,9 @@ func humanBytes(n int64) string {
 var historyPageTmpl = template.Must(template.New("probe-history").Parse(`<!doctype html>
 <title>dnshived-web — probe history</title>
 ` + styleHTML + `
-<h1>Probe history</h1>
 ` + navHTML + `
+<h1>Probe history</h1>
+
 <p><a href="/probes">&larr; back to Probes</a></p>
 {{if not .Hosts}}<p class="dim">No probe host is configured.</p>{{else}}
 <form method="get" action="/probes/history" style="margin-bottom:.8rem">

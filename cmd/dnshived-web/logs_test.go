@@ -4,10 +4,12 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHandleLogs_RendersBothLogsAndAuditSections(t *testing.T) {
@@ -49,7 +51,7 @@ func TestHandleLogs_RendersBothLogsAndAuditSections(t *testing.T) {
 	}
 }
 
-func TestHandleLogs_ThreeCollapsibleSectionsWithDaemonLogsForEveryCoreRole(t *testing.T) {
+func TestHandleLogs_ThreeTabsWithDaemonLogsForEveryCoreRole(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("{}"))
 	}))
@@ -66,9 +68,12 @@ func TestHandleLogs_ThreeCollapsibleSectionsWithDaemonLogsForEveryCoreRole(t *te
 	body := rec.Body.String()
 
 	for _, want := range []string{
-		`<details><summary><h2 style="display:inline" id="logs">General logs</h2></summary>`,
-		`<details><summary><h2 style="display:inline" id="audit">Audit logs</h2></summary>`,
-		`<details id="daemons"><summary><h2 style="display:inline">Daemon logs (incl. dnsmasq)</h2></summary>`,
+		`<section class="tab-pane" id="tab-general" data-tab="General" data-tab-order="1" data-tab-default>`,
+		`<h2 id="logs">General logs</h2>`,
+		`<section class="tab-pane" id="tab-audit" data-tab="Audit" data-tab-order="2">`,
+		`<h2 id="audit">Audit logs</h2>`,
+		`<section class="tab-pane" id="daemons" data-tab="Daemon logs" data-tab-order="3">`,
+		`<h2>Daemon logs (incl. dnsmasq)</h2>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("expected %q in body, got:\n%s", want, body)
@@ -259,5 +264,52 @@ func TestHandleDnsmasqLogView_UnknownNodeIs404(t *testing.T) {
 	h(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 for a probe host", rec.Code)
+	}
+}
+
+func TestMergeEventRows_NewestFirstLimitedAndSkipsFailedNodes(t *testing.T) {
+	base := time.Date(2026, 11, 8, 10, 0, 0, 0, time.UTC)
+	results := []nodeResult[[]event]{
+		{Node: NodeConfig{Name: "n1"}, Value: []event{{Timestamp: base.Add(1 * time.Minute), Level: "INFO", Message: "old"}, {Timestamp: base.Add(5 * time.Minute), Level: "ERROR", Message: "newest"}}},
+		{Node: NodeConfig{Name: "n2"}, Err: errors.New("down")},
+		{Node: NodeConfig{Name: "n3"}, Value: []event{{Timestamp: base.Add(3 * time.Minute), Level: "WARNING", Message: "middle"}}},
+	}
+	rows := mergeEventRows(results, []string{"core-1", "", "core-3"}, 2)
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want the limit of 2", len(rows))
+	}
+	if rows[0].Message != "newest" || rows[1].Message != "middle" {
+		t.Errorf("rows are not newest first: %+v", rows)
+	}
+	if rows[0].Node != "core-1" || rows[1].Node != "core-3" {
+		t.Errorf("node labels = %q, %q; want the roles core-1 and core-3", rows[0].Node, rows[1].Node)
+	}
+	if rows[0].Class != "crit" || rows[1].Class != "warn" {
+		t.Errorf("level classes = %q, %q; want crit and warn", rows[0].Class, rows[1].Class)
+	}
+	fallback := mergeEventRows(results[:1], nil, 5)
+	if len(fallback) != 2 || fallback[0].Node != "n1" {
+		t.Errorf("without roles the configured node name must be used, got %+v", fallback)
+	}
+}
+
+func TestStatusTmpl_RendersRecentEventsCard(t *testing.T) {
+	var buf strings.Builder
+	data := overviewData{ClusterState: "STABLE", ClusterClass: "ok", RecentEvents: []logRow{{Time: "11-08 10:00:00", Node: "core-1", Level: "WARNING", Class: "warn", Prefix: "PROBE", Message: "scope-002 no answer"}}}
+	if err := statusTmpl.Execute(&buf, data); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{"Recent events", "scope-002 no answer", `class="scrollbox"`, `href="/logs"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("overview lacks %q", want)
+		}
+	}
+	buf.Reset()
+	if err := statusTmpl.Execute(&buf, overviewData{ClusterState: "STABLE", ClusterClass: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "(no events yet)") {
+		t.Error("an empty event list must say so")
 	}
 }

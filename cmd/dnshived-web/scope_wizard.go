@@ -171,8 +171,9 @@ var wizardTmpl = template.Must(template.New("wizard").Funcs(template.FuncMap{
 }).Parse(`<!doctype html>
 <title>dnshived-web — add scope wizard</title>
 ` + styleHTML + wizardVIPScriptHTML + subnetOverlapScriptHTML + `
-<h1>Add Scope — step {{.Step}} of 4</h1>
 ` + navHTML + `
+<h1>Add Scope — step {{.Step}} of 4</h1>
+
 
 {{if eq .Step 1}}
 <form method="post" action="/scopes/wizard">

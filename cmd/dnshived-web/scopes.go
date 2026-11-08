@@ -114,9 +114,10 @@ window.addEventListener('resize',function(){closeAll(null)});
 var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
 <title>dnshived-web — scopes</title>
 ` + styleHTML + `
-<h1>Scopes</h1>
 ` + navHTML + `
-<div class="view-tabs"><span class="active">List view</span><a href="/topology">Topology view &rarr;</a></div>
+<h1>Scopes</h1>
+
+<div class="view-tabs"><span class="active">List view</span><a href="/topology">Topology view &rarr;</a><a href="/scopes/options">Defaults for new scopes &rarr;</a></div>
 <p><a href="/scopes/wizard">+ Add scope (guided wizard)</a> &middot; <a href="/scopes/move-all">Move all scopes from one interface to another</a></p>
 
 <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
@@ -556,12 +557,18 @@ document.addEventListener('DOMContentLoaded', function(){
 });
 </script>`
 
+// renderScopeDetail fills the back link with the page the operator came from.
+func renderScopeDetail(w http.ResponseWriter, r *http.Request, data scopeDetailData) {
+	data.BackHref, data.BackText = backTarget(r, "/scopes", "back to scopes")
+	renderTemplate(w, scopeDetailTmpl, data, "scope-detail")
+}
+
 var scopeDetailTmpl = template.Must(template.New("scope-detail").Parse(`<!doctype html>
 <title>dnshived-web — scope {{.Scope}}</title>
 ` + styleHTML + scopeColorPickerStyleHTML + scopeTitleStyleHTML + subnetOverlapScriptHTML + scopeEditAutoFillScriptHTML + navHTML + `
 <h1 class="scope-title">Scope: {{.Scope}}</h1>
 ` + pendingBannerHTML + `
-<p><a href="/scopes">&larr; back to scopes</a></p>
+<p><a href="{{.BackHref}}">&larr; {{.BackText}}</a></p>
 {{if .NotFound}}
 <p class="crit">No reachable node knows this scope.</p>
 {{else if .FetchError}}
@@ -764,13 +771,14 @@ func renderScopePreview(scopeName string, sc config.ScopeConfig, defaultDHCPOpti
 }
 
 type scopeDetailData struct {
-	Scope         string
-	NotFound      bool
-	FetchError    string
-	Check         authorityCheck
-	ServingText   string
-	ServingClass  string
-	DecisionClass string
+	BackHref, BackText string
+	Scope              string
+	NotFound           bool
+	FetchError         string
+	Check              authorityCheck
+	ServingText        string
+	ServingClass       string
+	DecisionClass      string
 	// TargetNode names which node this page's checks were actually evaluated
 	// on.
 	TargetNode         string
@@ -928,14 +936,14 @@ func handleScopeDetail(ref *configRef, store *TemplateStore) http.HandlerFunc {
 		data := scopeDetailData{Scope: scope, HasProbeHost: len(cfg.ProbeHosts) > 0, IPPattern: ipPattern, IPCIDRPattern: ipCIDRPattern, GatewayPattern: ipGatewayPattern}
 		if target == nil {
 			data.NotFound = true
-			renderTemplate(w, scopeDetailTmpl, data, "scope-detail")
+			renderScopeDetail(w, r, data)
 			return
 		}
 
 		ac, err := fetchAuthority(*target, scope)
 		if err != nil {
 			data.FetchError = err.Error()
-			renderTemplate(w, scopeDetailTmpl, data, "scope-detail")
+			renderScopeDetail(w, r, data)
 			return
 		}
 
@@ -1029,7 +1037,7 @@ func handleScopeDetail(ref *configRef, store *TemplateStore) http.HandlerFunc {
 		if ac.Decision == "SERVE" {
 			data.DecisionClass = "ok"
 		}
-		renderTemplate(w, scopeDetailTmpl, data, "scope-detail")
+		renderScopeDetail(w, r, data)
 	}
 }
 

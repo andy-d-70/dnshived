@@ -195,11 +195,12 @@ func formatBytesIEC(b int64) string {
 var daemonsTmpl = template.Must(template.New("daemons").Parse(`<!doctype html>
 <title>dnshived-web — daemons</title>
 ` + styleHTML + `
-<h1>Daemons</h1>
 ` + navHTML + `
-<div class="view-tabs"><a href="/config">&larr; Cluster config</a><span class="active">Daemons</span></div>
+<h1>Daemons</h1>
+
+<div class="view-tabs"><a href="{{.BackHref}}">&larr; {{.BackText}}</a><span class="active">Daemons</span></div>
 <p>{{.Total}} unit(s)</p>
-<table border="1" cellpadding="4" cellspacing="0">
+<table border="1" cellpadding="4" cellspacing="0" data-stack>
 <tr><th>Node</th><th>Unit</th><th>State</th><th>Uptime</th><th>Version</th><th title="the ACTUAL live process's own user, not just what the unit is configured to run as">Running as</th><th title="the ACTUAL live process's own PID">PID</th><th></th></tr>
 {{range .Rows}}
 <tr>
@@ -254,6 +255,8 @@ var daemonsTmpl = template.Must(template.New("daemons").Parse(`<!doctype html>
 type daemonsPageData struct {
 	Rows  []daemonRow
 	Total int
+	// BackHref and BackText lead to the page the operator came from.
+	BackHref, BackText string
 }
 
 func handleDaemons(ref *configRef) http.HandlerFunc {
@@ -340,6 +343,7 @@ func handleDaemons(ref *configRef) http.HandlerFunc {
 			Rows:  rows,
 			Total: len(rows),
 		}
+		data.BackHref, data.BackText = backTarget(r, "/logs", "back to logs")
 		renderTemplate(w, daemonsTmpl, data, "daemons")
 	}
 }
@@ -369,8 +373,9 @@ type restartConfirmData struct {
 var restartConfirmTmpl = template.Must(template.New("restart-confirm").Parse(`<!doctype html>
 <title>dnshived-web — confirm restart</title>
 ` + styleHTML + `
-<h1>Confirm: {{.Label}} {{.Unit}} on {{.Node}}</h1>
 ` + navHTML + `
+<h1>Confirm: {{.Label}} {{.Unit}} on {{.Node}}</h1>
+
 <p><a href="/daemons">&larr; back to Daemons</a></p>
 <p class="warn"><strong>This is a real action, not a preview.</strong> {{.Label}}ing {{.Unit}} briefly
 interrupts whatever it's currently doing on {{.Node}} — for dnshived.service itself, this daemon's

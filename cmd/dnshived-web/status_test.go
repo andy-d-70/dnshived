@@ -40,11 +40,8 @@ func TestStatusTmpl_RendersProbeHostRows(t *testing.T) {
 	if !strings.Contains(out, "load 0.05  mem 24%") {
 		t.Error("expected probe-a's row and load/mem to render")
 	}
-	if !strings.Contains(out, `<td class="node-probe">probe-a</td>`) {
-		t.Error("expected probe host row's Name column to show its own nickname (probe-a), not a hardcoded label")
-	}
-	if !strings.Contains(out, `<td class="node-probe">probe</td>`) {
-		t.Error("expected probe host row's Role column to still show the fixed \"probe\" label")
+	if !strings.Contains(out, `class="node-probe" title="probe · `) || !strings.Contains(out, `>probe-a</td>`) {
+		t.Error("expected probe host row's Name cell to show its own nickname (probe-a), with the fixed \"probe\" role in its tooltip")
 	}
 	if !strings.Contains(out, "0.9.7-dev") || !strings.Contains(out, "1155c7e") {
 		t.Error("expected probe-a's version to render")
@@ -138,8 +135,8 @@ func TestStatusTmpl_RendersHostnameAndNicknameColumns(t *testing.T) {
 		t.Fatalf("statusTmpl.Execute failed: %v", err)
 	}
 	out := buf.String()
-	if !strings.Contains(out, "<th>Host</th>") {
-		t.Error("expected a Host column header in the Workers table")
+	if !strings.Contains(out, `title="core-1 · node-a · 192.0.2.25:9443`) {
+		t.Error("expected the name cell's tooltip to carry role, hostname and address, which no longer have columns of their own")
 	}
 	if !strings.Contains(out, "the fast one") {
 		t.Error("expected the row's nickname to render in the Name column")
@@ -1213,7 +1210,7 @@ func TestStatusTmpl_ClusterTableRowsCarryInfoIcons(t *testing.T) {
 	if n := strings.Count(out, "info-ico"); n < 9 {
 		t.Errorf("found %d info-ico occurrences in the Cluster table, want at least 9 (State, Configuration sane, Interfaces, Witness, Arbiter quorum, Serving, Daemons, Probes, Cluster paths)", n)
 	}
-	for _, label := range []string{">State ", ">Witness ", ">Serving ", ">Daemons ", ">Probes "} {
+	for _, label := range []string{">State ", ">Witness ", ">Scopes ", ">Daemons ", ">Probes "} {
 		if !strings.Contains(out, label) {
 			t.Errorf("expected label %q to be followed by an info-ico span, not just plain text", label)
 		}
@@ -1500,5 +1497,79 @@ func TestConfigRevisionWarnings_BehindInTheBackupSettingsOnly(t *testing.T) {
 	got := configRevisionWarnings(rows)
 	if len(got) != 1 || !strings.Contains(got[0], "core-2 (revision 3) missed a commit") {
 		t.Errorf("warnings = %v", got)
+	}
+}
+
+func TestBuildServingNodes_CountsEnabledScopesAndScalesToTheBusiestNode(t *testing.T) {
+	rows := []statusRow{
+		{Status: nodeStatus{Role: "core-1", Serving: []string{"a", "b", "c", "off"}}, Nickname: "core-1", RoleClass: "node-core-1"},
+		{Status: nodeStatus{Role: "core-2", Serving: []string{"d"}}},
+		{Status: nodeStatus{Role: "core-3"}, FetchError: "down"},
+		{Status: nodeStatus{Role: "probe-1", Serving: []string{"x"}}},
+	}
+	got := buildServingNodes(rows, map[string]bool{"off": true})
+	if len(got) != 2 {
+		t.Fatalf("got %d rows, want the two reachable core nodes: %+v", len(got), got)
+	}
+	if got[0].Count != 3 || got[0].Pct != 100 || got[0].Name != "core-1" || got[0].Class != "node-core-1" {
+		t.Errorf("core-1 row = %+v, want 3 enabled scopes at 100%%", got[0])
+	}
+	if got[1].Count != 1 || got[1].Pct != 33 || got[1].Name != "core-2" {
+		t.Errorf("core-2 row = %+v, want 1 scope, 33%% of the busiest, named by its role", got[1])
+	}
+}
+
+func TestBuildProbeFigures_LeavesDeliberateGapsOutAndGradesTheCard(t *testing.T) {
+	cov := probeCoverage{Total: 12, Probed: 8, ScopeDisabled: 2, Disabled: 1, Pending: 1}
+	f := buildProbeFigures(cov, nil)
+	if f.Total != 9 || f.Pct != 88 || f.Class != "warn" || f.Meter != "warn" {
+		t.Errorf("figures = %+v, want total 9 (deliberate gaps out), 88%%, warn for the pending one", f)
+	}
+	f = buildProbeFigures(probeCoverage{Total: 4, Probed: 4}, []probeIssue{{Scope: "a"}, {Scope: "b", Rogue: true}})
+	if f.Issues != 2 || f.Rogue != 1 || f.Class != "crit" || f.Pct != 100 || f.Meter != "ok" {
+		t.Errorf("figures = %+v, want 2 issues, 1 rogue, crit", f)
+	}
+	if f := buildProbeFigures(probeCoverage{Total: 4, Probed: 4}, nil); f.Class != "ok" {
+		t.Errorf("a fully probed cluster without issues must be ok, got %+v", f)
+	}
+	if f := buildProbeFigures(probeCoverage{}, nil); f.Total != 0 || f.Pct != 0 {
+		t.Errorf("no results must not divide by zero: %+v", f)
+	}
+}
+
+func TestBuildPathDigest_WorstFirstLimitedAndCountsVLANPaths(t *testing.T) {
+	rows := []clusterPathRow{
+		{From: "core-1", To: "core-2", Trunk: "eth1", Score: 100, Class: "ok", Text: "reachable"},
+		{From: "core-1", To: "core-3", Trunk: "eth1", Score: 60, Class: "ok", Text: "reachable"},
+		{From: "core-2", To: "core-3", Trunk: "eth2", Score: 90, Class: "ok", Text: "reachable"},
+		{From: "core-1", To: "core-2", Trunk: "eth1.10", Score: 100, IsVLAN: true},
+		{From: "core-1", To: "core-3", Trunk: "eth1.11", Score: 100, IsVLAN: true},
+	}
+	digest, more, vlan := buildPathDigest(rows, 2)
+	if len(digest) != 2 || digest[0].To != "core-3" || digest[0].Score != 60 || digest[1].Score != 90 {
+		t.Errorf("digest = %+v, want the two worst trunk paths first", digest)
+	}
+	if more != 1 || vlan != 2 {
+		t.Errorf("more = %d, vlan = %d; want 1 more trunk path and 2 VLAN paths", more, vlan)
+	}
+}
+
+func TestStatusTmpl_OverviewCardsCarryTheirFigures(t *testing.T) {
+	data := overviewData{
+		ClusterState: "STABLE", ClusterClass: "ok", ServingText: "9 of 10 scope(s)", ServingClass: "warn", ServingMeter: "warn", ServingPct: 90,
+		UnservedCount: 1, DisabledCount: 2, ServingNodes: []nodeServingRow{{Name: "core-1", Class: "node-core-1", Count: 5, Pct: 100}},
+		ProbeSummary: "x", ProbeFig: probeFigures{Total: 10, Probed: 8, Pending: 2, Issues: 1, Rogue: 1, Pct: 80, Class: "crit"},
+		PathsSummaryText: "3 path(s)", PathDigest: []pathDigestRow{{From: "core-1", To: "core-2", Trunk: "eth1", Class: "ok", Text: "reachable", Score: 97}}, PathDigestMore: 2, VLANPaths: 4,
+		PathRows: []clusterPathRow{{From: "core-1", To: "core-2"}},
+	}
+	var buf strings.Builder
+	if err := statusTmpl.Execute(&buf, data); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{"Not served", "Paused (disabled)", "5 serving", "8 of 10", "1 (1 rogue DHCP)", "Pending first sweep", "core-1 → core-2", "97 %", "+ 2 more trunk path(s)", "4 VLAN path(s)", `class="meter warn"`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("overview lacks %q", want)
+		}
 	}
 }

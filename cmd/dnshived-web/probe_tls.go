@@ -150,8 +150,9 @@ func closePlainAfterAdopt(entry NodeConfig) string {
 var pinNowTmpl = template.Must(template.New("pin-now").Parse(`<!doctype html>
 <title>dnshived-web — pin probe certificate</title>
 ` + styleHTML + `
-<h1>Pin the certificate of {{.Addr}}</h1>
 ` + navHTML + `
+<h1>Pin the certificate of {{.Addr}}</h1>
+
 <p>This probe host reports the certificate fingerprint below over its unencrypted port. Anyone who can alter that traffic could
 report a different one, so compare it with the fingerprint in the probe host's own log
 (<code>journalctl -u dnshived-probe | grep 'TLS API'</code>) before you pin it.</p>
@@ -261,8 +262,9 @@ func replaceProbeHost(cfgPath string, ref *configRef, host NodeConfig) error {
 var pinResultTmpl = template.Must(template.New("pin-result").Parse(`<!doctype html>
 <title>dnshived-web — probe pinned</title>
 ` + styleHTML + `
-<h1 class="ok">Probe {{.Addr}} is pinned</h1>
 ` + navHTML + `
+<h1 class="ok">Probe {{.Addr}} is pinned</h1>
+
 <p>Its certificate was proven with the probe's admin token, so nothing had to be compared by hand. The web UI now talks to it over HTTPS only.</p>
 {{if .Rotated}}<p class="ok">The probe's admin token was replaced over the pinned connection. The old token was sent in cleartext while the probe was not pinned and no longer works. Other web instances pick the new token up from the probe-host list within a minute; <code>dnshived-top</code> and <code>dnshived-validate</code> need it too if they use the admin token.</p>
 {{else}}<p class="warn">The admin token was <b>not</b> replaced: {{.RotateErr}}. The old token travelled in cleartext before this pin, so treat it as known to an observer on the network and replace it as soon as possible.</p>{{end}}

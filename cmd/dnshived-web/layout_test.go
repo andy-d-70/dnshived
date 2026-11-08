@@ -4,6 +4,9 @@
 package main
 
 import (
+	"math"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -48,12 +51,6 @@ func TestNavHTML_PendingButtonSitsOutsideTheNavFrame(t *testing.T) {
 	}
 }
 
-func TestStyleHTML_BrandDescLinesUpUnderBrandText(t *testing.T) {
-	if !strings.Contains(styleHTML, "nav .brand .nav-desc{margin-left:") {
-		t.Error("expected nav .brand .nav-desc to have a left margin offsetting the brand icon's own width, so \"overview\" lines up under \"dnshived\" rather than sitting flush left")
-	}
-}
-
 func TestNavHTML_NeverScrollsHorizontally(t *testing.T) {
 	if strings.Contains(styleHTML, "overflow-x:auto") && strings.Contains(styleHTML, "nav{") {
 		idx := strings.Index(styleHTML, "nav{")
@@ -95,28 +92,80 @@ func TestNavHTML_BrandMarkIsInlineSVGNotImg(t *testing.T) {
 }
 
 func TestNavHTML_BrandIsNowTheOverviewLink(t *testing.T) {
-	if !strings.Contains(navHTML, `<a href="/" class="nav-item brand">`) {
+	if !strings.Contains(navHTML, `<a href="/" class="nav-item brand"`) {
 		t.Errorf("expected the brand itself to be a real link to \"/\", got:\n%s", navHTML)
 	}
-	if !strings.Contains(navHTML, `<span class="nav-desc">overview</span>`) {
-		t.Error("expected the brand's second line to read \"overview\"")
+	if !strings.Contains(navHTML, `title="overview of the whole cluster"`) {
+		t.Error("expected the brand to carry an overview tooltip, since it is the only way to the overview")
 	}
 	if strings.Count(navHTML, `href="/"`) != 1 {
 		t.Errorf("expected exactly one link to \"/\" (the brand) now that the separate overview link is gone, got %d", strings.Count(navHTML, `href="/"`))
 	}
 }
 
-// TestNavHTML_EveryItemHasATwoLineNameAndDescription guards the two-line
-// redesign holding for every nav item, not just the brand.
-func TestNavHTML_EveryItemHasATwoLineNameAndDescription(t *testing.T) {
-	items := strings.Count(navHTML, `class="nav-item`)
-	names := strings.Count(navHTML, `class="nav-name"`)
-	descs := strings.Count(navHTML, `class="nav-desc"`)
-	if items == 0 {
+// TestNavHTML_EveryItemHasANameAndATooltip guards the one-row nav: every
+// item has a name and explains itself in a tooltip instead of a second line.
+func TestNavHTML_EveryItemHasANameAndATooltip(t *testing.T) {
+	items := regexp.MustCompile(`<a [^>]*class="nav-item[^>]*>`).FindAllString(navHTML, -1)
+	if len(items) == 0 {
 		t.Fatal("expected at least one .nav-item")
 	}
-	if names != items || descs != items {
-		t.Errorf("expected one .nav-name and one .nav-desc per .nav-item (%d items), got %d names, %d descs", items, names, descs)
+	for _, it := range items {
+		if !strings.Contains(it, `title="`) {
+			t.Errorf("nav item without a tooltip: %s", it)
+		}
+		if !strings.Contains(it, `data-match="`) {
+			t.Errorf("nav item without data-match, it can never be highlighted: %s", it)
+		}
+	}
+	if strings.Contains(navHTML, "nav-desc") {
+		t.Error("the second description line is gone; the text belongs in the tooltip")
+	}
+}
+
+func TestNavHTML_ItemsAreInTheAgreedOrder(t *testing.T) {
+	order := []string{`href="/"`, `href="/scopes"`, `href="/probes"`, `nav-sep`, `href="/config/dns"`, `href="/security"`, `href="/backup"`, `href="/config"`, `href="/logs"`}
+	last := -1
+	for _, want := range order {
+		idx := strings.Index(navHTML, want)
+		if idx == -1 {
+			t.Fatalf("navHTML has no %s", want)
+		}
+		if idx < last {
+			t.Errorf("%s is out of order in the nav", want)
+		}
+		last = idx
+	}
+	for _, label := range []string{"Scopes", "Probes", "DHCP &amp; DNS", "Security", "Maintenance", "Cluster settings", "Logs"} {
+		if !strings.Contains(navHTML, `<span class="nav-name">`+label+`</span>`) {
+			t.Errorf("navHTML has no item named %q", label)
+		}
+	}
+}
+
+func TestNavHTML_FoldsIntoAMenuButtonOnNarrowScreens(t *testing.T) {
+	if !strings.Contains(navHTML, `id="nav-menu-toggle"`) || !strings.Contains(navHTML, `aria-expanded="false"`) {
+		t.Error("expected a Menu toggle button with aria-expanded")
+	}
+	if !strings.Contains(navHTML, "function dnshivedToggleNav()") {
+		t.Error("expected the toggle script")
+	}
+	if !strings.Contains(styleHTML, "@media (max-width:1180px)") || !strings.Contains(styleHTML, "nav .nav-item:not(.brand)") {
+		t.Error("expected the narrow-screen rule that hides the items except the brand")
+	}
+}
+
+func TestNavHTML_CurrentPageIsHighlightedByLongestPrefix(t *testing.T) {
+	if !strings.Contains(navHTML, "aria-current") || !strings.Contains(navHTML, "bestLen") {
+		t.Error("expected the script that marks the item with the longest matching prefix")
+	}
+	if !strings.Contains(styleHTML, ".nav-outer .nav-item[aria-current=page]{") {
+		t.Error("expected a style for the current item")
+	}
+	for path, want := range map[string]string{"/config/dns": `data-match="/config/dns,`, "/config": `data-match="/config"`, "/config/mail": "/config/mail", "/config/scopes": "/config/scopes"} {
+		if !strings.Contains(navHTML, want) {
+			t.Errorf("no nav item claims %s (%s)", path, want)
+		}
 	}
 }
 
@@ -201,15 +250,15 @@ func TestNavHTML_ThemeSwitcherCyclesAllThreeOptionsAndAppliesImmediately(t *test
 	}
 }
 
-func TestNavHTML_ThemeSwitcherSitsBetweenNavAndPendingButton(t *testing.T) {
+func TestNavHTML_ThemeSwitcherSitsRightOfTheNavAndPendingButton(t *testing.T) {
 	navClose := strings.Index(navHTML, "</nav>")
 	selectIdx := strings.Index(navHTML, `id="theme_switcher"`)
 	pendingIdx := strings.Index(navHTML, `href="/pending"`)
 	if navClose == -1 || selectIdx == -1 || pendingIdx == -1 {
 		t.Fatalf("expected </nav>, the theme switcher, and the pending link all in navHTML, got:\n%s", navHTML)
 	}
-	if !(navClose < selectIdx && selectIdx < pendingIdx) {
-		t.Errorf("expected order </nav> -> theme switcher -> pending button, got navHTML:\n%s", navHTML)
+	if !(navClose < pendingIdx && pendingIdx < selectIdx) {
+		t.Errorf("expected order </nav> -> pending button -> theme switcher, got navHTML:\n%s", navHTML)
 	}
 }
 
@@ -277,5 +326,167 @@ func TestStyleHTML_DefinesInfoIcoCSS(t *testing.T) {
 	}
 	if !strings.Contains(styleHTML, "cursor:help") {
 		t.Error("expected the info icon to use cursor:help, signaling it's not a link/button")
+	}
+}
+
+func themeTokens(t *testing.T) map[string]map[string]string {
+	t.Helper()
+	blocks := regexp.MustCompile(`(?s):root(?:\[data-theme="(\w+)"\])?\{(.*?)\}`).FindAllStringSubmatch(styleHTML, -1)
+	decl := regexp.MustCompile(`(--[a-z0-9-]+):([^;]+);`)
+	out := map[string]map[string]string{"normal": {}}
+	for _, b := range blocks {
+		name := b[1]
+		if name == "" {
+			name = "normal"
+		}
+		if out[name] == nil {
+			out[name] = map[string]string{}
+			for k, v := range out["normal"] {
+				out[name][k] = v
+			}
+		}
+		for _, d := range decl.FindAllStringSubmatch(b[2], -1) {
+			out[name][d[1]] = strings.TrimSpace(d[2])
+		}
+	}
+	return out
+}
+
+func relLuminance(t *testing.T, hex string) float64 {
+	t.Helper()
+	h := strings.TrimPrefix(hex, "#")
+	if len(h) == 3 {
+		h = string([]byte{h[0], h[0], h[1], h[1], h[2], h[2]})
+	}
+	if len(h) != 6 {
+		t.Fatalf("colour %q is not #rgb or #rrggbb", hex)
+	}
+	var ch [3]float64
+	for i := range ch {
+		v, err := strconv.ParseUint(h[i*2:i*2+2], 16, 8)
+		if err != nil {
+			t.Fatalf("colour %q: %v", hex, err)
+		}
+		c := float64(v) / 255
+		if c <= 0.03928 {
+			ch[i] = c / 12.92
+		} else {
+			ch[i] = math.Pow((c+0.055)/1.055, 2.4)
+		}
+	}
+	return 0.2126*ch[0] + 0.7152*ch[1] + 0.0722*ch[2]
+}
+
+func contrastRatio(t *testing.T, fg, bg string) float64 {
+	t.Helper()
+	a, b := relLuminance(t, fg), relLuminance(t, bg)
+	if a < b {
+		a, b = b, a
+	}
+	return (a + 0.05) / (b + 0.05)
+}
+
+func TestStyleHTML_TextAndBackgroundPairsReachContrast45InEveryTheme(t *testing.T) {
+	pairs := []struct{ fg, bg string }{
+		{"--text", "--bg"}, {"--text", "--panel"}, {"--text", "--head"},
+		{"--muted", "--bg"}, {"--muted", "--panel"}, {"--muted", "--head"},
+		{"--accent", "--bg"}, {"--accent", "--panel"},
+		{"--ok", "--bg"}, {"--ok", "--panel"}, {"--ok", "--head"},
+		{"--warn", "--bg"}, {"--warn", "--panel"}, {"--warn", "--head"},
+		{"--crit", "--bg"}, {"--crit", "--panel"}, {"--crit", "--head"},
+		{"--on-accent", "--accent"}, {"--on-ok", "--ok"}, {"--on-warn", "--warn"}, {"--on-crit", "--crit"},
+		{"--core-1", "--panel"}, {"--core-2", "--panel"}, {"--core-3", "--panel"}, {"--worker-probe", "--panel"},
+	}
+	tokens := themeTokens(t)
+	if len(tokens) != 3 {
+		t.Fatalf("want 3 themes, found %d", len(tokens))
+	}
+	for theme, tok := range tokens {
+		for _, p := range pairs {
+			fg, bg := tok[p.fg], tok[p.bg]
+			if fg == "" || bg == "" {
+				t.Errorf("%s: %s or %s is not defined", theme, p.fg, p.bg)
+				continue
+			}
+			if r := contrastRatio(t, fg, bg); r < 4.5 {
+				t.Errorf("%s: %s %s on %s %s has contrast %.2f, want at least 4.5", theme, p.fg, fg, p.bg, bg, r)
+			}
+		}
+	}
+}
+
+func TestStyleHTML_NoHardCodedWhiteTextOnTokenBackgrounds(t *testing.T) {
+	if strings.Contains(styleHTML, "color:#fff") {
+		t.Error("text on filled elements must use the --on-* tokens, not #fff")
+	}
+}
+
+func TestStyleHTML_PendingButtonColourBeatsTheGenericNavItemColour(t *testing.T) {
+	if !strings.Contains(styleHTML, ".nav-outer .nav-pending-btn{") {
+		t.Error("the pending button colour rule must be as specific as `.nav-outer .nav-item`, or the text stays dark on the blue button")
+	}
+}
+
+func TestStyleHTML_TabsAndLineListsAreDefined(t *testing.T) {
+	for _, want := range []string{"function dnshivedInitTabs()", "function dnshivedLineLists()", ".tab-host.tabs-ready .tab-pane{display:none}", ".line-list{", "textarea[data-line-list]"} {
+		if !strings.Contains(navHTML+styleHTML, want) {
+			t.Errorf("layout lacks %q", want)
+		}
+	}
+	if !strings.Contains(navHTML, "'invalid'") {
+		t.Error("an invalid field in a hidden tab must open that tab, or the form cannot be submitted")
+	}
+}
+
+func TestTabLinksHTML_MarksOnlyTheActivePage(t *testing.T) {
+	out := securityTabs("/security")
+	if strings.Count(out, `aria-current="page"`) != 1 || !strings.Contains(out, `href="/security" aria-current="page"`) {
+		t.Errorf("exactly the active tab must carry aria-current: %s", out)
+	}
+	for _, href := range []string{"/users", "/security", "/config/mail"} {
+		if !strings.Contains(out, `href="`+href+`"`) {
+			t.Errorf("security tabs lack %s", href)
+		}
+	}
+}
+
+func TestPageTemplates_UseTheTabLayout(t *testing.T) {
+	cases := []struct {
+		name string
+		tmpl string
+		want []string
+	}{
+		{"maintenance", backupTmpl.Tree.Root.String(), []string{`id="tab-backup"`, `id="tab-restore"`, `id="tab-export"`}},
+		{"cluster settings", configFormTmpl.Tree.Root.String(), []string{`id="tab-nodes"`, `id="tab-interfaces"`, `id="tab-addresses"`, `id="tab-misc"`, `class="tab-submit"`}},
+		{"dhcp and dns", dhcpDNSConfigFormTmpl.Tree.Root.String(), []string{`id="tab-dhcp"`, `id="tab-dns"`, `id="tab-templates"`, `id="tab-domains"`, `data-line-list`}},
+		{"logs", logsTmpl.Tree.Root.String(), []string{`id="tab-general"`, `id="tab-audit"`, `id="daemons"`, `data-extra-tabs`}},
+	}
+	for _, c := range cases {
+		for _, want := range c.want {
+			if !strings.Contains(c.tmpl, want) {
+				t.Errorf("%s page lacks %s", c.name, want)
+			}
+		}
+		if !strings.Contains(c.tmpl, `class="tab-host`) {
+			t.Errorf("%s page has no tab host", c.name)
+		}
+	}
+}
+
+func TestSecurityTabs_TheMenuLandsOnTheFirstTab(t *testing.T) {
+	out := securityTabs("/security")
+	first := strings.Index(out, `href="`)
+	if first == -1 || !strings.HasPrefix(out[first:], `href="/security"`) {
+		t.Errorf("the first tab must be the page the Security menu item opens (/security): %s", out)
+	}
+	menuHref := regexp.MustCompile(`<a href="([^"]+)"[^>]*data-match="/security,`).FindStringSubmatch(navHTML)
+	if menuHref == nil || menuHref[1] != "/security" {
+		t.Errorf("the Security menu item must open /security, got %v", menuHref)
+	}
+}
+
+func TestStyleHTML_ThemeButtonHasAFixedWidth(t *testing.T) {
+	if !strings.Contains(styleHTML, "#theme_switcher{width:5.6rem;text-align:center}") {
+		t.Error("the theme button's label changes (Normal, Glowing, Dark); without a fixed width the nav items beside it jump")
 	}
 }

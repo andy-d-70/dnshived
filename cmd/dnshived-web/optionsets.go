@@ -196,8 +196,9 @@ func handleOptionSetDelete(ref *configRef, store *TemplateStore) http.HandlerFun
 var optionSetListTmpl = template.Must(template.New("optionsets-list").Parse(`<!doctype html>
 <title>dnshived-web — Option sets</title>
 ` + styleHTML + `
-<h1>Option sets</h1>
 ` + navHTML + `
+<h1>Option sets</h1>
+
 <p class="dim">A named bundle of <a href="/config/dns#templates">Templates</a>
 — up to one per kind. Applying a set applies every referenced
 template's own kind at once. Editing a set (or any template it
@@ -218,8 +219,9 @@ groups</a> to create those links across many scopes at once.</p>
 var optionSetEditTmpl = template.Must(template.New("optionset-edit").Parse(`<!doctype html>
 <title>dnshived-web — Option set</title>
 ` + styleHTML + `
-<h1>{{if .ID}}Edit{{else}}New{{end}} option set</h1>
 ` + navHTML + `
+<h1>{{if .ID}}Edit{{else}}New{{end}} option set</h1>
+
 {{if .Error}}<p class="crit">{{.Error}}</p>{{end}}
 <form method="post">
 <table>

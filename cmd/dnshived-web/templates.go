@@ -64,8 +64,9 @@ var newTemplateWizardTmpl = template.Must(template.New("template-new-wizard").Fu
 }).Parse(`<!doctype html>
 <title>dnshived-web — new template</title>
 ` + styleHTML + templateBuilderStyleHTML + `
-<h1>New template — step {{.Step}} of 2</h1>
 ` + navHTML + `
+<h1>New template — step {{.Step}} of 2</h1>
+
 
 {{if eq .Step 1}}
 <form method="post" action="/templates/new">
@@ -128,8 +129,9 @@ var templateEditTmpl = template.Must(template.New("template-edit").Funcs(templat
 }).Parse(`<!doctype html>
 <title>dnshived-web — edit template</title>
 ` + styleHTML + templateBuilderStyleHTML + `
-<h1>Edit template</h1>
 ` + navHTML + `
+<h1>Edit template</h1>
+
 {{if .Error}}<p class="crit">{{.Error}}</p>{{end}}
 <form method="post" action="/templates/{{.Template.ID}}/edit">
 <table>

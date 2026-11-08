@@ -576,13 +576,20 @@ func TestPushConfigAndRenderResult_RejectedConfigSkipsReloadAndReportsErrors(t *
 	}
 }
 
-func TestConfigFormTmpl_LinksToDaemonsView(t *testing.T) {
+func TestLogsTmpl_CarriesTheDaemonsTab(t *testing.T) {
 	var buf strings.Builder
+	if err := logsTmpl.Execute(&buf, logsPageData{}); err != nil {
+		t.Fatalf("logsTmpl.Execute failed: %v", err)
+	}
+	if !strings.Contains(buf.String(), `data-extra-tabs='[["Daemons","/daemons"]]'`) {
+		t.Error("the Daemons page belongs under Logs now: expected it as a tab of the Logs page")
+	}
+	buf.Reset()
 	if err := configFormTmpl.Execute(&buf, clusterFormData{}); err != nil {
 		t.Fatalf("configFormTmpl.Execute failed: %v", err)
 	}
-	if !strings.Contains(buf.String(), `href="/daemons"`) {
-		t.Error("expected a link to /daemons (the new Daemons view tab)")
+	if strings.Contains(buf.String(), `href="/daemons"`) {
+		t.Error("the cluster settings page no longer links to the Daemons page; it moved to Logs")
 	}
 }
 

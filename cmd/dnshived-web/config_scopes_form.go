@@ -131,8 +131,9 @@ document.addEventListener('DOMContentLoaded', function(){
 var scopesConfigFormTmpl = template.Must(template.New("config-scopes").Parse(`<!doctype html>
 <title>dnshived-web — scope editor</title>
 ` + styleHTML + scopeEditorStyleHTML + `
-<h1>Config editor — scopes</h1>
 ` + navHTML + pendingBannerHTML + `
+<h1>Config editor — scopes</h1>
+
 <p><a href="/scopes/wizard">+ Add scope (guided wizard)</a> <span class="dim">— a step-by-step
 alternative to the blank new-scope row at the bottom of the table below,
 with reusable DHCP/DNS templates. Same result either way: a new scope

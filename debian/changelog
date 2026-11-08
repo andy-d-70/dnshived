@@ -1,3 +1,13 @@
+dnshived (0.9.8.9~dev-18) unstable; urgency=medium
+
+  * Lab build: web UI redesign (colour contrast, one-row navigation with the
+    current page highlighted, card overview with figures and recent events,
+    tab layouts, line lists with menus, back links to the previous page,
+    stacked tables on a phone); the restore password limit counts a failed
+    guess before the next one runs.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Sun, 08 Nov 2026 20:00:00 +0100
+
 dnshived (0.9.8.9~dev-15) unstable; urgency=medium
 
   * Lab build: the probe host runs one DHCP and one DNS runner per interface,

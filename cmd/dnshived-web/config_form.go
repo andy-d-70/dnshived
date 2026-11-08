@@ -8,11 +8,10 @@ import "html/template"
 // configFormTmpl is the cluster-wide settings editor; scopes have their
 // own editor.
 var configFormTmpl = template.Must(template.New("config").Parse(`<!doctype html>
-<title>dnshived-web — config editor</title>
+<title>dnshived-web — cluster settings</title>
 ` + styleHTML + logModalScriptHTML + `
-<h1>Config editor — cluster</h1>
 ` + navHTML + `
-<div class="view-tabs"><span class="active">Settings</span><a href="/config/mail">Mail &rarr;</a><a href="/daemons">Daemons &rarr;</a></div>
+<h1>Cluster settings</h1>
 ` + pendingBannerHTML + `
 <p>Snapshot from node: <strong>{{.SourceNode}}</strong>. Saving stages a
 PENDING change on every configured node — nothing is applied until you
@@ -22,15 +21,17 @@ defaults and the template library live on another:
 <a href="/config/dns">edit DHCP &amp; DNS &rarr;</a>. To change your own
 login password: <a href="/password">change password &rarr;</a>. Export/
 import/backup moved to their own page:
-<a href="/backup">config management &rarr;</a>. API tokens moved
+<a href="/backup">maintenance &rarr;</a>. API tokens moved
 to <a href="/security">security &rarr;</a>. Scope VIP preference and
 new-scope defaults moved to
-<a href="/scopes/options">scope — general options &rarr;</a>. Probe
+<a href="/scopes/options">defaults for new scopes &rarr;</a>. Probe
 hosts (add/remove/rename, parallel probing, probe-behavior settings)
 moved to <a href="/probes#settings">probes &rarr;</a>.</p>
 
+<div class="tab-host">
 <form method="post" action="/config" onsubmit="return confirm('This will stage these cluster settings as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">
 
+<section class="tab-pane" id="tab-misc" data-tab="Misc" data-tab-order="4">
 <h2>Cluster-wide settings</h2>
 <table border="1" cellpadding="4">
 <tr><td>psk</td><td><input type="password" name="psk" value="" size="60" autocomplete="new-password" placeholder="unchanged — type a new PSK to replace it" title="The PSK is never sent to the browser. Leave blank to keep the current one."></td></tr>
@@ -48,6 +49,8 @@ moved to <a href="/probes#settings">probes &rarr;</a>.</p>
 </td></tr>
 </table>
 
+</section>
+<section class="tab-pane" id="tab-interfaces" data-tab="Interfaces &amp; VIP" data-tab-order="2">
 <h2>Platform</h2>
 <table border="1" cellpadding="4">
 <tr><td>mgmt interface</td><td><input name="platform_mgmt" value="{{if .Cluster.Platform}}{{.Cluster.Platform.Mgmt}}{{end}}"></td></tr>
@@ -66,6 +69,8 @@ moved to <a href="/probes#settings">probes &rarr;</a>.</p>
 <tr><td>vrrp_id</td><td><input class="vrrp-suggest" name="mgmt_vip_vrrp_id" value="{{if .Cluster.MgmtVIP}}{{.Cluster.MgmtVIP.VRRPID}}{{end}}" data-used-vrrp-ids="{{.UsedVRRPIDs}}"> (blank = auto-suggests the next free ID on load; never touches an already-set value)</td></tr>
 </table>
 
+</section>
+<section class="tab-pane" id="tab-addresses" data-tab="DNS &amp; DHCP addresses" data-tab-order="3">
 <h2 id="dns">Core DNS/DHCP addresses</h2>
 <p class="dim">Loopback bind addresses for the two consolidated per-worker
 "core" dnsmasq instances (0.9.7 DNS/DHCP consolidation prototype) —
@@ -98,11 +103,13 @@ plain reload can't — see cache_max_bytes' own tooltip for why).</p>
 <tr><td>dnsrelay_cache_max_bytes<br><small class="dim" title="An optional second ceiling on top of cache_size's own entry count — bytes of cached response data, cluster-wide across all shards. 0/blank disables it (entry-count-only, today's default behavior). Applying a change always restarts dnshived-dnsrelay, never just a SIGHUP reload — its reload handler only re-reads allowed_interfaces/interface_acls/rewrites, never cache sizing.">byte ceiling on top of cache_size, in bytes.</small></td><td><input type="number" min="0" name="dnsrelay_cache_max_bytes" value="{{if .Cluster.DNSRelayCacheMaxBytes}}{{.Cluster.DNSRelayCacheMaxBytes}}{{end}}" size="10" placeholder="8388608"></td></tr>
 </table>
 
-<p><input type="submit" value="Stage as pending change"></p>
+</section>
+<p class="tab-submit"><input type="submit" value="Stage as pending change"></p>
 </form>
 
+<section class="tab-pane" id="tab-nodes" data-tab="Nodes" data-tab-order="1">
 <h2>Cluster nodes</h2>
-<div class="table-wrap"><table border="1" cellpadding="4">
+<div class="table-wrap"><table border="1" cellpadding="4" data-stack>
 <tr><th>Name</th><th>Display name</th><th>Address</th><th>Rename</th><th>Offboard</th></tr>
 {{range .AllNodes}}
 <tr>
@@ -156,7 +163,7 @@ of this candidate's own interfaces line up with this cluster's own trunk
 interfaces, and reports its OS. This can take several seconds per
 interface; nothing is changed on the candidate by inspecting it.</p>
 {{if .Discovered}}
-<div class="table-wrap"><table border="1" cellpadding="4">
+<div class="table-wrap"><table border="1" cellpadding="4" data-stack>
 <tr><th>Hostname</th><th>Address</th><th>Version</th><th>Last seen</th><th>Inspect</th><th>Onboard as (missing)</th><th>Replace (occupied)</th></tr>
 {{range .Discovered}}
 <tr>
@@ -211,6 +218,9 @@ necessarily already discovered.</p>
 <button type="submit" onclick="document.getElementById('manual-inspect-addr-mirror').value=document.getElementById('manual-inspect-addr').value">Inspect this address</button>
 </form>
 </details>
+
+</section>
+</div>
 
 <dialog id="log-modal">
 <h3 id="log-modal-title" style="margin-top:0"></h3>

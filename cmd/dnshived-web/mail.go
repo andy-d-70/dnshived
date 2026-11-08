@@ -194,8 +194,9 @@ type mailPageData struct {
 var mailTmpl = template.Must(template.New("mail").Parse(`<!doctype html>
 <title>dnshived-web — mail</title>
 ` + styleHTML + `
-<h1>Mail</h1>
 ` + navHTML + `
+<h1>Security</h1>
+` + securityTabs("/config/mail") + `
 <p class="dim">Outgoing mail for password-reset links and security notifications. These settings apply at once on every core
 (no commit needed). <a href="/config">&larr; cluster config</a></p>
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}

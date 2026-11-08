@@ -639,7 +639,8 @@ dlg.addEventListener('click',function(e){if(e.target===dlg){dlg.close()}});
 })();
 </script>`
 
-const probeManagementHTML = `<h2 id="settings">Probe hosts &amp; settings</h2>
+const probeManagementHTML = `<section class="tab-pane" id="tab-hosts" data-tab="Probe hosts &amp; TLS" data-tab-order="3" data-tab-default>
+<h2 id="settings">Probe hosts &amp; settings</h2>
 <p class="dim">A probe host runs one DHCP check and one DNS check per physical
 interface at a time, each interface on its own, and moves to the next scope as
 soon as a DHCP server has offered a lease. Every scope is therefore checked
@@ -689,13 +690,15 @@ shown in orange as pending.</p>
 {{end}}
 </table></div>{{end}}
 {{else}}<p>None adopted.</p>{{end}}
-<form method="post" action="/nodes/probe/add">
+{{if .NodeProbeHosts}}<p class="dim">A probe host is onboarded. To use a different one, remove this one first; the form to add a probe host then appears here.</p>{{else}}<form method="post" action="/nodes/probe/add">
 <label>Address (host:port): <input type="text" name="addr" placeholder="192.0.2.43:9444"></label><br>
 <label>Join code (read from the probe's own bootstrap console): <input type="password" name="otp" autocomplete="off"></label><br>
 <p class="dim">Trunk coverage is derived automatically from the cluster's own configured worker interfaces — a probe host always covers every one of them, no separate entry needed here.</p>
 <button type="submit">Add probe</button>
-</form>
+</form>{{end}}
 
+</section>
+<section class="tab-pane" id="tab-manual" data-tab="Manual probes" data-tab-order="2">
 <h3 id="manual">Manual probes</h3>
 <p class="dim">Watch an interface for DHCP servers, tagged or untagged, also where no scope is served.
 A DISCOVER is sent and no lease is ever taken. Every DHCP server that answers is listed; click "ack" on one that belongs on
@@ -724,6 +727,8 @@ never accepts a second server.</p>
 {{end}}
 <datalist id="manual-ifaces">{{range .ManualIfaces}}<option value="{{.}}">{{end}}</datalist>
 
+</section>
+<section class="tab-pane" id="tab-history" data-tab="History" data-tab-order="4">
 <h3 id="history">Probe history</h3>
 <p class="dim">The probe host can keep what it finds: every result, or only failures (with a "recovered" line when a failing scope answers again), separately for DHCP and DNS. Manual probes follow the DHCP setting. Off by default. Each record is also written to the probe host's syslog (tag dnshived-probe-history) unless that is switched off here.
 <a href="/probes/history">Open the history</a>.</p>
@@ -742,6 +747,8 @@ never accepts a second server.</p>
 <p><button type="submit">Save history settings</button> <span class="dim">now {{.Size}} on disk{{if .Dropped}}, {{.Dropped}} record(s) dropped because the disk could not keep up{{end}}; applies at once, no restart</span></p>
 </form>{{end}}
 {{end}}
+</section>
+<section class="tab-pane" id="tab-behavior" data-tab="Behavior" data-tab-order="5">
 <h3>Probe behavior settings</h3>
 <form method="post" action="/probes/settings" onsubmit="return confirm('This will stage these probe settings as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">
 <p class="dim">Generic (name, type) DNS queries a probe host runs against
@@ -773,15 +780,19 @@ function addSelectedDNSChecks(){
 <textarea name="default_dns_checks" id="default_dns_checks" rows="3" cols="40">{{.DefaultDNSChecksText}}</textarea></label></p>
 <p><label>probe_interval_ms: <input name="probe_interval_ms" value="{{.ProbeIntervalMS}}"> (0/blank = default 5000ms)</label></p>
 <p><input type="submit" value="Stage probe settings as pending change"></p>
-</form>`
+</form>
+</section>`
 
 var probesTmpl = template.Must(template.New("probes").Parse(`<!doctype html>
 <meta http-equiv="refresh" content="` + fmt.Sprint(probeAutoRefreshSeconds) + `">
 <title>dnshived-web — probes</title>
 ` + styleHTML + `
-<h1>Probes (DNS/DHCP)</h1>
 ` + navHTML + pendingBannerHTML + `
+<h1>Probes (DNS/DHCP)</h1>
+
+<div class="tab-host">
 ` + probeManagementHTML + `
+<section class="tab-pane" id="tab-results" data-tab="Results" data-tab-order="1" data-tab-default>
 <h2 id="results">Results</h2>
 <p>{{.Total}} scope(s), {{.ErrorCount}} error(s){{if .PendingCount}}, <span class="dim">{{.PendingCount}} pending</span>{{end}}{{if .CoverageText}} — <span class="dim">{{.CoverageText}}</span>{{end}} — page {{.Page}}/{{.TotalPages}}
 {{if gt .Page 1}}<a href="/probes?page={{.PrevPage}}#results">prev</a>{{else}}<span class="dim">prev</span>{{end}}
@@ -801,6 +812,8 @@ var probesTmpl = template.Must(template.New("probes").Parse(`<!doctype html>
 <p class="dim">Ages are as of the probe host's own check, not when this page loaded.
 Next auto-refresh: {{.NextRefreshAt}} (every ` + fmt.Sprint(probeAutoRefreshSeconds) + `s) —
 <a href="?page={{.Page}}#results">refresh now</a>.</p>
+</section>
+</div>
 ` + probePopupHTML + `
 `))
 
@@ -808,10 +821,13 @@ Next auto-refresh: {{.NextRefreshAt}} (every ` + fmt.Sprint(probeAutoRefreshSeco
 var noProbeHostTmpl = template.Must(template.New("no-probe-host").Parse(`<!doctype html>
 <title>dnshived-web — probes</title>
 ` + styleHTML + `
-<h1>Probes (DNS/DHCP)</h1>
 ` + navHTML + pendingBannerHTML + `
+<h1>Probes (DNS/DHCP)</h1>
+
 <p class="dim">No probe host configured yet.</p>
+<div class="tab-host">
 ` + probeManagementHTML + `
+</div>
 `))
 
 type probesPageData struct {
@@ -1160,12 +1176,13 @@ func handleProbes(ref *configRef) http.HandlerFunc {
 
 // probeDetailData is one (scope, probe host) pair's full raw probe result.
 type probeDetailData struct {
-	Scope, Worker string
-	FetchError    string
-	Pending       bool
-	Enabled       bool
-	Reachable     bool
-	ProbedAt      string
+	BackHref, BackText string
+	Scope, Worker      string
+	FetchError         string
+	Pending            bool
+	Enabled            bool
+	Reachable          bool
+	ProbedAt           string
 	// ProbeDisabled/ProbeDisabledKnown carry the scope's ACTUAL probe_disabled
 	// config field (fetched separately from the probe result itself).
 	ProbeDisabled      bool
@@ -1277,6 +1294,7 @@ func renderProbeDetail(w http.ResponseWriter, r *http.Request, data probeDetailD
 		}
 		return
 	}
+	data.BackHref, data.BackText = backTarget(r, "/probes", "back to Probes")
 	renderTemplate(w, probeDetailTmpl, data, "probe-detail")
 }
 
@@ -1392,9 +1410,10 @@ func handleProbeRefresh(ref *configRef) http.HandlerFunc {
 var probeDetailTmpl = template.Must(template.New("probe-detail").Parse(`<!doctype html>
 <title>dnshived-web — probe detail</title>
 ` + styleHTML + `
-<h1>Probe detail: {{.Scope}} (from {{.Worker}})</h1>
 ` + navHTML + `
-<p><a href="/probes">&larr; back to Probes</a></p>
+<h1>Probe detail: {{.Scope}} (from {{.Worker}})</h1>
+
+<p><a href="{{.BackHref}}">&larr; {{.BackText}}</a></p>
 <form method="post" action="/probes/{{.Scope}}/{{.Worker}}/refresh">
 <button type="submit">Probe now</button>
 </form>

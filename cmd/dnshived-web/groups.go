@@ -215,8 +215,9 @@ func applyScopeGroupIfAssigned(w http.ResponseWriter, r *http.Request, cfg *WebC
 var scopeGroupListTmpl = template.Must(template.New("groups-list").Parse(`<!doctype html>
 <title>dnshived-web — Scope groups</title>
 ` + styleHTML + `
-<h1>Scope groups</h1>
 ` + navHTML + `
+<h1>Scope groups</h1>
+
 <p class="dim">A named group of scopes with its own
 <a href="/config/dns#templates">Template</a>/<a href="/optionsets">Option
 set</a> assignment — assign once to the group instead of every member
@@ -239,8 +240,9 @@ group, see <a href="/rollout">mass-rollout</a>.</p>
 var scopeGroupEditTmpl = template.Must(template.New("group-edit").Parse(`<!doctype html>
 <title>dnshived-web — Scope group</title>
 ` + styleHTML + `
-<h1>{{if .ID}}Edit{{else}}New{{end}} scope group</h1>
 ` + navHTML + `
+<h1>{{if .ID}}Edit{{else}}New{{end}} scope group</h1>
+
 {{if .Error}}<p class="crit">{{.Error}}</p>{{end}}
 <form method="post">
 <p><label>name <input name="name" value="{{.Name}}" required></label>

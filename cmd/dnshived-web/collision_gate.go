@@ -172,8 +172,9 @@ func applyLinksWithCollisionGate(
 var collisionConfirmTmpl = template.Must(template.New("collision-confirm").Parse(`<!doctype html>
 <title>dnshived-web — existing content found</title>
 ` + styleHTML + `
-<h1>Existing content found</h1>
 ` + navHTML + `
+<h1>Existing content found</h1>
+
 <p class="warn">These fields already have real content — manually set,
 or linked to something else. They're left exactly as-is (kept) unless
 you tick "overwrite" for that one. Nothing has been applied yet.</p>
