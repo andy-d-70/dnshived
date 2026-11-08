@@ -1,52 +1,14 @@
-dnshived (0.9.8.9~dev-18) unstable; urgency=medium
+dnshived (0.9.8.9) unstable; urgency=medium
 
-  * Lab build: web UI redesign (colour contrast, one-row navigation with the
-    current page highlighted, card overview with figures and recent events,
-    tab layouts, line lists with menus, back links to the previous page,
-    stacked tables on a phone); the restore password limit counts a failed
-    guess before the next one runs.
+  * Polished web interface (menu, tabs, overview cards, line lists, back
+    links, themes, phone layout). Probe host runners per interface, manual
+    probes, probe history, HTTPS-only probe API with a pinned certificate.
+    The management interface can serve scopes. Sortable scope list with a
+    menu per scope. Configuration revision with catch-up and outage rules for
+    writes. Fixes: restore password limit, false probe results, "Pin now"
+    401, unreadable buttons.
 
- -- Andreas Dunkl <andreas@dunkl.net>  Sun, 08 Nov 2026 20:00:00 +0100
-
-dnshived (0.9.8.9~dev-15) unstable; urgency=medium
-
-  * Lab build: the probe host runs one DHCP and one DNS runner per interface,
-    manual DHCP watch probes, the management interface can serve scopes (per
-    interface switch), the probe API is pinned at adoption with the plain
-    HTTP port closed, probe history, a sortable scope list with a row menu and
-    probe popup, collapsible topology interfaces and a checked move of all
-    scopes between interfaces.
-
- -- Andreas Dunkl <andreas@dunkl.net>  Sun, 08 Nov 2026 15:00:00 +0100
-
-dnshived (0.9.8.9~dev-4) unstable; urgency=medium
-
-  * Lab build: second configuration hash that also covers the sanity-check and
-    backup settings, used by the Overview, the catch-up and the start check.
-
- -- Andreas Dunkl <andreas@dunkl.net>  Sat, 07 Nov 2026 20:00:00 +0100
-
-dnshived (0.9.8.9~dev-3) unstable; urgency=medium
-
-  * Lab build: outage rules (write quorum, stale-base refusal, configuration
-    verification at start, membership epoch, dnshived --force-standalone),
-    login wait for the first users sync.
-
- -- Andreas Dunkl <andreas@dunkl.net>  Sat, 07 Nov 2026 19:00:00 +0100
-
-dnshived (0.9.8.9~dev-2) unstable; urgency=medium
-
-  * Lab build: config revision on cluster.json, catch-up of a node that missed
-    a commit, replicated documents for the web instances.
-
- -- Andreas Dunkl <andreas@dunkl.net>  Sat, 07 Nov 2026 18:00:00 +0100
-
-dnshived (0.9.8.9~dev-1) unstable; urgency=medium
-
-  * Lab build of the 0.9.8.9 work: replicated documents for the web instances
-    (users with a content hash, probe-host list).
-
- -- Andreas Dunkl <andreas@dunkl.net>  Sat, 07 Nov 2026 17:00:00 +0100
+ -- Andreas Dunkl <andreas@dunkl.net>  Sun, 08 Nov 2026 21:00:00 +0100
 
 dnshived (0.9.8.8) unstable; urgency=medium
 
