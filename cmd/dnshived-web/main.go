@@ -150,6 +150,7 @@ func main() {
 	mux.HandleFunc("POST /probes/manual/ack", requirePermission(store, webauth.PermEditConfig, handleManualProbeAck(ref)))
 	mux.HandleFunc("POST /probes/manual/remove", requirePermission(store, webauth.PermEditConfig, handleManualProbeRemove(ref)))
 	mux.HandleFunc("POST /probes/settings", requirePermission(store, webauth.PermEditConfig, handleProbeSettingsPost(ref)))
+	mux.HandleFunc("POST /probes/dns-checks/lint", requirePermission(store, webauth.PermEditConfig, handleDNSChecksLint()))
 	mux.HandleFunc("POST /probes/pin", requirePermission(store, webauth.PermEditConfig, handleProbePin(*cfgPath, ref)))
 	mux.HandleFunc("POST /probes/pin-now", requirePermission(store, webauth.PermEditConfig, handleProbePinNow(*cfgPath, ref)))
 	mux.HandleFunc("POST /probes/plain-http", requirePermission(store, webauth.PermEditConfig, handleProbePlainHTTP(ref)))

@@ -639,52 +639,55 @@ func TestCheckCoherence_EpochDivergenceOnlyWhenBothStable(t *testing.T) {
 	}
 }
 
-func TestCheckCoherence_ClockSkew(t *testing.T) {
-	skewed := time.Now().Add(-30 * time.Second).UTC().Format(time.RFC3339)
-	rows := []statusRow{
-		{Node: NodeConfig{Name: "core-1"}, Status: nodeStatus{Role: "core-1", NodeID: "n1", ServerTime: skewed}},
-	}
-	warnings := checkCoherence(rows, map[string]tokenInfo{})
-	found := false
-	for _, w := range warnings {
-		if strings.Contains(w, "CLOCK SKEW") {
-			found = true
+func skewWarnings(w []string) []string {
+	var out []string
+	for _, x := range w {
+		if strings.Contains(x, "CLOCK SKEW") {
+			out = append(out, x)
 		}
 	}
-	if !found {
-		t.Errorf("checkCoherence() = %v, want a CLOCK SKEW warning for a 30s-off server_time", warnings)
+	return out
+}
+
+func TestCheckCoherence_ClockSkew(t *testing.T) {
+	clockSkewTracker.reset()
+	skewed := time.Now().Add(-30 * time.Second).UTC().Format(time.RFC3339)
+	row := func() []statusRow {
+		return []statusRow{{Node: NodeConfig{Name: "core-1"}, Status: nodeStatus{Role: "core-1", NodeID: "n1", ServerTime: skewed}}}
+	}
+	if w := skewWarnings(checkCoherence(row(), map[string]tokenInfo{})); len(w) != 0 {
+		t.Fatalf("first reading must not warn yet, got %v", w)
+	}
+	if w := skewWarnings(checkCoherence(row(), map[string]tokenInfo{})); len(w) != 1 {
+		t.Errorf("second reading must warn once, got %v", w)
 	}
 }
 
 func TestCheckCoherence_ClockSkew_UsesFetchedAtNotWallClock(t *testing.T) {
-	fetchedAt := time.Now().Add(-11 * time.Second) // this row's own fetch returned 11s ago
-	serverTime := fetchedAt.UTC().Format(time.RFC3339)
-	rows := []statusRow{
-		{Node: NodeConfig{Name: "core-1"}, Status: nodeStatus{Role: "core-1", NodeID: "n1", ServerTime: serverTime}, FetchedAt: fetchedAt},
-	}
-	warnings := checkCoherence(rows, map[string]tokenInfo{})
-	for _, w := range warnings {
-		if strings.Contains(w, "CLOCK SKEW") {
-			t.Errorf("checkCoherence() = %v, want no CLOCK SKEW warning — server_time matches its own FetchedAt exactly, real wall-clock time moving on since then is irrelevant", warnings)
+	clockSkewTracker.reset()
+	for i := 0; i < 3; i++ {
+		fetchedAt := time.Now().Add(-11*time.Second + time.Duration(i)*time.Millisecond)
+		rows := []statusRow{
+			{Node: NodeConfig{Name: "core-1"}, Status: nodeStatus{Role: "core-1", NodeID: "n1", ServerTime: fetchedAt.UTC().Format(time.RFC3339)}, FetchedAt: fetchedAt},
+		}
+		if w := skewWarnings(checkCoherence(rows, map[string]tokenInfo{})); len(w) != 0 {
+			t.Errorf("reading %d: want no CLOCK SKEW, server_time matches its own FetchedAt, got %v", i, w)
 		}
 	}
 }
 
 func TestCheckCoherence_ClockSkew_StillCaughtRelativeToFetchedAt(t *testing.T) {
-	fetchedAt := time.Now().Add(-11 * time.Second)
-	serverTime := fetchedAt.Add(-30 * time.Second).UTC().Format(time.RFC3339)
-	rows := []statusRow{
-		{Node: NodeConfig{Name: "core-1"}, Status: nodeStatus{Role: "core-1", NodeID: "n1", ServerTime: serverTime}, FetchedAt: fetchedAt},
-	}
-	warnings := checkCoherence(rows, map[string]tokenInfo{})
-	found := false
-	for _, w := range warnings {
-		if strings.Contains(w, "CLOCK SKEW") {
-			found = true
+	clockSkewTracker.reset()
+	var last []string
+	for i := 0; i < 2; i++ {
+		fetchedAt := time.Now().Add(-11*time.Second + time.Duration(i)*time.Millisecond)
+		rows := []statusRow{
+			{Node: NodeConfig{Name: "core-1"}, Status: nodeStatus{Role: "core-1", NodeID: "n1", ServerTime: fetchedAt.Add(-30 * time.Second).UTC().Format(time.RFC3339)}, FetchedAt: fetchedAt},
 		}
+		last = skewWarnings(checkCoherence(rows, map[string]tokenInfo{}, "core-2"))
 	}
-	if !found {
-		t.Errorf("checkCoherence() = %v, want a CLOCK SKEW warning — genuinely 30s off relative to its own FetchedAt", warnings)
+	if len(last) != 1 || !strings.Contains(last[0], "off from core-2") {
+		t.Errorf("want one CLOCK SKEW naming the observer core-2, got %v", last)
 	}
 }
 
@@ -1589,5 +1592,35 @@ func TestStatusTmpl_NodeStateStaysOnOneLine(t *testing.T) {
 	}
 	if !strings.Contains(styleHTML, "td.st{white-space:nowrap}") {
 		t.Error("the one-line state class has no style")
+	}
+}
+
+func TestStatusTmpl_HealthChecksCarryTheFormerDetails(t *testing.T) {
+	render := func(d overviewData) string {
+		var buf bytes.Buffer
+		if err := statusTmpl.Execute(&buf, d); err != nil {
+			t.Fatalf("statusTmpl.Execute failed: %v", err)
+		}
+		return buf.String()
+	}
+	out := render(overviewData{ClusterState: "STABLE", StableSince: "12:00:01", StableFor: "2d 04:03:12", Witness: "healthy", ActiveTokens: 12})
+	for _, want := range []string{
+		"<tr><td>Stable for</td>", ">2d 04:03:12</td>", `title="stable since 12:00:01`,
+		"<tr><td>Witness ", ">healthy · 12 active</td>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("Health checks lack %q", want)
+		}
+	}
+	for _, gone := range []string{"More cluster details", "card-details", "<td>Node IDs</td>", "<td>Tokens</td>"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("the old details block must be gone, found %q", gone)
+		}
+	}
+	if !strings.Contains(render(overviewData{ClusterState: "DEGRADED"}), "<tr><td>Stable for</td><td class=\"dim st\">–</td></tr>") {
+		t.Error("Stable for keeps its row (a dash) while the cluster is not stable, so the card does not change height")
+	}
+	if !strings.Contains(render(overviewData{Witness: "2 expired", ActiveTokens: 10}), ">2 expired · 10 active</td>") {
+		t.Error("expired tokens must show in the Witness value")
 	}
 }

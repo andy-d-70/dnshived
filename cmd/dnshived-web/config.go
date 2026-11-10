@@ -354,7 +354,7 @@ func handleProbeParallelPost(ref *configRef) http.HandlerFunc {
 			pushAudit(node, user.Name, "probe.parallel_probing", summary)
 		}
 
-		http.Redirect(w, r, "/probes#settings", http.StatusSeeOther)
+		http.Redirect(w, r, "/probes#tab-hosts", http.StatusSeeOther)
 	}
 }
 
@@ -1294,16 +1294,17 @@ func nodeAddrLastOctet(nodeAddr string) string {
 	return strconv.Itoa(int(nodeIP4[3]))
 }
 
-// parseDNSCheckLines parses the cluster form's default_dns_checks
-// textarea.
+// parseDNSCheckLines is parseDNSCheckInput with the errors joined into one.
 func parseDNSCheckLines(s string) ([]config.DNSCheck, error) {
-	var checks []config.DNSCheck
-	for _, line := range splitLines(s) {
-		name, typ, ok := strings.Cut(line, "|")
-		if !ok {
-			return nil, fmt.Errorf("%q: expected NAME|TYPE", line)
+	checks, finds := parseDNSCheckInput(s)
+	var msgs []string
+	for _, f := range finds {
+		if f.Level == "error" {
+			msgs = append(msgs, f.Message)
 		}
-		checks = append(checks, config.DNSCheck{Name: strings.TrimSpace(name), Type: strings.ToUpper(strings.TrimSpace(typ))})
+	}
+	if len(msgs) > 0 {
+		return nil, fmt.Errorf("%s", strings.Join(msgs, "; "))
 	}
 	return checks, nil
 }

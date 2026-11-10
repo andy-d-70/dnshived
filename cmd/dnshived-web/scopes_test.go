@@ -1837,3 +1837,40 @@ func TestBuildScopeRows_DisabledScopeShowsDisabled(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildScopeRows_PreferredNodeMarkerAndRebalanceNote(t *testing.T) {
+	rows := []statusRow{
+		{Node: NodeConfig{Name: "core-1"}, Status: nodeStatus{Role: "core-1", Serving: []string{"on", "off", "nopref"}}},
+		{Node: NodeConfig{Name: "core-2"}, Status: nodeStatus{Role: "core-2"}},
+	}
+	configScopes := map[string]config.ScopeConfig{
+		"on":       {VIP: "192.168.1.1/24", PreferredWorker: "core-1"},
+		"off":      {VIP: "192.168.2.1/24", PreferredWorker: "core-2"},
+		"nopref":   {VIP: "192.168.3.1/24"},
+		"unserved": {VIP: "192.168.4.1/24", PreferredWorker: "core-2"},
+		"disabled": {VIP: "192.168.5.1/24", PreferredWorker: "core-2", DNSMasqDisabled: true},
+	}
+	got := map[string]scopeRow{}
+	for _, r := range buildScopeRows(rows, configScopes, nil, nil, nil, nil) {
+		got[r.Name] = r
+	}
+	tests := []struct {
+		name string
+		off  bool
+		note string
+	}{
+		{"on", false, "already on its preferred node"},
+		{"off", true, ""},
+		{"nopref", false, "no preferred worker set for this scope"},
+		{"unserved", false, ""},
+		{"disabled", false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := got[tt.name]
+			if r.OffPreferred != tt.off || r.RebalanceNote != tt.note {
+				t.Errorf("OffPreferred/RebalanceNote = %v/%q, want %v/%q", r.OffPreferred, r.RebalanceNote, tt.off, tt.note)
+			}
+		})
+	}
+}

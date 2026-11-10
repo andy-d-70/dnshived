@@ -35,14 +35,17 @@ type statusRow struct {
 	FetchError string
 	// ViaFallback: this node's mgmt path is down but its status was fetched
 	// over its scope-VLAN fallback address (tunnel).
-	ViaFallback  bool
-	Icon         string
-	Class        string
-	Info         string
-	SysStr       string
-	Nickname     string
-	RoleClass    string
-	FetchedAt    time.Time
+	ViaFallback bool
+	Icon        string
+	Class       string
+	Info        string
+	SysStr      string
+	Nickname    string
+	RoleClass   string
+	FetchedAt   time.Time
+	// FetchStart, when set, opens the window the node's time is checked
+	// against (a cached snapshot spans a whole request).
+	FetchStart   time.Time
 	HoldsMgmtVIP bool
 }
 
@@ -84,16 +87,22 @@ func fetchAllStatus(cfg *WebConfig, nodes []NodeConfig) []statusRow {
 }
 
 func fetchAllStatusViaSnapshot(cfg *WebConfig, nodes []NodeConfig) ([]statusRow, bool) {
-	byAddr, _, ok := resolveClusterSnapshot(cfg, nodes)
+	byAddr, snap, ok := resolveClusterSnapshot(cfg, nodes)
 	if !ok {
 		return nil, false
 	}
+	return statusRowsFromSnapshot(nodes, byAddr, snap), true
+}
 
-	fetchedAt := time.Now()
+func statusRowsFromSnapshot(nodes []NodeConfig, byAddr map[string]clusterSnapshotNode, snap clusterSnapshotResponse) []statusRow {
+	fetchedAt, fetchStart := snap.FetchEnd, snap.FetchStart
+	if fetchedAt.IsZero() {
+		fetchedAt = time.Now()
+	}
 	rows := make([]statusRow, len(nodes))
 	for i, n := range nodes {
 		sn := byAddr[n.Addr]
-		row := statusRow{Node: n, FetchedAt: fetchedAt}
+		row := statusRow{Node: n, FetchedAt: fetchedAt, FetchStart: fetchStart}
 		if sn.Error != "" {
 			row.FetchError = sn.Error
 			if countsAsDeadMsg(sn.Error) {
@@ -127,7 +136,7 @@ func fetchAllStatusViaSnapshot(cfg *WebConfig, nodes []NodeConfig) ([]statusRow,
 		rows[i] = row
 	}
 	computeRowDisplay(rows)
-	return rows, true
+	return rows
 }
 
 // fetchAllStatusLegacy polls every configured node concurrently.
@@ -591,7 +600,7 @@ func coherenceWarningTitle(w string) string {
 	case strings.HasPrefix(w, "EPOCH DIVERGENCE:"):
 		return "The two workers disagree on the cluster's own generation counter while both report STABLE — usually a transient right after a restart or config push; persisting suggests the two nodes are working from genuinely different config."
 	case strings.HasPrefix(w, "CLOCK SKEW:"):
-		return "This node's clock disagrees with another's by more than this check's tolerance — witness-token expiry and VRRP timing both assume reasonably synced clocks across the cluster. Check NTP/chrony on the flagged node."
+		return "The flagged node's reported time differs by more than 5 seconds from this web host's clock, measured against the moment the data was fetched, in two readings in a row. Witness-token expiry and VRRP timing assume synced clocks. Check NTP/chrony on the flagged node; if every node is flagged, check the clock of the host named in the message."
 	case strings.HasPrefix(w, "MEMBERSHIP:"):
 		return "This node's own peer list (cluster.json peers) disagrees with the cluster's current core nodes. A stale entry usually means a decommission never reached this node; a missing one means it was never told about a node that joined. Either way the nodes are no longer working from the same membership: quorum sizing, peer probing and trusted_hosts can all differ between them. Fix the node's peer list rather than waiting, it does not heal on its own."
 	case strings.HasPrefix(w, "TRUNK PATH:"):
@@ -679,6 +688,10 @@ func checkCoherence(rows []statusRow, tokens map[string]tokenInfo, observerName 
 		warnings = append(warnings, fmt.Sprintf("EPOCH DIVERGENCE: %s", strings.Join(parts, " vs ")))
 	}
 
+	skewObserver := "this host"
+	if len(observerName) > 0 && observerName[0] != "" {
+		skewObserver = observerName[0]
+	}
 	for _, row := range rows {
 		if row.FetchError != "" || row.Status.ServerTime == "" {
 			continue
@@ -687,16 +700,13 @@ func checkCoherence(rows []statusRow, tokens map[string]tokenInfo, observerName 
 		if err != nil {
 			continue
 		}
-		now := row.FetchedAt
-		if now.IsZero() {
-			now = time.Now()
+		end := row.FetchedAt
+		if end.IsZero() {
+			end = time.Now()
 		}
-		skew := now.Sub(serverT)
-		if skew < 0 {
-			skew = -skew
-		}
-		if skew > 5*time.Second {
-			warnings = append(warnings, fmt.Sprintf("CLOCK SKEW: %s is %.1fs off from this host", row.Status.NodeID, skew.Seconds()))
+		skew := clockSkewOutside(serverT, row.FetchStart, end)
+		if clockSkewTracker.observe(row.Status.NodeID, end, skew, skewObserver) {
+			warnings = append(warnings, fmt.Sprintf("CLOCK SKEW: %s is %.1fs off from %s", row.Status.NodeID, skew.Seconds(), skewObserver))
 		}
 	}
 
@@ -1238,10 +1248,12 @@ setting once every node is reachable.</strong></p>
 <h2>Health checks</h2>
 <table class="small kv-table">
 <tr><td>State <span class="info-ico" title="the cluster's own quorum/failover state machine: STABLE means every serving decision has settled and held for the required settling window; DEGRADED/GETTING THERE/NOT CONVERGING mean scopes are still starting, rebalancing, or stuck — not necessarily an outage, but worth watching">ⓘ</span></td><td class="{{.ClusterClass}}">{{.ClusterState}}</td></tr>
+<tr><td>Stable for</td><td class="dim st"{{if .StableSince}} title="stable since {{.StableSince}} (this web host's time)"{{end}}>{{if .StableSince}}{{.StableFor}}{{else}}–{{end}}</td></tr>
 <tr><td>Configuration sane <span class="info-ico" title="every node's own real, live-observed state (interfaces, sockets, ...) checked against what's actually configured/intended — separate from State above, which is FSM/quorum health only">ⓘ</span></td><td class="{{.ConfigSaneClass}}"{{if .ConfigSaneTitle}} title="{{.ConfigSaneTitle}}"{{end}}>{{.ConfigSaneText}}</td></tr>
 <tr><td>Interfaces <span class="info-ico" title="physical trunk carrier state (link up/down) per node — a link-down trunk force-closes DHCP for every scope on it">ⓘ</span></td><td class="{{.InterfaceHealthClass}}">{{.InterfaceHealthText}}</td></tr>
 <tr><td>Trunks <span class="info-ico" title="every configured trunk on every stable core: verified once that node has heard a topology beacon from another core on it, assumed while nothing has been heard (the configured interface name is then unconfirmed)">ⓘ</span></td><td class="{{.TrunksClass}}"{{if .TrunksTitle}} title="{{.TrunksTitle}}"{{end}}>{{.TrunksText}}</td></tr>
 <tr><td>Arbiter quorum <span class="info-ico" title="every core node also runs its own arbiter instance since 0.9.8 — a witness grant needs 2 of these 3 to agree, so this is 'who is arbiter now', not a single node">ⓘ</span></td><td class="{{.ArbiterQuorumClass}}">{{.ArbiterQuorumText}}</td></tr>
+<tr><td>Witness <span class="info-ico" title="the time-limited token that authorizes a node to keep a scope's DHCP gate open — renewed continuously while healthy; a node that stops renewing (crash, network loss) has its gate close automatically once its current token expires, which is what actually prevents two nodes serving the same scope at once. Shown: witness state, then how many tokens are active">ⓘ</span></td><td class="st">{{.Witness}} · {{.ActiveTokens}} active</td></tr>
 <tr><td>Daemons <span class="info-ico" title="systemd unit health (dnshived itself, dnsmasq, keepalived, relays, ...) on every node — a daemon issue here is independent of State above: a unit can be unhealthy while the cluster's own quorum/serving logic stays fine, and vice versa">ⓘ</span></td><td class="{{.DaemonSummaryClass}}">{{.DaemonSummary}} <a href="/daemons">details →</a></td></tr>
 </table>
 </section>
@@ -1255,17 +1267,6 @@ setting once every node is reachable.</strong></p>
 {{end}}</ul></div>
 {{else}}<p class="dim">(no events yet)</p>{{end}}
 </section>
-
-<details class="card-details">
-<summary>More cluster details</summary>
-<table class="small kv-table">
-{{if .StableSince}}<tr><td>Stable since</td><td class="dim">{{.StableSince}} ({{.StableFor}} ago)</td></tr>{{end}}
-<tr><td>Node IDs</td><td class="dim">{{.NodeIDsLine}}</td></tr>
-<tr><td>Witness <span class="info-ico" title="the time-limited token that authorizes a node to keep a scope's DHCP gate open — renewed continuously while healthy; a node that stops renewing (crash, network loss) has its gate close automatically once its current token expires, which is what actually prevents two nodes serving the same scope at once">ⓘ</span></td><td>{{.Witness}}</td></tr>
-<tr><td>Tokens</td><td>{{.ActiveTokens}} active, {{.ExpiredTokens}} expired</td></tr>
-<tr><td>Unreachable nodes</td><td>{{.Unreachable}}{{if .UnreachableNames}} ({{.UnreachableNames}}){{end}}</td></tr>
-</table>
-</details>
 
 {{if .PathRows}}
 <dialog id="paths-modal">
@@ -1328,16 +1329,13 @@ setting once every node is reachable.</strong></p>
 `))
 
 type overviewData struct {
-	Rows           []statusRow
-	Mismatch       bool
-	ConfigMismatch bool
-	BannerText     string
-	BannerClass    string
-	ClusterState   string
-	ClusterClass   string
-	// NodeIDsLine shows each reachable core node's role + real control address
-	// (role=ip:port).
-	NodeIDsLine          string
+	Rows                 []statusRow
+	Mismatch             bool
+	ConfigMismatch       bool
+	BannerText           string
+	BannerClass          string
+	ClusterState         string
+	ClusterClass         string
 	Witness              string
 	ArbiterQuorumText    string
 	ArbiterQuorumClass   string
@@ -1485,7 +1483,6 @@ func servingText(serving, configured, disabled, mgmtOnlyDown int) string {
 	return text
 }
 
-// nodeServingRow is one core node's share of the served scopes on the Overview.
 type nodeServingRow struct {
 	Name, Class string
 	Count, Pct  int
@@ -1523,15 +1520,13 @@ func buildServingNodes(rows []statusRow, disabled map[string]bool) []nodeServing
 	return out
 }
 
-// probeFigures are the numbers behind the Overview's Probes card.
 type probeFigures struct {
 	Total, Probed, Pending, Stale, NoCoverage, Unknown int
 	Issues, Rogue, Pct                                 int
 	Class, Meter                                       string
 }
 
-// buildProbeFigures turns the probe coverage and the issue list into the card's
-// numbers. Deliberately switched-off probing is left out of the total.
+// Deliberately switched-off probing is left out of the total.
 func buildProbeFigures(cov probeCoverage, issues []probeIssue) probeFigures {
 	f := probeFigures{
 		Total: cov.Total - cov.ScopeDisabled - cov.Disabled, Probed: cov.Probed, Pending: cov.Pending,
@@ -1563,7 +1558,6 @@ func buildProbeFigures(cov probeCoverage, issues []probeIssue) probeFigures {
 	return f
 }
 
-// pathDigestRow is one line of the Overview's compact path list.
 type pathDigestRow struct {
 	From, To, Trunk, Class, Text string
 	Score                        int
@@ -1616,7 +1610,6 @@ func handleStatus(ref *configRef) http.HandlerFunc {
 		servingScopes := make(map[string]bool)
 		disabledScopes := disabledScopeSet(rows)
 		totalServing := 0
-		var idParts []string
 		for _, row := range rows {
 			if row.FetchError != "" {
 				if mgmtOnlyAddrs[row.Node.Addr] {
@@ -1633,7 +1626,6 @@ func handleStatus(ref *configRef) http.HandlerFunc {
 			if row.Status.State == "STABLE" {
 				stable++
 			}
-			idParts = append(idParts, row.Status.Role+"="+row.Node.Addr)
 			if isCoreRole(row.Status.Role) {
 				for _, sc := range row.Status.ConfiguredScopes {
 					if !disabledScopes[sc] {
@@ -1764,7 +1756,6 @@ func handleStatus(ref *configRef) http.HandlerFunc {
 			BannerClass:          bannerC,
 			ClusterState:         overallState,
 			ClusterClass:         overallClass,
-			NodeIDsLine:          strings.Join(idParts, "  "),
 			Witness:              witness,
 			ArbiterQuorumText:    arbiterQuorumText,
 			ArbiterQuorumClass:   arbiterQuorumClass,

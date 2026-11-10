@@ -26,7 +26,7 @@ to <a href="/security">security &rarr;</a>. Scope VIP preference and
 new-scope defaults moved to
 <a href="/scopes/options">defaults for new scopes &rarr;</a>. Probe
 hosts (add/remove/rename, parallel probing, probe-behavior settings)
-moved to <a href="/probes#settings">probes &rarr;</a>.</p>
+moved to <a href="/probes">probes &rarr;</a>.</p>
 
 <div class="tab-host">
 <form method="post" action="/config" onsubmit="return confirm('This will stage these cluster settings as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">

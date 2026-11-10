@@ -268,7 +268,7 @@ var pinResultTmpl = template.Must(template.New("pin-result").Parse(`<!doctype ht
 <p>Its certificate was proven with the probe's admin token, so nothing had to be compared by hand. The web UI now talks to it over HTTPS only.</p>
 {{if .Rotated}}<p class="ok">The probe's admin token was replaced over the pinned connection. The old token was sent in cleartext while the probe was not pinned and no longer works. Other web instances pick the new token up from the probe-host list within a minute; <code>dnshived-top</code> and <code>dnshived-validate</code> need it too if they use the admin token.</p>
 {{else}}<p class="warn">The admin token was <b>not</b> replaced: {{.RotateErr}}. The old token travelled in cleartext before this pin, so treat it as known to an observer on the network and replace it as soon as possible.</p>{{end}}
-<p><a href="/probes#settings">back to Probes</a></p>`))
+<p><a href="/probes#tab-hosts">back to Probes</a></p>`))
 
 // handleProbePinNow serves POST /probes/pin-now. A probe that proves its
 // fingerprint with the admin token this web UI holds is pinned at once, and
@@ -367,7 +367,7 @@ func handleProbePlainHTTP(ref *configRef) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		http.Redirect(w, r, "/probes#settings", http.StatusSeeOther)
+		http.Redirect(w, r, "/probes#tab-hosts", http.StatusSeeOther)
 	}
 }
 
@@ -416,6 +416,6 @@ func handleProbeCertUpload(cfgPath string, ref *configRef) http.HandlerFunc {
 		}
 		ref.Store(&newCfg)
 		pushAudit(host, user.Name, "probe.tls_upload", fmt.Sprintf("certificate of %s replaced, new fingerprint %s", host.Name, fp))
-		http.Redirect(w, r, "/probes#settings", http.StatusSeeOther)
+		http.Redirect(w, r, "/probes#tab-hosts", http.StatusSeeOther)
 	}
 }

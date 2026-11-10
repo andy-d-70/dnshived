@@ -1,3 +1,14 @@
+dnshived (0.9.8.10~dev-3) unstable; urgency=medium
+
+  * Web UI follow-ups: the clock skew warning no longer fires on cached data,
+    the Health checks card takes over the cluster details, scopes served away
+    from their preferred node are marked, the Rebalance entry is greyed when
+    it cannot apply, the probe DNS checks box accepts the usual spellings and
+    checks input while typing, and the probes page no longer reloads itself
+    and wipes what is typed.
+
+ -- Andreas Dunkl <andreas@dunkl.net>  Tue, 10 Nov 2026 22:00:00 +0100
+
 dnshived (0.9.8.9) unstable; urgency=medium
 
   * Polished web interface (menu, tabs, overview cards, line lists, back

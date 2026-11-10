@@ -351,8 +351,11 @@ func TestParseDNSCheckLines_ParsesAndRejectsMalformed(t *testing.T) {
 	if len(checks) != 2 || checks[0].Name != "example.com." || checks[0].Type != "A" {
 		t.Errorf("checks = %+v", checks)
 	}
-	if _, err := parseDNSCheckLines("no-pipe-here"); err == nil {
-		t.Fatal("expected an error for a line missing '|'")
+	if _, err := parseDNSCheckLines("bad name|A"); err == nil {
+		t.Fatal("expected an error for a name with a space")
+	}
+	if checks, err := parseDNSCheckLines("orf.at"); err != nil || len(checks) != 1 || checks[0].Type != "A" {
+		t.Fatalf("a bare name means A, got %+v, %v", checks, err)
 	}
 }
 

@@ -253,9 +253,8 @@ var daemonsTmpl = template.Must(template.New("daemons").Parse(`<!doctype html>
 `))
 
 type daemonsPageData struct {
-	Rows  []daemonRow
-	Total int
-	// BackHref and BackText lead to the page the operator came from.
+	Rows               []daemonRow
+	Total              int
 	BackHref, BackText string
 }
 

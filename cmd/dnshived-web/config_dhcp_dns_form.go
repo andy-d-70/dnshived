@@ -16,7 +16,7 @@ stages a <a href="/pending">pending change</a> — nothing applies until
 you commit it. Elsewhere: <a href="/config">cluster settings</a>,
 <a href="/security">security</a>, <a href="/backup">maintenance</a>,
 <a href="/config/scopes">scopes</a>, <a href="/scopes/options">scope
-options</a>, <a href="/probes#settings">DNS probe checks</a>.</p>
+options</a>, <a href="/probes#tab-behavior">DNS probe checks</a>.</p>
 
 <div class="tab-host">
 <section class="tab-pane" id="tab-domains" data-tab="Local domains" data-tab-order="4">
@@ -87,7 +87,7 @@ better. Named boilerplate lives under <a href="#templates">Templates</a>
 </form>
 
 <p class="dim">Default DNS probe checks moved to
-<a href="/probes#settings">Probes &rarr;</a> — the checks that DRIVE
+<a href="/probes#tab-behavior">Probes &rarr;</a> — the checks that DRIVE
 probing now live next to the probing RESULTS.</p>
 
 </section>

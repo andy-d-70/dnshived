@@ -127,3 +127,38 @@ func TestHandleProbeDetail_FragmentModeReturnsOnlyTheFragment(t *testing.T) {
 		t.Fatalf("status %d body %q, want the bare fragment", rec.Code, body)
 	}
 }
+
+func TestScopesTmpl_PreferredNodeMarkerKeepsItsSlot(t *testing.T) {
+	out := renderScopes(t, []scopeRow{
+		{Name: "alpha", Display: "alpha", Worker: "core-2", Preferred: "core-1", OffPreferred: true},
+		{Name: "beta", Display: "beta", Worker: "core-1", Preferred: "core-1"},
+	}, false)
+	if got := strings.Count(out, `class="pref-slot"`); got != 2 {
+		t.Errorf("every row keeps the marker slot, got %d slots for 2 rows", got)
+	}
+	if got := strings.Count(out, "&ne;"); got != 1 {
+		t.Errorf("only the off-preferred row shows the marker, got %d", got)
+	}
+	if !strings.Contains(out, `title="not on its preferred node: served by core-2, preferred is core-1"`) {
+		t.Error("the marker needs a tooltip naming both nodes")
+	}
+}
+
+func TestScopesTmpl_RebalanceEntryIsGreyedWithAReason(t *testing.T) {
+	out := renderScopes(t, []scopeRow{
+		{Name: "alpha", Display: "alpha", RebalanceNote: "no preferred worker set for this scope"},
+		{Name: "beta", Display: "beta"},
+	}, false)
+	if strings.Contains(out, `action="/scopes/alpha/rebalance"`) {
+		t.Error("a greyed entry must not carry the form")
+	}
+	if !strings.Contains(out, `title="no preferred worker set for this scope"><button type="button" role="menuitem" disabled`) {
+		t.Error("the greyed entry is a disabled button wrapped in a span with the reason as tooltip")
+	}
+	if !strings.Contains(out, `action="/scopes/beta/rebalance"`) {
+		t.Error("a scope that can rebalance keeps its form")
+	}
+	if !strings.Contains(out, "button:not(:disabled)") {
+		t.Error("the menu's keyboard navigation must skip disabled entries")
+	}
+}

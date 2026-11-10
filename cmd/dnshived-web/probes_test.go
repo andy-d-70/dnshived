@@ -24,7 +24,7 @@ func TestProbesTmpl_RendersWithProbeHostColumns(t *testing.T) {
 		Total:          1,
 		Page:           1,
 		TotalPages:     1,
-		NextRefreshAt:  "12:00:00",
+		UpdatedAt:      "12:00:00",
 		ProbeHostNames: []string{"probe-a", "probe-b"},
 		Rows: []probeRow{
 			{
@@ -51,7 +51,7 @@ func TestProbesTmpl_RendersWithProbeHostColumns(t *testing.T) {
 
 func TestProbesTmpl_SettingsRenderAboveResults(t *testing.T) {
 	data := probesPageData{
-		Total: 1, Page: 1, TotalPages: 1, NextRefreshAt: "12:00:00",
+		Total: 1, Page: 1, TotalPages: 1, UpdatedAt: "12:00:00",
 		ProbeHostNames: []string{"probe-a"},
 		Rows:           []probeRow{{Scope: "office", ProbeHostCells: []probeCellData{{DNSText: "DNS✔", DNSClass: "ok"}}}},
 	}
@@ -72,7 +72,7 @@ func TestProbesTmpl_SettingsRenderAboveResults(t *testing.T) {
 
 func TestProbesTmpl_RendersErrorCount(t *testing.T) {
 	data := probesPageData{
-		Total: 3, ErrorCount: 2, Page: 1, TotalPages: 1, NextRefreshAt: "12:00:00",
+		Total: 3, ErrorCount: 2, Page: 1, TotalPages: 1, UpdatedAt: "12:00:00",
 	}
 	var buf bytes.Buffer
 	if err := probesTmpl.Execute(&buf, data); err != nil {

@@ -751,10 +751,12 @@ never accepts a second server.</p>
 <section class="tab-pane" id="tab-behavior" data-tab="Behavior" data-tab-order="5">
 <h3>Probe behavior settings</h3>
 <form method="post" action="/probes/settings" onsubmit="return confirm('This will stage these probe settings as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">
-<p class="dim">Generic (name, type) DNS queries a probe host runs against
-every scope, in addition to any scope-specific/global records — one
-<code>NAME|TYPE</code> pair per line. Blank = built-in default
-(claude.ai./A).</p>
+<p class="dim">Extra DNS queries a probe host runs against every scope, on top
+of any scope-specific/global records, one per line: <code>NAME|TYPE</code>,
+for example <code>claude.ai.|A</code>; <code>orf.at/A</code> and
+<code>orf.at A</code> work too. Types: A, AAAA, CNAME, PTR, TXT, MX, SRV, NAPTR,
+CAA. Blank = built-in default (<code>claude.ai.|A</code>); once you list any
+check, only your list is used.</p>
 {{if .GlobalDNSNames}}<p><select id="dns_check_quick_add" multiple size="6">
 {{range .GlobalDNSNames}}<option value="{{.Name}}|{{.Type}}">{{.Name}} ({{.Type}})</option>{{end}}
 </select>
@@ -773,32 +775,49 @@ function addSelectedDNSChecks(){
     if(o.value !== '' && have.indexOf(o.value) === -1){ have.push(o.value); }
   });
   ta.value = have.filter(function(l){ return l !== ''; }).join("\n");
+  ta.dispatchEvent(new Event('input'));
 }
 </script>
 {{end}}
 <p><label>Default DNS probe checks:<br>
 <textarea name="default_dns_checks" id="default_dns_checks" rows="3" cols="40">{{.DefaultDNSChecksText}}</textarea></label></p>
+<p id="dnscheck_status" class="lint-slot dim" aria-live="polite"></p>
+<script>
+(function(){
+  var ta=document.getElementById('default_dns_checks'), st=document.getElementById('dnscheck_status');
+  if(!ta||!st) return;
+  var timer=null, seq=0;
+  function show(cls, text, title){ st.className='lint-slot '+cls; st.textContent=text; st.title=title||''; }
+  function run(){
+    var my=++seq;
+    if(ta.value.trim()===''){ show('dim','blank: the built-in default (claude.ai.|A) is used',''); return; }
+    fetch('/probes/dns-checks/lint',{method:'POST',body:new URLSearchParams({text:ta.value})})
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(my!==seq) return;
+        var errs=d.findings.filter(function(f){return f.level==='error';});
+        var warns=d.findings.filter(function(f){return f.level!=='error';});
+        var all=d.findings.map(function(f){ return (f.line?'line '+f.line+': ':'')+f.message; });
+        var pick=errs.length?errs:warns;
+        if(!pick.length){ show('ok', d.count+' check'+(d.count===1?'':'s')+' OK', ''); return; }
+        var f=pick[0];
+        show(errs.length?'crit':'warn', (f.line?'line '+f.line+': ':'')+f.message+(pick.length>1?' (+'+(pick.length-1)+' more)':''), all.join('\n'));
+      })
+      .catch(function(){ if(my===seq) show('dim','could not check right now; the save checks it again',''); });
+  }
+  ta.addEventListener('input',function(){ clearTimeout(timer); timer=setTimeout(run,300); });
+  run();
+})();
+</script>
 <p><label>probe_interval_ms: <input name="probe_interval_ms" value="{{.ProbeIntervalMS}}"> (0/blank = default 5000ms)</label></p>
 <p><input type="submit" value="Stage probe settings as pending change"></p>
 </form>
 </section>`
 
-var probesTmpl = template.Must(template.New("probes").Parse(`<!doctype html>
-<meta http-equiv="refresh" content="` + fmt.Sprint(probeAutoRefreshSeconds) + `">
-<title>dnshived-web — probes</title>
-` + styleHTML + `
-` + navHTML + pendingBannerHTML + `
-<h1>Probes (DNS/DHCP)</h1>
-
-<div class="tab-host">
-` + probeManagementHTML + `
-<section class="tab-pane" id="tab-results" data-tab="Results" data-tab-order="1" data-tab-default>
-<h2 id="results">Results</h2>
-<p>{{.Total}} scope(s), {{.ErrorCount}} error(s){{if .PendingCount}}, <span class="dim">{{.PendingCount}} pending</span>{{end}}{{if .CoverageText}} — <span class="dim">{{.CoverageText}}</span>{{end}} — page {{.Page}}/{{.TotalPages}}
+var probesTmpl = template.Must(template.New("probes").Parse(`` + probeCellDefineHTML + `{{define "probe-results-body"}}<p>{{.Total}} scope(s), {{.ErrorCount}} error(s){{if .PendingCount}}, <span class="dim">{{.PendingCount}} pending</span>{{end}}{{if .CoverageText}} — <span class="dim">{{.CoverageText}}</span>{{end}} — page {{.Page}}/{{.TotalPages}}
 {{if gt .Page 1}}<a href="/probes?page={{.PrevPage}}#results">prev</a>{{else}}<span class="dim">prev</span>{{end}}
 {{if lt .Page .TotalPages}}<a href="/probes?page={{.NextPage}}#results">next</a>{{end}}
 </p>
-` + probeCellDefineHTML + `
 <table border="1" cellpadding="4" cellspacing="0">
 <tr><th>Scope</th>{{range .ProbeHostNames}}<th>from {{.}}</th>{{end}}</tr>
 {{range .Rows}}
@@ -810,11 +829,70 @@ var probesTmpl = template.Must(template.New("probes").Parse(`<!doctype html>
 </table>
 {{if eq .Total 0}}<p class="dim">(no scopes configured)</p>{{end}}
 <p class="dim">Ages are as of the probe host's own check, not when this page loaded.
-Next auto-refresh: {{.NextRefreshAt}} (every ` + fmt.Sprint(probeAutoRefreshSeconds) + `s) —
+Updated {{.UpdatedAt}}, refreshes every ` + fmt.Sprint(probeAutoRefreshSeconds) + `s while this tab is open —
 <a href="?page={{.Page}}#results">refresh now</a>.</p>
+{{end}}<!doctype html>
+<title>dnshived-web — probes</title>
+` + styleHTML + `
+` + navHTML + pendingBannerHTML + `
+<h1>Probes (DNS/DHCP)</h1>
+
+<div class="tab-host">
+` + probeManagementHTML + `
+<section class="tab-pane" id="tab-results" data-tab="Results" data-tab-order="1" data-tab-default>
+<h2 id="results">Results</h2>
+<div id="probe-results" data-page="{{.Page}}" data-seconds="` + fmt.Sprint(probeAutoRefreshSeconds) + `">{{template "probe-results-body" .}}</div>
+<script>
+(function(){
+  var box=document.getElementById('probe-results'), pane=document.getElementById('tab-results');
+  if(!box||!pane) return;
+  var secs=+box.getAttribute('data-seconds')||20, last=Date.now(), busy=false;
+  function selected(){ var s=window.getSelection&&window.getSelection(); return !!(s&&!s.isCollapsed&&box.contains(s.anchorNode)); }
+  function due(){
+    if(busy||document.hidden||!pane.classList.contains('active')) return false;
+    if(document.querySelector('dialog[open]')||selected()) return false;
+    return Date.now()-last>=secs*1000-500;
+  }
+  function refresh(){
+    if(!due()) return;
+    busy=true;
+    fetch('/probes?fragment=results&page='+encodeURIComponent(box.getAttribute('data-page')),{credentials:'same-origin'})
+      .then(function(r){ if(!r.ok||r.headers.get('X-Probe-Fragment')!=='1') throw 0; return r.text(); })
+      .then(function(t){ if(!document.querySelector('dialog[open]')&&!selected()){ box.innerHTML=t; } last=Date.now(); })
+      .catch(function(){})
+      .then(function(){ busy=false; });
+  }
+  setInterval(refresh,1000);
+  document.addEventListener('visibilitychange',refresh);
+})();
+</script>
 </section>
 </div>
 ` + probePopupHTML + `
+`))
+
+type probeChecksErrData struct {
+	Pending    bool
+	Findings   []dnsCheckFinding
+	Text       string
+	IntervalMS string
+}
+
+// probeChecksErrTmpl is the page a refused save of the DNS checks shows: the
+// reasons per line and the typed text, so nothing has to be retyped.
+var probeChecksErrTmpl = template.Must(template.New("probe-checks-err").Parse(`<!doctype html>
+<title>dnshived-web — probes</title>
+` + styleHTML + `
+` + navHTML + pendingBannerHTML + `
+<h1>Probe checks: please fix</h1>
+<p class="crit">Nothing was saved.</p>
+<ul>{{range .Findings}}{{if eq .Level "error"}}<li>{{if .Line}}line {{.Line}}: {{end}}{{.Message}}</li>{{end}}{{end}}</ul>
+<form method="post" action="/probes/settings">
+<p><label>Default DNS probe checks:<br>
+<textarea name="default_dns_checks" rows="6" cols="60">{{.Text}}</textarea></label></p>
+<input type="hidden" name="probe_interval_ms" value="{{.IntervalMS}}">
+<p><input type="submit" value="Stage probe settings as pending change"> <a href="/probes#tab-behavior">back to probes</a></p>
+</form>
 `))
 
 // noProbeHostTmpl is the page shown when zero probe hosts are configured.
@@ -837,12 +915,12 @@ type probesPageData struct {
 	PendingCount int
 	// CoverageText is the same "probed N of M" convergence clause Overview
 	// shows.
-	CoverageText  string
-	Page          int
-	TotalPages    int
-	PrevPage      int
-	NextPage      int
-	NextRefreshAt string
+	CoverageText string
+	Page         int
+	TotalPages   int
+	PrevPage     int
+	NextPage     int
+	UpdatedAt    string
 	// ProbeHostNames: configured external probe hosts' display names, in the
 	// same order as each Row's ProbeHostCells.
 	ProbeHostNames []string
@@ -1047,12 +1125,22 @@ type noProbeHostPageData struct {
 func handleProbes(ref *configRef) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := ref.Load()
-		c, node, isPending, err := currentEditableConfig(nodesIncludingSelf(cfg))
-		if err != nil {
-			http.Error(w, "could not read config from any node: "+err.Error(), http.StatusBadGateway)
+		fragment := r.URL.Query().Get("fragment") == "results"
+		if fragment && len(cfg.ProbeHosts) == 0 {
+			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		mgmt := buildProbeManagementData(c, node, cfg.ProbeHosts)
+		var mgmt probeManagementData
+		var isPending bool
+		if !fragment {
+			c, node, pending, err := currentEditableConfig(nodesIncludingSelf(cfg))
+			if err != nil {
+				http.Error(w, "could not read config from any node: "+err.Error(), http.StatusBadGateway)
+				return
+			}
+			isPending = pending
+			mgmt = buildProbeManagementData(c, node, cfg.ProbeHosts)
+		}
 
 		if len(cfg.ProbeHosts) == 0 {
 			renderTemplate(w, noProbeHostTmpl, noProbeHostPageData{Pending: isPending, probeManagementData: mgmt}, "probes")
@@ -1165,7 +1253,7 @@ func handleProbes(ref *configRef) http.HandlerFunc {
 			TotalPages:          totalPages,
 			PrevPage:            page - 1,
 			NextPage:            page + 1,
-			NextRefreshAt:       renderNow.Add(probeAutoRefreshSeconds * time.Second).Format("15:04:05"),
+			UpdatedAt:           renderNow.Format("15:04:05"),
 			ProbeHostNames:      probeHostNames,
 			Pending:             isPending,
 			probeManagementData: mgmt,
@@ -1326,10 +1414,16 @@ func handleProbeSettingsPost(ref *configRef) http.HandlerFunc {
 			http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		defaultChecks, err := parseDNSCheckLines(r.PostForm.Get("default_dns_checks"))
-		if err != nil {
-			http.Error(w, "bad input: "+err.Error(), http.StatusBadRequest)
-			return
+		typed := r.PostForm.Get("default_dns_checks")
+		defaultChecks, finds := parseDNSCheckInput(typed)
+		for _, f := range finds {
+			if f.Level == "error" {
+				w.WriteHeader(http.StatusBadRequest)
+				renderTemplate(w, probeChecksErrTmpl, probeChecksErrData{
+					Findings: finds, Text: typed, IntervalMS: strings.TrimSpace(r.PostForm.Get("probe_interval_ms")),
+				}, "probe checks")
+				return
+			}
 		}
 		probeMS, _ := strconv.Atoi(r.PostForm.Get("probe_interval_ms"))
 
@@ -1344,7 +1438,7 @@ func handleProbeSettingsPost(ref *configRef) http.HandlerFunc {
 		payload.ProbeIntervalMS = probeMS
 
 		user, _ := userFromContext(r)
-		pushCandidateAndRenderResult(w, cfg, payload, user, "/probes#settings", "back to probes")
+		pushCandidateAndRenderResult(w, cfg, payload, user, "/probes#tab-behavior", "back to probes")
 	}
 }
 

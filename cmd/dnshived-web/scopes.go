@@ -35,6 +35,13 @@ type scopeRow struct {
 	// [IoT]" when flagged (see scopeDisplayName).
 	Display string
 	Worker  string
+	// Preferred is the scope's preferred_worker; OffPreferred is true when a
+	// different core serves it right now.
+	Preferred    string
+	OffPreferred bool
+	// RebalanceNote, when set, is why "Rebalance to preferred core" is
+	// greyed out for this scope.
+	RebalanceNote string
 	// WorkerClass is the same worker-identity color topology.go's own
 	// roleClass() uses everywhere else.
 	WorkerClass string
@@ -98,7 +105,7 @@ menus.forEach(function(m){
  m.addEventListener('mouseleave',function(){if(m.open){clear();timer=setTimeout(function(){m.removeAttribute('open')},DELAY)}});
  m.addEventListener('mouseenter',clear);
  m.addEventListener('keydown',function(e){
-  var items=Array.prototype.slice.call(list.querySelectorAll('a,button')),i=items.indexOf(document.activeElement);
+  var items=Array.prototype.slice.call(list.querySelectorAll('a,button:not(:disabled)')),i=items.indexOf(document.activeElement);
   if(e.key==='Escape'){m.removeAttribute('open');m.querySelector('summary').focus()}
   else if(e.key==='ArrowDown'){e.preventDefault();(items[i+1]||items[0]).focus()}
   else if(e.key==='ArrowUp'){e.preventDefault();(items[i-1]||items[items.length-1]).focus()}
@@ -135,7 +142,7 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
 {{range .Rows}}
 <tr>
   <td style="white-space:nowrap">{{if .Color}}<span class="name-dot" style="background:{{.Color}}" title="color tag — change on the scope's own edit page"></span>{{end}}<a href="/scopes/{{.Name}}">{{.Display}}</a>{{if .PendingDelete}} <span class="crit" title="a pending change stages this scope's removal — still live and served until you commit from Pending changes">marked for deletion</span>{{end}}</td>
-  <td class="{{.WorkerClass}}">{{.Worker}}</td>
+  <td class="{{.WorkerClass}}">{{.Worker}}<span class="pref-slot">{{if .OffPreferred}}<span class="warn" title="not on its preferred node: served by {{.Worker}}, preferred is {{.Preferred}}">&ne;</span>{{end}}</span></td>
   <td title="{{.Worker}}'s trunk NIC ({{.ParentInterface}}), VLAN-tagged for this scope">{{.Interface}}</td>
   <td>{{.VLANID}}</td>
   <td>{{.Subnet}}</td>
@@ -147,7 +154,8 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
   <div class="row-menu-list" role="menu">
   <a role="menuitem" href="/scopes/{{.Name}}">Open / edit</a>
   <form method="post" action="/scopes/{{.Name}}/toggle-disabled" onsubmit="return confirm('This will stage a pending change on every configured node ({{if .Disabled}}enable{{else}}disable{{end}} scope {{.Name}}) — nothing is applied until you commit from Pending changes. {{if not .Disabled}}DHCP, DNS and probing stop for this scope; the VIP and VRRP are released; the VLAN interface and node addresses stay up.{{end}} Continue?')"><button type="submit" role="menuitem">{{if .Disabled}}Enable{{else}}Disable{{end}}</button></form>
-  <form method="post" action="/scopes/{{.Name}}/rebalance" onsubmit="return confirm('Approve a rebalance of scope {{.Name}} to its preferred core? This stages the approval as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')"><button type="submit" role="menuitem">Rebalance to preferred core</button></form>
+  {{if .RebalanceNote}}<span class="menu-off" title="{{.RebalanceNote}}"><button type="button" role="menuitem" disabled aria-disabled="true">Rebalance to preferred core</button></span>
+  {{else}}<form method="post" action="/scopes/{{.Name}}/rebalance" onsubmit="return confirm('Approve a rebalance of scope {{.Name}} to its preferred core? This stages the approval as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')"><button type="submit" role="menuitem">Rebalance to preferred core</button></form>{{end}}
   <form method="post" action="/scopes/{{.Name}}/delete" onsubmit="return confirm('Really delete scope {{.Name}}? This stages its removal as a pending change on every configured node — nothing is torn down until you commit from Pending changes. Continue?')"><button type="submit" role="menuitem" class="danger">Delete&hellip;</button></form>
   </div></details>
   </td>
@@ -222,6 +230,9 @@ func buildScopeRows(rows []statusRow, configScopes map[string]config.ScopeConfig
 			row.Worker, row.WorkerClass = "—", "dim"
 			row.Token, row.Status, row.Class = "—", "not served", "dim"
 		}
+		row.Preferred = cfgSc.PreferredWorker
+		row.OffPreferred = !row.Disabled && row.Preferred != "" && isCoreRole(row.Worker) && row.Worker != row.Preferred
+		row.RebalanceNote = rebalanceNote(row.Preferred, row.Worker)
 		if row.Disabled {
 			row.Status, row.Class = "disabled", "warn"
 			row.StatusTitle = "this scope is disabled: DHCP and DNS stopped, probing off; the VIP and VRRP are released, the VLAN interface and node addresses stay up — enable to serve again"
@@ -230,6 +241,16 @@ func buildScopeRows(rows []statusRow, configScopes map[string]config.ScopeConfig
 	}
 	sort.Slice(scopes, func(i, j int) bool { return scopes[i].Name < scopes[j].Name })
 	return scopes
+}
+
+func rebalanceNote(preferred, serving string) string {
+	switch {
+	case preferred == "":
+		return "no preferred worker set for this scope"
+	case preferred == serving:
+		return "already on its preferred node"
+	}
+	return ""
 }
 
 func handleScopes(ref *configRef) http.HandlerFunc {
@@ -557,7 +578,6 @@ document.addEventListener('DOMContentLoaded', function(){
 });
 </script>`
 
-// renderScopeDetail fills the back link with the page the operator came from.
 func renderScopeDetail(w http.ResponseWriter, r *http.Request, data scopeDetailData) {
 	data.BackHref, data.BackText = backTarget(r, "/scopes", "back to scopes")
 	renderTemplate(w, scopeDetailTmpl, data, "scope-detail")
@@ -655,9 +675,9 @@ var scopeDetailTmpl = template.Must(template.New("scope-detail").Parse(`<!doctyp
 <input type="number" name="vlan_id" min="0" max="4094" value="{{.EditScope.VLANID}}" required title="VLAN ID on the chosen parent (0 = untagged)">
 <button type="submit">Move scope to this parent and VLAN</button>
 </form>
-<form method="post" action="/scopes/{{.Scope}}/rebalance" style="display:inline" onsubmit="return confirm('Approve a rebalance to the preferred core ({{.EditScope.PreferredWorker}}) for scope {{.Scope}}? This stages the approval as a pending change on every configured node — nothing moves until you commit from Pending changes, and even then only once {{.EditScope.PreferredWorker}} is confirmed alive and stable. Continue?')" title="a scope never moves back to its preferred core automatically while a different node is already serving it correctly — this explicitly approves doing so now">
+{{if .EditScope.PreferredWorker}}<form method="post" action="/scopes/{{.Scope}}/rebalance" style="display:inline" onsubmit="return confirm('Approve a rebalance to the preferred core ({{.EditScope.PreferredWorker}}) for scope {{.Scope}}? This stages the approval as a pending change on every configured node — nothing moves until you commit from Pending changes, and even then only once {{.EditScope.PreferredWorker}} is confirmed alive and stable. Continue?')" title="a scope never moves back to its preferred core automatically while a different node is already serving it correctly — this explicitly approves doing so now">
 <button type="submit">Rebalance to preferred ({{.EditScope.PreferredWorker}}) now</button>
-</form>
+</form>{{else}}<button type="button" disabled title="no preferred worker set for this scope">Rebalance to preferred core</button>{{end}}
 <form method="post" action="/scopes/{{.Scope}}/delete" style="display:inline" onsubmit="return confirm('Really delete scope {{.Scope}}? This stages its removal as a pending change on every configured node — nothing is torn down until you commit from Pending changes, and the interface/dnsmasq unit only actually stop on the next daemon restart. Continue?')">
 <button type="submit" class="btn-danger">Delete this scope</button>
 </form>
@@ -1459,6 +1479,10 @@ func handleScopeRebalance(ref *configRef) http.HandlerFunc {
 		sc, ok := c.Scopes[scope]
 		if !ok {
 			http.Error(w, "scope not present in cluster config: "+scope, http.StatusNotFound)
+			return
+		}
+		if sc.PreferredWorker == "" {
+			http.Error(w, "scope "+scope+" has no preferred worker, so there is nothing to rebalance to", http.StatusConflict)
 			return
 		}
 

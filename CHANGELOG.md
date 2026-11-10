@@ -1,5 +1,20 @@
 # dnshived Changelog
 
+## Unreleased
+
+**Changed**
+
+- Overview: the "More cluster details" block is gone. Its rows now sit in the Health checks card: how long the cluster has been stable under State, the witness and the token counts under Arbiter quorum. The node list with addresses stays in the tooltip of each node name.
+- Scope list: a scope that is served by a node other than its preferred worker gets a marker, with a tooltip naming both nodes. The "Rebalance" entry in the scope menu is greyed out for a scope without a preferred worker or already on it, and the server refuses a rebalance for a scope without a preferred worker.
+
+**Fixed**
+
+- The "CLOCK SKEW" warning could appear for all nodes at once with the same value, with no clock involved: the page compared a node's time with the moment the page was drawn, but the node data could be a few seconds old. The check now compares against the moment the data was actually fetched, needs two fresh readings in a row, names the node it compares against, and writes a line to the journal when it is raised and when it clears.
+- Probes, Behavior: the DNS checks box explained its format with a slash example (`claude.ai./A`) but only accepted `NAME|TYPE`, and a wrong line ended in a bare error page that threw the typed text away. The box now accepts `orf.at|A`, `orf.at/A` and `orf.at A` (a name alone means A), checks every line while you type (name shape, supported record type, repeated lines, at most 100 checks) and, when a save fails, shows each bad line with the reason and keeps your text. The type `RAW`, which the probe can never query, is refused for checks. Names with non-ASCII characters have to be written in punycode (`xn--`).
+- Probes: the page no longer reloads itself every 20 seconds. The reload wiped what was typed on Behavior and Manual probes and, in Firefox, dropped the open tab. Only the results table is refreshed in place now, and only while the Results tab is open, the page is visible and nothing in it is selected or open in a popup. A tab you leave and come back to is remembered, also after a reload without a fragment.
+- Links and redirects to `/probes#settings` landed on "Probe hosts & TLS": the DNS probe check links and saving the Behavior settings now land on Behavior, the probe host and certificate actions on "Probe hosts & TLS". The Pending changes button keeps its width when the marker appears. Closing a result dialog asks before reloading when a field on the page has unsaved text.
+- A malformed fragment in the address (for example `#%E0%A4%A`) left every tab pane hidden.
+
 ## 0.9.8.9 — released
 
 Polished web interface, and the probe host, the cluster configuration and the web UI got new features.

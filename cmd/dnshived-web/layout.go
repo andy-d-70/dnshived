@@ -168,6 +168,19 @@ function showLogModal(title, url, linkEl){
   return false;
 }
 
+// dnshivedReloadUnlessEdited reloads after a result dialog closes, but asks first
+// when a field outside the submitted form holds text that was never saved.
+function dnshivedReloadUnlessEdited(form){
+  var edited=false;
+  document.querySelectorAll('input,textarea,select').forEach(function(el){
+    if(edited||(form&&form.contains(el))||el.type==='hidden'||el.type==='submit'||el.type==='button') return;
+    if(el.tagName==='SELECT'){ for(var i=0;i<el.options.length;i++){ if(el.options[i].selected!==el.options[i].defaultSelected) edited=true; } }
+    else if(el.type==='checkbox'||el.type==='radio'){ if(el.checked!==el.defaultChecked) edited=true; }
+    else if(el.value!==el.defaultValue){ edited=true; }
+  });
+  if(!edited||confirm('This page has changes you have not saved. Reload anyway?')) location.reload();
+}
+
 // submitFormInModal POSTs the form via fetch, shows the plain-text result
 // in the log modal and reloads the page on close.
 function submitFormInModal(form, title){
@@ -181,7 +194,7 @@ function submitFormInModal(form, title){
   }).catch(function(e){
     document.getElementById('log-modal-body').textContent='request failed: '+e;
   });
-  dlg.addEventListener('close', function(){ location.reload(); }, {once:true});
+  dlg.addEventListener('close', function(){ dnshivedReloadUnlessEdited(form); }, {once:true});
   return false;
 }
 
@@ -207,7 +220,7 @@ function submitFormAsConsole(form, title, steps){
     clearInterval(timer);
     body.textContent = steps.join('\n') + '\n\nrequest failed: '+e;
   });
-  dlg.addEventListener('close', function(){ location.reload(); }, {once:true});
+  dlg.addEventListener('close', function(){ dnshivedReloadUnlessEdited(form); }, {once:true});
   return false;
 }
 </script>`
@@ -227,7 +240,7 @@ const navHTML = `<div class="nav-outer">
 <a href="/config" class="nav-item" title="nodes, interfaces, cluster-wide settings" data-match="/config"><span class="nav-name">Cluster settings</span></a>
 <a href="/logs" class="nav-item" title="system log, audit log, daemons" data-match="/logs,/audit,/daemons"><span class="nav-name">Logs</span></a>
 </nav>
-<a href="/pending" class="nav-item nav-pending-btn" title="review and commit staged changes" data-match="/pending"><span class="nav-name">Pending changes<span id="pending-marker" title="a change is staged and waiting to be committed" style="display:none;margin-left:.3rem">&#9679;</span></span></a>
+<a href="/pending" class="nav-item nav-pending-btn" title="review and commit staged changes" data-match="/pending"><span class="nav-name">Pending changes<span id="pending-marker" title="a change is staged and waiting to be committed" style="visibility:hidden;margin-left:.3rem">&#9679;</span></span></a>
 <button type="button" id="theme_switcher" class="nav-theme-select" onclick="dnshivedCycleTheme()" title="color scheme — click to cycle">Normal</button>
 <form method="post" action="/logout" style="margin:0;display:flex"><button type="submit" class="nav-theme-select" title="end this web-UI session">Log out</button></form>
 </div>
@@ -237,9 +250,9 @@ function pollPendingMarker(){
     var m=document.getElementById('pending-marker');
     if(d.hasChanges){
       m.className='warn';
-      m.style.display='inline';
+      m.style.visibility='visible';
     }else{
-      m.style.display='none';
+      m.style.visibility='hidden';
     }
   }).catch(function(){});
 }
@@ -278,7 +291,8 @@ function dnshivedApplyTheme(t){
 // this script all panes simply stay visible. A hash such as #discovered opens the
 // pane that holds that element; an invalid field in a hidden pane opens its pane.
 function dnshivedInitTabs(){
-  document.querySelectorAll('.tab-host').forEach(function(host){
+  document.querySelectorAll('.tab-host').forEach(function(host,hostIndex){
+    var tabKey='dnshived-tab:'+location.pathname+':'+hostIndex;
     var panes=[].slice.call(host.querySelectorAll('.tab-pane[data-tab]'));
     var extra=[];
     try{ extra=JSON.parse(host.getAttribute('data-extra-tabs')||'[]'); }catch(e){}
@@ -306,6 +320,7 @@ function dnshivedInitTabs(){
       b.onclick=function(){
         show(p);
         try{ if(p.id) history.replaceState(null,'','#'+p.id); }catch(e){}
+        try{ if(p.id) sessionStorage.setItem(tabKey,p.id); }catch(e){}
       };
       strip.appendChild(b);
       btns.push(b);
@@ -320,7 +335,8 @@ function dnshivedInitTabs(){
     host.insertBefore(strip,host.firstChild);
     host.classList.add('tabs-ready');
     function fromHash(){
-      var id=decodeURIComponent(location.hash.slice(1));
+      var id=location.hash.slice(1);
+      try{ id=decodeURIComponent(id); }catch(e){}
       if(!id) return null;
       var el=document.getElementById(id);
       if(!el) return null;
@@ -329,7 +345,13 @@ function dnshivedInitTabs(){
     }
     var h=fromHash();
     var first=panes.filter(function(p){return p.hasAttribute('data-tab-default');})[0]||panes[0];
-    show(h?h.p:first);
+    var start=h?h.p:first;
+    if(!h){
+      var saved='', nav=performance.getEntriesByType&&performance.getEntriesByType('navigation')[0];
+      try{ if(nav&&(nav.type==='reload'||nav.type==='back_forward')) saved=sessionStorage.getItem(tabKey)||''; }catch(e){}
+      for(var k=0;k<panes.length;k++){ if(saved&&panes[k].id===saved) start=panes[k]; }
+    }
+    show(start);
     if(h&&h.el!==h.p) h.el.scrollIntoView();
     window.addEventListener('hashchange',function(){var n=fromHash(); if(n) show(n.p);});
     host.addEventListener('invalid',function(e){
@@ -597,7 +619,6 @@ td.ver{white-space:nowrap;font-size:.8rem}
 td.st{white-space:nowrap}
 .events li{padding:.3rem 0;overflow-wrap:anywhere}
 .ev-time{white-space:nowrap;margin-right:.3rem}
-details.card-details{padding:.05rem 1rem}
 .card-wide{margin:0 0 1rem}
 .meter{display:block;height:.55rem;background:var(--border);border-radius:4px;overflow:hidden;margin:.35rem 0 .5rem}
 .meter>i{display:block;height:100%;background:var(--ok)}
@@ -682,6 +703,11 @@ border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.2);padding:.3rem}
 border:0;border-radius:5px;background:transparent;color:var(--text);font:inherit;text-decoration:none;cursor:pointer}
 .row-menu-list a:hover,.row-menu-list button:hover,.row-menu-list a:focus,.row-menu-list button:focus{background:var(--head);outline:none}
 .row-menu-list .danger{color:var(--crit)}
+.row-menu-list .menu-off{display:block}
+.row-menu-list button:disabled{opacity:.5;cursor:not-allowed}
+.row-menu-list button:disabled:hover{background:transparent}
+.lint-slot{min-height:1.4em;margin:.2rem 0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.pref-slot{display:inline-block;width:1.1em;margin-left:.25rem;text-align:center}
 /* btn-success for commit-shaped actions, btn-danger for discard/delete. */
 button.btn-success{background:var(--ok);border-color:var(--ok);color:var(--on-ok)}
 button.btn-danger{background:var(--crit);border-color:var(--crit);color:var(--on-crit)}
@@ -756,7 +782,6 @@ overflow:hidden;vertical-align:middle;margin-right:.4rem}
 .node-probe{color:var(--worker-probe)}
 </style>`
 
-// tabLinksHTML renders a tab strip whose tabs are links to separate pages.
 func tabLinksHTML(items [][2]string, active string) string {
 	var b strings.Builder
 	b.WriteString(`<div class="tabs" role="tablist">`)

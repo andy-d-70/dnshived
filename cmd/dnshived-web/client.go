@@ -374,6 +374,11 @@ type clusterSnapshotResponse struct {
 	// Tokens is GET /api/v1/token/status's own response, fetched server-side
 	// from self's own loopback address.
 	Tokens json.RawMessage `json:"tokens,omitempty"`
+
+	// FetchStart and FetchEnd bound the request that produced this copy; every
+	// node's server_time lies inside that window when the clocks agree.
+	FetchStart time.Time `json:"-"`
+	FetchEnd   time.Time `json:"-"`
 }
 
 type clusterSnapshotNode struct {
@@ -432,18 +437,22 @@ func fetchClusterSnapshot(entry NodeConfig) (clusterSnapshotResponse, bool) {
 
 func fetchClusterSnapshotFresh(entry NodeConfig) (clusterSnapshotResponse, bool) {
 	var resp clusterSnapshotResponse
+	start := time.Now()
 	status, err := doGet(clusterSnapshotHTTPClient, entry, "/api/v1/cluster/snapshot", &resp)
+	end := time.Now()
 	ok := err == nil && status == http.StatusOK
 	if ok && len(resp.Self.Status) == 0 && resp.Self.Error == "" {
 		ok = false
 	}
 	if !ok {
 		resp = clusterSnapshotResponse{}
+	} else {
+		resp.FetchStart, resp.FetchEnd = start, end
 	}
 
 	clusterSnapshotCacheMu.Lock()
 	clusterSnapshotCacheAddr = entry.Addr
-	clusterSnapshotCacheAt = time.Now()
+	clusterSnapshotCacheAt = end
 	clusterSnapshotCacheResp = resp
 	clusterSnapshotCacheOK = ok
 	clusterSnapshotCacheMu.Unlock()

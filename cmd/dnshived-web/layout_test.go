@@ -26,8 +26,8 @@ func TestNavHTML_PendingChangesIsAHighlightedButtonRightOfLogs(t *testing.T) {
 	if !strings.Contains(navHTML, `id="pending-marker"`) {
 		t.Error("expected a #pending-marker element in navHTML")
 	}
-	if !strings.Contains(navHTML, `style="display:none`) {
-		t.Error("expected the pending marker to start hidden (display:none) in static markup")
+	if !strings.Contains(navHTML, `style="visibility:hidden`) {
+		t.Error("expected the pending marker to start hidden (visibility:hidden, so its width stays reserved) in static markup")
 	}
 	if strings.Contains(navHTML, `class="warn"`) {
 		t.Error("navHTML must never hardcode class=\"warn\" in static markup — only the marker's own client-side fetch may add it, once a real pending change is confirmed")
@@ -488,5 +488,23 @@ func TestSecurityTabs_TheMenuLandsOnTheFirstTab(t *testing.T) {
 func TestStyleHTML_ThemeButtonHasAFixedWidth(t *testing.T) {
 	if !strings.Contains(styleHTML, "#theme_switcher{width:5.6rem;text-align:center}") {
 		t.Error("the theme button's label changes (Normal, Glowing, Dark); without a fixed width the nav items beside it jump")
+	}
+}
+
+func TestStyleHTML_TabHashDecodeCannotThrow(t *testing.T) {
+	src := navHTML + styleHTML
+	for i := 0; ; {
+		j := strings.Index(src[i:], "decodeURIComponent(")
+		if j < 0 {
+			break
+		}
+		at := i + j
+		if !strings.Contains(src[max(0, at-8):at], "try{") && !strings.Contains(src[max(0, at-24):at], "try{ id=") {
+			t.Errorf("decodeURIComponent at %d is not inside a try: a malformed #fragment would leave every pane hidden", at)
+		}
+		i = at + 1
+	}
+	if !strings.Contains(src, "try{ id=decodeURIComponent(id); }catch(e){}") {
+		t.Error("dnshivedInitTabs must fall back to the raw fragment when it cannot be decoded")
 	}
 }

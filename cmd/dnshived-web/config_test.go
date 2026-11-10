@@ -442,8 +442,8 @@ func TestHandleProbeParallelPost_BroadcastsToEveryProbeHost(t *testing.T) {
 	if rec.Code != http.StatusSeeOther {
 		t.Errorf("status = %d, want %d (redirect)", rec.Code, http.StatusSeeOther)
 	}
-	if loc := rec.Header().Get("Location"); loc != "/probes#settings" {
-		t.Errorf("redirect target = %q, want /probes#settings (real regression, found live: this form moved to /probes but the redirect still pointed at the old page, making a successful save look like it silently did nothing)", loc)
+	if loc := rec.Header().Get("Location"); loc != "/probes#tab-hosts" {
+		t.Errorf("redirect target = %q, want /probes#tab-hosts (real regression, found live: this form moved to /probes but the redirect still pointed at the old page, making a successful save look like it silently did nothing)", loc)
 	}
 
 	mu.Lock()
