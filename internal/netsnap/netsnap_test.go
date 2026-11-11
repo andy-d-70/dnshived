@@ -9,12 +9,12 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
-	"runtime"
 	"sort"
 	"strings"
 	"syscall"
 	"testing"
+
+	"dnshived/internal/nstest"
 )
 
 var ne = binary.NativeEndian
@@ -215,33 +215,8 @@ func TestRelayCopyIsIdentical(t *testing.T) {
 	}
 }
 
-// withDummyInterfaces runs the rest of a test in a private network namespace
-// that holds n dummy interfaces with one address each. Root only.
-func withDummyInterfaces(tb testing.TB, n int) {
-	tb.Helper()
-	if os.Geteuid() != 0 {
-		tb.Skip("needs root for a private network namespace")
-	}
-	if _, err := exec.LookPath("ip"); err != nil {
-		tb.Skip("needs the ip tool")
-	}
-	runtime.LockOSThread() // never unlocked: the thread ends with the goroutine and takes the namespace with it
-	if err := syscall.Unshare(syscall.CLONE_NEWNET); err != nil {
-		tb.Skipf("cannot create a network namespace: %v", err)
-	}
-	var script strings.Builder
-	for i := 0; i < n; i++ {
-		fmt.Fprintf(&script, "link add d%03d type dummy\naddr add 10.%d.%d.1/24 dev d%03d\nlink set d%03d up\n", i, 100+i/250, i%250, i, i)
-	}
-	cmd := exec.Command("ip", "-batch", "-")
-	cmd.Stdin = strings.NewReader(script.String())
-	if out, err := cmd.CombinedOutput(); err != nil {
-		tb.Skipf("cannot create dummy interfaces: %v %s", err, out)
-	}
-}
-
 func TestSnapshotWithManyInterfaces(t *testing.T) {
-	withDummyInterfaces(t, 120)
+	nstest.WithDummyInterfaces(t, 120)
 	snap, err := Take()
 	if err != nil {
 		t.Fatal(err)
@@ -268,7 +243,7 @@ func TestSnapshotWithManyInterfaces(t *testing.T) {
 func BenchmarkAddrLookup(b *testing.B) {
 	const n = 100
 	b.Run("per interface (before)", func(b *testing.B) {
-		withDummyInterfaces(b, n)
+		nstest.WithDummyInterfaces(b, n)
 		for b.Loop() {
 			for i := 0; i < n; i++ {
 				ifi, err := net.InterfaceByName(fmt.Sprintf("d%03d", i))
@@ -282,7 +257,7 @@ func BenchmarkAddrLookup(b *testing.B) {
 		}
 	})
 	b.Run("one snapshot (after)", func(b *testing.B) {
-		withDummyInterfaces(b, n)
+		nstest.WithDummyInterfaces(b, n)
 		for b.Loop() {
 			snap, err := Take()
 			if err != nil {
@@ -296,7 +271,7 @@ func BenchmarkAddrLookup(b *testing.B) {
 		}
 	})
 	b.Run("addresses only, by index (after, relay)", func(b *testing.B) {
-		withDummyInterfaces(b, n)
+		nstest.WithDummyInterfaces(b, n)
 		for b.Loop() {
 			if _, err := TakeAddrs(); err != nil {
 				b.Fatal(err)

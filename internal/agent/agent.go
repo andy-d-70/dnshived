@@ -44,6 +44,7 @@ import (
 	"dnshived/internal/lease"
 	"dnshived/internal/leasesync"
 	"dnshived/internal/loglevel"
+	"dnshived/internal/netsnap"
 	"dnshived/internal/ownership"
 	"dnshived/internal/psksign"
 	"dnshived/internal/relaygate"
@@ -485,6 +486,8 @@ type Agent struct {
 	// Privilege separation — when set, privileged ops go through the helper
 	// socket instead of direct execution.
 	helperClient *helper.Client
+	// vrrpDumpOverride replaces the helper call in tests.
+	vrrpDumpOverride func() ([]byte, error)
 
 	// relayGate, when set, is the DHCP relay's authority gate: a scope's gate is
 	// opened on the relay by authorize with the held witness tokens, and closed
@@ -2344,6 +2347,9 @@ func sanityFingerprint(m map[string]int) string {
 	return contentHash(b.String())
 }
 
+// takeNetSnapshot is netsnap.Take; tests replace it to exercise the fallback.
+var takeNetSnapshot = netsnap.Take
+
 func (a *Agent) CheckPlaneHealth() []PlaneHealth {
 
 	a.mu.Lock()
@@ -2366,12 +2372,15 @@ func (a *Agent) CheckPlaneHealth() []PlaneHealth {
 	checkKeepalived := a.keepalivedReady
 	a.mu.Unlock()
 
-	// One SIGDATA dump for the whole tick, not one per scope.
-	var vDump []byte
+	// One SIGDATA dump and one interface snapshot for the whole tick, each
+	// parsed once, not asked for again per scope.
+	var vStates map[string]string
+	var snap *netsnap.Snapshot
 	if len(toCheck) > 0 {
 		if d, err := a.vrrpDump(); err == nil {
-			vDump = d
+			vStates = vrrpstate.ParseInstanceStates(d)
 		}
+		snap, _ = takeNetSnapshot() // on failure each scope asks the kernel itself, as before
 	}
 
 	type checkResult struct {
@@ -2389,15 +2398,28 @@ func (a *Agent) CheckPlaneHealth() []PlaneHealth {
 		rs := toCheck[i]
 		var findings []PlaneHealth
 		iface := ifname.InterfaceName(a.localParent(rs.sc.Parent), rs.sc.VLANID)
-		ifi, err := net.InterfaceByName(iface)
-		if err != nil {
-			results[i] = checkResult{scope: rs.name, findings: []PlaneHealth{{Scope: rs.name, What: "interface",
-				Detail: fmt.Sprintf("%s no longer exists", iface), Healable: true}}}
-			return
+		var ifIndex int
+		var ifAddrs func() ([]net.Addr, error)
+		if snap != nil {
+			e, ok := snap.ByName(iface)
+			if !ok {
+				results[i] = checkResult{scope: rs.name, findings: []PlaneHealth{{Scope: rs.name, What: "interface",
+					Detail: fmt.Sprintf("%s no longer exists", iface), Healable: true}}}
+				return
+			}
+			ifIndex, ifAddrs = e.Index, func() ([]net.Addr, error) { return e.Addrs, nil }
+		} else {
+			ifi, err := net.InterfaceByName(iface)
+			if err != nil {
+				results[i] = checkResult{scope: rs.name, findings: []PlaneHealth{{Scope: rs.name, What: "interface",
+					Detail: fmt.Sprintf("%s no longer exists", iface), Healable: true}}}
+				return
+			}
+			ifIndex, ifAddrs = ifi.Index, ifi.Addrs
 		}
 
 		if rs.sc.NodeIP != "" {
-			addrs, aerr := ifi.Addrs()
+			addrs, aerr := ifAddrs()
 			if aerr == nil && !addrsMatch(addrs, rs.sc.NodeIP) {
 				findings = append(findings, PlaneHealth{Scope: rs.name, What: "node_ip",
 					Detail: fmt.Sprintf("%s does not carry configured node_ip %s", iface, rs.sc.NodeIP), Healable: true})
@@ -2411,14 +2433,14 @@ func (a *Agent) CheckPlaneHealth() []PlaneHealth {
 				Detail: fmt.Sprintf("%s is %s (expected inactive — DHCP/DNS now served by the shared relay/central instances, not per-scope)", unit, st.ActiveState), Healable: true})
 		}
 
-		if want, known := a.lastGate(rs.name); known && want == "open" && vDump != nil {
-			if vst, verr := vrrpstate.ParseInstanceState(vDump, "DNSHIVED_"+rs.name); verr == nil && vst != "MASTER" {
+		if want, known := a.lastGate(rs.name); known && want == "open" && vStates != nil {
+			if vst, found := vStates["DNSHIVED_"+rs.name]; found && vst != "MASTER" {
 				findings = append(findings, PlaneHealth{Scope: rs.name, What: "gate_vrrp_coherence",
 					Detail: fmt.Sprintf("DHCP gate is open but VRRP state is %s, not MASTER", vst), Healable: false})
 			}
 		}
 
-		results[i] = checkResult{scope: rs.name, findings: findings, ifIndex: ifi.Index}
+		results[i] = checkResult{scope: rs.name, findings: findings, ifIndex: ifIndex}
 	})
 
 	ifaceObserved := make(map[string]sanityIfaceObservation, len(results))
@@ -3845,6 +3867,9 @@ func (a *Agent) CachedMgmtVIPState() string {
 
 // vrrpDump returns one fresh, node-wide SIGDATA dump.
 func (a *Agent) vrrpDump() ([]byte, error) {
+	if a.vrrpDumpOverride != nil {
+		return a.vrrpDumpOverride()
+	}
 	if a.helperClient != nil {
 		return a.helperClient.GetVRRPDump()
 	}

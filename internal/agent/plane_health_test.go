@@ -4,11 +4,19 @@
 package agent
 
 import (
+	"errors"
+	"fmt"
+	"io"
+	"log"
 	"net"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"dnshived/internal/config"
+	"dnshived/internal/netsnap"
+	"dnshived/internal/nstest"
 )
 
 func TestCheckPlaneHealth_NotYetReadyScopeIsSkipped(t *testing.T) {
@@ -171,5 +179,154 @@ func TestShouldSkipInterfaceRebuild(t *testing.T) {
 				t.Errorf("shouldSkipInterfaceRebuild() = %v, want %v — %s", got, tc.wantSkip, tc.wantReason)
 			}
 		})
+	}
+}
+
+func loScope(nodeIP string) map[string]config.ScopeConfig {
+	return map[string]config.ScopeConfig{"office": {Parent: "lo", VLANID: 0, NodeIP: nodeIP, VIP: "127.0.0.2/8"}}
+}
+
+func findingsFor(found []PlaneHealth, scope string) []string {
+	var out []string
+	for _, f := range found {
+		if f.Scope == scope {
+			out = append(out, f.What+": "+f.Detail)
+		}
+	}
+	return out
+}
+
+func TestCheckPlaneHealth_NodeIPFromTheSnapshot(t *testing.T) {
+	ok := New(config.RoleCore1, "n", 1, "psk", "/tmp", loScope("127.0.0.1/8"), nil)
+	ok.ready["office"] = time.Now()
+	for _, f := range ok.CheckPlaneHealth() {
+		if f.Scope == "office" && (f.What == "interface" || f.What == "node_ip") {
+			t.Errorf("lo carries 127.0.0.1, got finding %+v", f)
+		}
+	}
+	if _, still := ok.ready["office"]; !still {
+		t.Error("a healthy scope must stay ready")
+	}
+
+	bad := New(config.RoleCore1, "n", 1, "psk", "/tmp", loScope("10.255.255.1/24"), nil)
+	bad.ready["office"] = time.Now()
+	var got *PlaneHealth
+	for _, f := range bad.CheckPlaneHealth() {
+		if f.Scope == "office" && f.What == "node_ip" {
+			f := f
+			got = &f
+		}
+	}
+	if got == nil || !got.Healable || !strings.Contains(got.Detail, "lo does not carry configured node_ip 10.255.255.1/24") {
+		t.Fatalf("want a healable node_ip finding naming lo, got %+v", got)
+	}
+	if _, still := bad.ready["office"]; still {
+		t.Error("a scope with a drifted node_ip must be demoted from ready")
+	}
+}
+
+// The snapshot path and the per-scope fallback give the same findings.
+func TestCheckPlaneHealth_SnapshotAndFallbackAgree(t *testing.T) {
+	scopes := map[string]config.ScopeConfig{
+		"a-fine":    {Parent: "lo", VLANID: 0, NodeIP: "127.0.0.1/8"},
+		"b-drift":   {Parent: "lo", VLANID: 0, NodeIP: "10.255.255.1/24"},
+		"c-missing": {Parent: "no-such-nic", VLANID: 0, NodeIP: "10.0.0.1/24"},
+		"d-vlan":    {Parent: "no-such-nic", VLANID: 100, NodeIP: "10.0.1.1/24"},
+		"e-nonode":  {Parent: "lo", VLANID: 0},
+	}
+	run := func() []string {
+		a := New(config.RoleCore1, "n", 1, "psk", "/tmp", scopes, nil)
+		for name := range scopes {
+			a.ready[name] = time.Now()
+		}
+		var out []string
+		for _, f := range a.CheckPlaneHealth() {
+			out = append(out, fmt.Sprintf("%s|%s|%s|%v", f.Scope, f.What, f.Detail, f.Healable))
+		}
+		return out
+	}
+	withSnapshot := run()
+	saved := takeNetSnapshot
+	takeNetSnapshot = func() (*netsnap.Snapshot, error) { return nil, errors.New("netlink unavailable") }
+	defer func() { takeNetSnapshot = saved }()
+	fallback := run()
+	if strings.Join(withSnapshot, "\n") != strings.Join(fallback, "\n") {
+		t.Errorf("snapshot path\n%s\nfallback path\n%s", strings.Join(withSnapshot, "\n"), strings.Join(fallback, "\n"))
+	}
+	if len(withSnapshot) < 3 {
+		t.Errorf("expected findings for the drifted and the missing interfaces, got %v", withSnapshot)
+	}
+}
+
+func TestCheckPlaneHealth_GateVRRPCoherenceFromOneParse(t *testing.T) {
+	dump, err := os.ReadFile("../vrrpstate/testdata/keepalived.data")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := map[string]config.ScopeConfig{
+		"office":  {Parent: "lo", VLANID: 0}, // fixture: BACKUP
+		"avdante": {Parent: "lo", VLANID: 0}, // fixture: MASTER
+		"unknown": {Parent: "lo", VLANID: 0}, // not in the dump
+		"closed":  {Parent: "lo", VLANID: 0}, // gate not open: never judged
+	}
+	a := New(config.RoleCore1, "n", 1, "psk", "/tmp", scopes, nil)
+	calls := 0
+	a.vrrpDumpOverride = func() ([]byte, error) { calls++; return dump, nil }
+	for name := range scopes {
+		a.ready[name] = time.Now()
+	}
+	for _, name := range []string{"office", "avdante", "unknown"} {
+		a.lastAppliedGate[name] = "open"
+	}
+	a.lastAppliedGate["closed"] = "closed"
+	found := a.CheckPlaneHealth()
+	if calls != 1 {
+		t.Errorf("one dump per run, got %d", calls)
+	}
+	if f := findingsFor(found, "office"); len(f) != 1 || !strings.Contains(f[0], "gate_vrrp_coherence: DHCP gate is open but VRRP state is BACKUP, not MASTER") {
+		t.Errorf("office = %v", f)
+	}
+	for _, name := range []string{"avdante", "unknown", "closed"} {
+		for _, f := range findingsFor(found, name) {
+			if strings.HasPrefix(f, "gate_vrrp_coherence") {
+				t.Errorf("%s must not be flagged: %s", name, f)
+			}
+		}
+	}
+	for _, f := range found {
+		if f.What == "gate_vrrp_coherence" && f.Healable {
+			t.Error("gate/VRRP incoherence is report-only")
+		}
+	}
+}
+
+// BenchmarkCheckPlaneHealth102 runs the check for 102 scopes whose interfaces
+// exist in a private namespace. The snapshot is taken on the benchmark's own
+// thread, which is why the per-scope fallback cannot be measured here: it asks
+// the kernel from worker goroutines outside that namespace. The cost of the old
+// per-scope calls is measured in internal/netsnap and internal/vrrpstate.
+func BenchmarkCheckPlaneHealth102(b *testing.B) {
+	const n = 102
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+	nstest.WithDummyInterfaces(b, n)
+	scopes := make(map[string]config.ScopeConfig, n)
+	for i := 0; i < n; i++ {
+		scopes[fmt.Sprintf("s%03d", i)] = config.ScopeConfig{Parent: nstest.Name(i), VLANID: 0, NodeIP: nstest.Addr(i) + "/24"}
+	}
+	a := New(config.RoleCore1, "n", 1, "psk", "/tmp", scopes, nil)
+	var dump strings.Builder
+	for name := range scopes {
+		a.ready[name] = time.Now()
+		a.lastAppliedGate[name] = "open"
+		fmt.Fprintf(&dump, " VRRP Instance = DNSHIVED_%s\n   VRRP Version = 2\n   State = MASTER\n   Priority = 100\n", name)
+	}
+	a.vrrpDumpOverride = func() ([]byte, error) { return []byte(dump.String()), nil }
+	for b.Loop() {
+		for _, f := range a.CheckPlaneHealth() {
+			if f.Scope != "" && (f.What == "interface" || f.What == "node_ip" || f.What == "gate_vrrp_coherence") {
+				b.Fatalf("unexpected finding %+v", f)
+			}
+		}
 	}
 }

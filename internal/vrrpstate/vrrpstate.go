@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -123,14 +122,49 @@ func verifyProcessIsKeepalived(pid int) error {
 // ParseInstanceState extracts one vrrp_instance's State from a raw dump
 // previously obtained via Dump.
 func ParseInstanceState(data []byte, instanceName string) (string, error) {
-	pattern := `(?m)^\s*VRRP Instance = ` + regexp.QuoteMeta(instanceName) + `\s*$\n(?:.*\n)*?\s*State = (\S+)`
-	re, err := regexp.Compile(pattern)
-	if err != nil {
-		return "", fmt.Errorf("build pattern: %w", err)
-	}
-	m := re.FindSubmatch(data)
-	if m == nil {
+	state, ok := ParseInstanceStates(data)[instanceName]
+	if !ok {
 		return "", fmt.Errorf("instance %q not found in dump", instanceName)
 	}
-	return string(m[1]), nil
+	return state, nil
+}
+
+var (
+	instancePrefix = []byte("VRRP Instance = ")
+	statePrefix    = []byte("State = ")
+)
+
+// ParseInstanceStates returns every vrrp_instance's State from a raw dump in
+// one pass: the first "State = X" line after an instance's own line. A caller
+// that needs many instances should use this once instead of
+// ParseInstanceState per instance. An instance without a State line is left
+// out, and the first of two instances with the same name wins.
+func ParseInstanceStates(data []byte) map[string]string {
+	out := make(map[string]string)
+	cur := ""
+	for len(data) > 0 {
+		line := data
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			line, data = data[:i], data[i+1:]
+		} else {
+			data = nil
+		}
+		t := bytes.TrimSpace(line)
+		if rest, ok := bytes.CutPrefix(t, instancePrefix); ok {
+			cur = string(bytes.TrimSpace(rest))
+			continue
+		}
+		if cur == "" {
+			continue
+		}
+		if rest, ok := bytes.CutPrefix(t, statePrefix); ok {
+			if f := bytes.Fields(rest); len(f) > 0 {
+				if _, dup := out[cur]; !dup {
+					out[cur] = string(f[0])
+				}
+				cur = ""
+			}
+		}
+	}
+	return out
 }
