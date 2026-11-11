@@ -5,11 +5,14 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 const extraFixture = `{
@@ -250,4 +253,267 @@ func writeFixture(t *testing.T, dir string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// extrasOracle computes what the decoders must keep: the keys of the document
+// and of each scope that the structs have no field for, found with the plain
+// unknownKeys function, independent of the strict fast path.
+func extrasOracle(data []byte) (map[string]json.RawMessage, map[string]map[string]json.RawMessage) {
+	cluster := unknownKeys(data, reflect.TypeOf(Cluster{}))
+	scopes := map[string]map[string]json.RawMessage{}
+	var top map[string]json.RawMessage
+	if json.Unmarshal(data, &top) != nil {
+		return cluster, scopes
+	}
+	for k, v := range top {
+		if !strings.EqualFold(k, "scopes") {
+			continue
+		}
+		var raw map[string]json.RawMessage
+		if json.Unmarshal(v, &raw) != nil {
+			continue
+		}
+		for name, r := range raw {
+			scopes[name] = unknownKeys(r, reflect.TypeOf(ScopeConfig{}))
+		}
+	}
+	return cluster, scopes
+}
+
+func checkDecodeAgainstOracle(t testing.TB, data []byte) {
+	t.Helper()
+	var c Cluster
+	if err := json.Unmarshal(data, &c); err != nil {
+		return
+	}
+	wantCluster, wantScopes := extrasOracle(data)
+	if !reflect.DeepEqual(c.Extra, wantCluster) {
+		t.Fatalf("cluster extras = %v, oracle %v\ndocument: %s", c.Extra, wantCluster, data)
+	}
+	for name, sc := range c.Scopes {
+		if want := wantScopes[name]; !reflect.DeepEqual(sc.Extra, want) {
+			t.Fatalf("scope %q extras = %v, oracle %v\ndocument: %s", name, sc.Extra, want, data)
+		}
+	}
+	var plain clusterPlain
+	if err := json.Unmarshal(data, &plain); err != nil {
+		t.Fatalf("plain decode failed where the real one passed: %v", err)
+	}
+	got, want := c, Cluster(plain)
+	got.Extra, want.Extra = nil, nil
+	strip := func(m map[string]ScopeConfig) map[string]ScopeConfig {
+		out := make(map[string]ScopeConfig, len(m))
+		for k, v := range m {
+			v.Extra = nil
+			out[k] = v
+		}
+		return out
+	}
+	if len(got.Scopes) > 0 {
+		got.Scopes = strip(got.Scopes)
+	}
+	if len(want.Scopes) > 0 {
+		want.Scopes = strip(want.Scopes)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("known fields differ from a plain decode\ndocument: %s", data)
+	}
+}
+
+func TestDecodeKeepsExactlyTheUnknownKeys(t *testing.T) {
+	docs := map[string]string{
+		"fixture with dry_run and extras": extraFixture,
+		"no unknown keys at all":          `{"cluster_id":"c","node_id":"n","role":"core-1","scopes":{"a":{"parent":"eth1","vlan_id":5}}}`,
+		"upper case known keys":           `{"Cluster_ID":"c","NODE_ID":"n","Scopes":{"a":{"PARENT":"eth1","VLAN_ID":5,"VIP":"10.0.0.1/24"}}}`,
+		"unknown only in a scope":         `{"cluster_id":"c","scopes":{"a":{"parent":"eth1","future_field":{"x":[1,2,{"y":null}]}},"b":{"parent":"eth1"}}}`,
+		"unknown only at the top":         `{"cluster_id":"c","future":[1,2,3],"scopes":{"a":{"parent":"eth1"}}}`,
+		"dry_run escaped":                 `{"cluster_id":"c","dry\u005frun":true,"scopes":{"a":{"dry_run":false,"parent":"eth1"}}}`,
+		"null scope":                      `{"cluster_id":"c","scopes":{"a":null,"b":{"parent":"eth1","x":1}}}`,
+		"empty scopes":                    `{"cluster_id":"c","scopes":{}}`,
+		"unknown key with unicode":        `{"cluster_id":"c","größe":1,"scopes":{"ä":{"parent":"eth1","größe":2}}}`,
+		"nested numbers and strings":      `{"cluster_id":"c","big":12345678901234567890,"s":"a\"b\\c","scopes":{"a":{"parent":"eth1","t":"ä"}}}`,
+	}
+	for name, doc := range docs {
+		t.Run(name, func(t *testing.T) { checkDecodeAgainstOracle(t, []byte(doc)) })
+	}
+}
+
+func TestDecodeErrorsStayErrors(t *testing.T) {
+	for name, doc := range map[string]string{
+		"wrong type for a known field":   `{"cluster_id":"c","scopes":{"a":{"vlan_id":"ten"}}}`,
+		"wrong type next to unknown key": `{"cluster_id":"c","future":1,"scopes":{"a":{"vlan_id":"ten","x":1}}}`,
+		"scopes is not an object":        `{"cluster_id":"c","scopes":[1]}`,
+		"top level array":                `[1,2]`,
+		"known key with the wrong type":  `{"cluster_id":5}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var c Cluster
+			if err := json.Unmarshal([]byte(doc), &c); err == nil {
+				t.Errorf("expected an error for %s", doc)
+			}
+		})
+	}
+}
+
+func TestLoadSetsLegacyDryRunOnlyWhenTheKeyIsThere(t *testing.T) {
+	dir := t.TempDir()
+	write := func(extra string) string {
+		cfg := validBase()
+		doc, _ := json.Marshal(cfg)
+		doc = append(doc[:len(doc)-1], []byte(extra+"}")...)
+		p := filepath.Join(dir, "c.json")
+		if err := os.WriteFile(p, doc, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for _, tt := range []struct {
+		name, extra string
+		want        bool
+	}{
+		{"absent", "", false},
+		{"present", `,"dry_run":true`, true},
+		{"escaped spelling", `,"dry\u005frun":false`, true},
+		{"only in a value", `,"note":"dry_run is gone"`, false},
+	} {
+		c, err := Load(write(tt.extra))
+		if err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		if c.LegacyDryRun != tt.want {
+			t.Errorf("%s: LegacyDryRun = %v, want %v", tt.name, c.LegacyDryRun, tt.want)
+		}
+	}
+}
+
+func FuzzDecodeKeepsExactlyTheUnknownKeys(f *testing.F) {
+	for _, s := range []string{
+		extraFixture,
+		`{"cluster_id":"c","scopes":{"a":{"parent":"eth1","future":1}}}`,
+		`{"Cluster_ID":"c","dry_run":true,"scopes":{"a":null}}`,
+		`{"scopes":{"a":{"VIP":"1.2.3.4/24","vip":"5.6.7.8/24","x":{}}}}`,
+	} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if !json.Valid(data) {
+			return
+		}
+		checkDecodeAgainstOracle(t, data)
+	})
+}
+
+// BenchmarkLoad102Scopes measures config.Load on a document of the size of a
+// real cluster: 102 scopes, about 34 KB.
+func BenchmarkLoad102Scopes(b *testing.B) {
+	cfg := validBase()
+	scopes := map[string]interface{}{}
+	for i := 0; i < 102; i++ {
+		scopes[fmt.Sprintf("dante-%03d", i)] = map[string]interface{}{
+			"parent": "eth1", "vlan_id": 100 + i, "vrrp_id": 1 + i, "preferred_worker": []string{"core-1", "core-2", "core-3"}[i%3],
+			"vip":        fmt.Sprintf("10.%d.%d.1/24", 100+i/250, i%250),
+			"dhcp_range": []string{fmt.Sprintf("10.%d.%d.50", 100+i/250, i%250), fmt.Sprintf("10.%d.%d.200", 100+i/250, i%250)},
+			"gateway":    fmt.Sprintf("10.%d.%d.1", 100+i/250, i%250),
+			"upstream":   []string{"1.1.1.1", "9.9.9.9"},
+			"reservations": []map[string]interface{}{
+				{"mac": fmt.Sprintf("aa:bb:cc:00:%02x:01", i), "ip": fmt.Sprintf("10.%d.%d.10", 100+i/250, i%250), "hostname": fmt.Sprintf("printer-%d", i)},
+				{"mac": fmt.Sprintf("aa:bb:cc:00:%02x:02", i), "ip": fmt.Sprintf("10.%d.%d.11", 100+i/250, i%250), "hostname": fmt.Sprintf("camera-%d", i)},
+			},
+		}
+	}
+	cfg["scopes"] = scopes
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		b.Fatal(err)
+	}
+	path := filepath.Join(b.TempDir(), "cluster.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		b.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(int64(len(data)))
+	for b.Loop() {
+		if _, err := Load(path); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestTopLevelKeys(t *testing.T) {
+	tests := []struct {
+		name string
+		doc  string
+		want []string
+		ok   bool
+	}{
+		{"flat", `{"a":1,"b":"x","c":true,"d":null}`, []string{"a", "b", "c", "d"}, true},
+		{"nested values are skipped", `{"a":{"b":[1,{"c":2}],"d":"}"},"e":[ "]", {"f":"\"{" } ]}`, []string{"a", "e"}, true},
+		{"braces and quotes inside strings", `{"k":"a\"}{\\","m":"[["}`, []string{"k", "m"}, true},
+		{"whitespace everywhere", " {\n\t\"a\" :\r\n 1 ,\n \"b\"\t: [ ] }\n", []string{"a", "b"}, true},
+		{"empty object", `{}`, nil, true},
+		{"empty object with spaces", ` { } `, nil, true},
+		{"numbers and literals at the end", `{"a":-1.5e3,"b":false}`, []string{"a", "b"}, true},
+		{"escaped key falls back", `{"dry\u005frun":true}`, nil, false},
+		{"not an object", `[1,2]`, nil, false},
+		{"trailing data", `{"a":1} x`, nil, false},
+		{"truncated", `{"a":1,`, nil, false},
+		{"missing colon", `{"a" 1}`, nil, false},
+		{"unterminated string", `{"a":"x`, nil, false},
+		{"empty input", ``, nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			keys, ok := topLevelKeys([]byte(tt.doc))
+			if ok != tt.ok {
+				t.Fatalf("ok = %v, want %v (keys %q)", ok, tt.ok, keys)
+			}
+			if !ok {
+				return
+			}
+			var got []string
+			for _, k := range keys {
+				got = append(got, string(k))
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("keys = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// On every valid object the scan finds exactly the keys encoding/json sees.
+func FuzzTopLevelKeysMatchTheDecoder(f *testing.F) {
+	for _, s := range []string{extraFixture, `{"a":{"b":1},"c":[{"d":"}"}]}`, `{}`, `{"a\"b":1}`} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if !json.Valid(data) || !utf8.Valid(data) {
+			return
+		}
+		keys, ok := topLevelKeys(data)
+		var m map[string]json.RawMessage
+		if json.Unmarshal(data, &m) != nil {
+			if ok {
+				t.Fatalf("scan accepted a document that is not an object: %s", data)
+			}
+			return
+		}
+		if !ok {
+			return
+		}
+		seen := map[string]bool{}
+		for _, k := range keys {
+			seen[string(k)] = true
+		}
+		if len(seen) != len(m) {
+			t.Fatalf("scan found %d distinct keys, decoder %d, in %s", len(seen), len(m), data)
+		}
+		for k := range m {
+			if !seen[k] {
+				t.Fatalf("key %q missing from the scan of %s", k, data)
+			}
+		}
+	})
 }

@@ -125,16 +125,162 @@ func appendExtra(base []byte, extra map[string]json.RawMessage, t reflect.Type) 
 	return out.Bytes(), nil
 }
 
+// decodeKeepingExtras decodes data into v, a pointer to the plain twin of
+// struct type t, and returns the keys t has no field for. The document is
+// decoded once; a light scan of its top-level keys (no value is decoded)
+// finds out whether any key is unknown, which is rarely the case, and only
+// then are the keys collected with the full decoder.
+func decodeKeepingExtras(data []byte, v any, t reflect.Type) (map[string]json.RawMessage, error) {
+	if err := json.Unmarshal(data, v); err != nil {
+		return nil, err
+	}
+	if keys, ok := topLevelKeys(data); ok && allKnown(keys, knownKeys(t)) {
+		return nil, nil
+	}
+	return unknownKeys(data, t), nil
+}
+
+// allKnown reports whether every key is a field of the type and none is a key
+// that is dropped on purpose, folding case as encoding/json does.
+func allKnown(keys [][]byte, known map[string]bool) bool {
+	for _, k := range keys {
+		if known[string(k)] {
+			if removedKeys[string(k)] {
+				return false
+			}
+			continue
+		}
+		lk := strings.ToLower(string(k))
+		if !known[lk] || removedKeys[lk] {
+			return false
+		}
+	}
+	return true
+}
+
+// topLevelKeys returns the keys of the JSON object in data as written, without
+// decoding any value. ok is false when data is not an object it can walk or a
+// key holds an escape; the caller then uses the full decoder. data must
+// already be valid JSON: the scan only finds the keys.
+func topLevelKeys(data []byte) (keys [][]byte, ok bool) {
+	i := skipSpace(data, 0)
+	if i >= len(data) || data[i] != '{' {
+		return nil, false
+	}
+	i = skipSpace(data, i+1)
+	if i < len(data) && data[i] == '}' {
+		return nil, skipSpace(data, i+1) == len(data)
+	}
+	for {
+		i = skipSpace(data, i)
+		if i >= len(data) || data[i] != '"' {
+			return nil, false
+		}
+		j := i + 1
+		for j < len(data) && data[j] != '"' {
+			if data[j] == '\\' {
+				return nil, false
+			}
+			j++
+		}
+		if j >= len(data) {
+			return nil, false
+		}
+		keys = append(keys, data[i+1:j])
+		i = skipSpace(data, j+1)
+		if i >= len(data) || data[i] != ':' {
+			return nil, false
+		}
+		var good bool
+		if i, good = skipValue(data, skipSpace(data, i+1)); !good {
+			return nil, false
+		}
+		i = skipSpace(data, i)
+		if i >= len(data) {
+			return nil, false
+		}
+		switch data[i] {
+		case ',':
+			i++
+		case '}':
+			return keys, skipSpace(data, i+1) == len(data)
+		default:
+			return nil, false
+		}
+	}
+}
+
+func skipSpace(data []byte, i int) int {
+	for i < len(data) && (data[i] == ' ' || data[i] == '\t' || data[i] == '\n' || data[i] == '\r') {
+		i++
+	}
+	return i
+}
+
+// skipValue returns the index just after the JSON value that starts at i.
+func skipValue(data []byte, i int) (int, bool) {
+	if i >= len(data) {
+		return i, false
+	}
+	switch data[i] {
+	case '"':
+		return skipString(data, i)
+	case '{', '[':
+		depth := 0
+		for i < len(data) {
+			switch data[i] {
+			case '"':
+				var good bool
+				if i, good = skipString(data, i); !good {
+					return i, false
+				}
+				continue
+			case '{', '[':
+				depth++
+			case '}', ']':
+				depth--
+				if depth == 0 {
+					return i + 1, true
+				}
+			}
+			i++
+		}
+		return i, false
+	}
+	for i < len(data) {
+		switch data[i] {
+		case ',', '}', ']', ' ', '\t', '\n', '\r':
+			return i, true
+		}
+		i++
+	}
+	return i, true
+}
+
+// skipString returns the index just after the string that starts at i.
+func skipString(data []byte, i int) (int, bool) {
+	for i++; i < len(data); i++ {
+		switch data[i] {
+		case '\\':
+			i++
+		case '"':
+			return i + 1, true
+		}
+	}
+	return i, false
+}
+
 type clusterPlain Cluster
 
 // UnmarshalJSON reads c and keeps the keys it has no field for in Extra.
 func (c *Cluster) UnmarshalJSON(data []byte) error {
 	p := clusterPlain(*c)
-	if err := json.Unmarshal(data, &p); err != nil {
+	extra, err := decodeKeepingExtras(data, &p, reflect.TypeOf(Cluster{}))
+	if err != nil {
 		return err
 	}
 	*c = Cluster(p)
-	c.Extra = mergeExtra(c.Extra, unknownKeys(data, reflect.TypeOf(Cluster{})))
+	c.Extra = mergeExtra(c.Extra, extra)
 	return nil
 }
 
@@ -152,11 +298,12 @@ type scopePlain ScopeConfig
 // UnmarshalJSON reads s and keeps the keys it has no field for in Extra.
 func (s *ScopeConfig) UnmarshalJSON(data []byte) error {
 	p := scopePlain(*s)
-	if err := json.Unmarshal(data, &p); err != nil {
+	extra, err := decodeKeepingExtras(data, &p, reflect.TypeOf(ScopeConfig{}))
+	if err != nil {
 		return err
 	}
 	*s = ScopeConfig(p)
-	s.Extra = mergeExtra(s.Extra, unknownKeys(data, reflect.TypeOf(ScopeConfig{})))
+	s.Extra = mergeExtra(s.Extra, extra)
 	return nil
 }
 

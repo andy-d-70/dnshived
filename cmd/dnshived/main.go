@@ -1164,14 +1164,8 @@ func main() {
 
 	mux.HandleFunc("/api/v1/dnsrelay-stats", dnsRelayStatsHandler())
 
-	mux.HandleFunc("GET /api/v1/config", authMw.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
-		current, err := config.Load(*cfgPath)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load current config: " + err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, current)
-	}))
+	var configResponses, candidateResponses responseCache
+	mux.HandleFunc("GET /api/v1/config", authMw.RequireAdmin(configGetHandler(func() string { return *cfgPath }, &configResponses)))
 
 	mux.HandleFunc("GET /api/v1/probe-config", authMw.RequireProbeOrReadonly(func(w http.ResponseWriter, r *http.Request) {
 		current, err := config.Load(*cfgPath)
@@ -1221,14 +1215,7 @@ func main() {
 		writeJSON(w, status, body)
 	}))
 
-	mux.HandleFunc("GET /api/v1/candidate", authMw.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
-		cand, exists, err := loadCandidateConfig(dataDir(currentConfig.Load()))
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load candidate: " + err.Error()})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]interface{}{"exists": exists, "candidate": cand})
-	}))
+	mux.HandleFunc("GET /api/v1/candidate", authMw.RequireAdmin(candidateGetHandler(func() string { return dataDir(currentConfig.Load()) }, &candidateResponses)))
 	mux.HandleFunc("POST /api/v1/candidate", authMw.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
 		var upd configUpdate
 		if err := json.NewDecoder(r.Body).Decode(&upd); err != nil {

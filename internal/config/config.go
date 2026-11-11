@@ -5,6 +5,7 @@
 package config
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -992,9 +993,14 @@ func Load(path string) (*Cluster, error) {
 	if err := c.validate(); err != nil {
 		return nil, err
 	}
-	var keys map[string]json.RawMessage
-	if json.Unmarshal(data, &keys) == nil {
-		_, c.LegacyDryRun = keys["dry_run"]
+	// The legacy dry_run key can only be in the document if its name appears
+	// literally or a string escape (a backslash) could spell it; skip the
+	// extra decode otherwise.
+	if bytes.Contains(data, []byte("dry_run")) || bytes.IndexByte(data, '\\') >= 0 {
+		var keys map[string]json.RawMessage
+		if json.Unmarshal(data, &keys) == nil {
+			_, c.LegacyDryRun = keys["dry_run"]
+		}
 	}
 	return &c, nil
 }
