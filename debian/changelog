@@ -1,4 +1,4 @@
-dnshived (0.9.8.10~dev-5) unstable; urgency=medium
+dnshived (0.9.8.10~dev-6) unstable; urgency=medium
 
   * Web UI follow-ups: the clock skew warning no longer fires on cached data,
     the Health checks card takes over the cluster details, scopes served away
