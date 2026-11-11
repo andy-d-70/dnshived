@@ -22,6 +22,7 @@
 - The "CLOCK SKEW" warning could appear for all nodes at once because cached node data looked old. It now needs two fresh readings in a row, names the node it compares against, and is logged when it is raised and cleared.
 - The probes page reloaded itself every 20 seconds and wiped what was typed; only the results table refreshes now. Links to the probe settings land on the right tab, and the Pending changes button keeps its width.
 - A malformed fragment in the address left every tab pane hidden.
+- The scope row menu no longer flashes at the wrong place before it opens, and a page with tabs no longer shows all its panes stacked while it loads.
 
 ## 0.9.8.9 — released
 

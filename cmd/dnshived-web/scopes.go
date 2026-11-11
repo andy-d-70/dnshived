@@ -93,15 +93,15 @@ var menus=document.querySelectorAll('details.row-menu'),DELAY=400;
 function closeAll(except){menus.forEach(function(m){if(m!==except){m.removeAttribute('open')}})}
 function place(m){
  var btn=m.querySelector('summary'),list=m.querySelector('.row-menu-list'),r=btn.getBoundingClientRect();
- list.style.visibility='hidden';list.style.left='0px';list.style.top='0px';
+ list.style.left='0px';list.style.top='0px';
  var w=list.offsetWidth,h=list.offsetHeight,left=Math.max(8,Math.min(r.right-w,window.innerWidth-w-8)),top=r.bottom+4;
  if(top+h>window.innerHeight-8){top=Math.max(8,r.top-h-4)}
- list.style.left=left+'px';list.style.top=top+'px';list.style.visibility='visible';
+ list.style.left=left+'px';list.style.top=top+'px';m.setAttribute('data-placed','');
 }
 menus.forEach(function(m){
  var timer=null,list=m.querySelector('.row-menu-list');
  function clear(){if(timer){clearTimeout(timer);timer=null}}
- m.addEventListener('toggle',function(){if(m.open){closeAll(m);place(m)}else{clear()}});
+ m.addEventListener('toggle',function(){if(m.open){closeAll(m);place(m)}else{m.removeAttribute('data-placed');clear()}});
  m.addEventListener('mouseleave',function(){if(m.open){clear();timer=setTimeout(function(){m.removeAttribute('open')},DELAY)}});
  m.addEventListener('mouseenter',clear);
  m.addEventListener('keydown',function(e){

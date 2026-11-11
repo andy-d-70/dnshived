@@ -162,3 +162,39 @@ func TestScopesTmpl_RebalanceEntryIsGreyedWithAReason(t *testing.T) {
 		t.Error("the menu's keyboard navigation must skip disabled entries")
 	}
 }
+
+func TestRowMenu_ListStaysHiddenUntilItIsPlaced(t *testing.T) {
+	for _, want := range []string{
+		".js details.row-menu:not([data-placed])>.row-menu-list{visibility:hidden}",
+	} {
+		if !strings.Contains(styleHTML, want) {
+			t.Errorf("style lacks %q: an unplaced menu list would flash at the wrong spot", want)
+		}
+	}
+	if !strings.Contains(navHTML, "document.documentElement.classList.add('js')") {
+		t.Error("the page must mark itself as script-driven before anything is drawn, or the hiding rules never apply (and without a script the menu must keep working)")
+	}
+	out := renderScopes(t, []scopeRow{{Name: "alpha", Display: "alpha"}}, false)
+	for _, want := range []string{"m.setAttribute('data-placed','')", "m.removeAttribute('data-placed')"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("menu script lacks %q", want)
+		}
+	}
+	if strings.Contains(out, "list.style.visibility='visible'") {
+		t.Error("the script must not force the list visible: placement is what reveals it")
+	}
+}
+
+func TestTabHost_StaysOutOfSightUntilItsTabsAreBuilt(t *testing.T) {
+	for _, want := range []string{
+		".js .tab-host:not(.tabs-ready):not(.tabs-skip){visibility:hidden;max-height:0;overflow:hidden;animation:dnshived-reveal 0s 2s forwards}",
+		"@keyframes dnshived-reveal{to{visibility:visible;max-height:none}}",
+	} {
+		if !strings.Contains(styleHTML, want) {
+			t.Errorf("style lacks %q", want)
+		}
+	}
+	if !strings.Contains(navHTML+styleHTML, "host.classList.add('tabs-skip')") {
+		t.Error("a tab host with a single pane never gets tabs-ready, so it must be released with tabs-skip or it stays hidden for 2 s")
+	}
+}

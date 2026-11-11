@@ -227,7 +227,8 @@ function submitFormAsConsole(form, title, steps){
 
 const navBrandMarkSVG = `<svg class="brand-mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true"><path d="M 16 46 A 24 24 0 0 1 32 10" fill="none" class="ring-dim" stroke-width="4" stroke-linecap="round"/><path d="M 48 46 A 24 24 0 0 1 16 46" fill="none" class="ring-dim" stroke-width="4" stroke-linecap="round"/><path d="M 32 10 A 24 24 0 0 1 48 46" fill="none" class="auth" stroke-width="5" stroke-linecap="round"/><circle cx="32" cy="10" r="6" class="nd" stroke="none"/><circle cx="16" cy="46" r="6" class="nd" stroke="none"/><circle cx="48" cy="46" r="6" class="nd" stroke="none"/></svg>`
 
-const navHTML = `<div class="nav-outer">
+const navHTML = `<script>document.documentElement.classList.add('js')</script>
+<div class="nav-outer">
 <nav id="mainnav" aria-label="Main">
 <a href="/" class="nav-item brand" title="overview of the whole cluster" data-match="/,/status"><span class="nav-name">` + navBrandMarkSVG + ` dnshived</span></a>
 <button type="button" class="nav-menu-toggle" id="nav-menu-toggle" aria-expanded="false" aria-controls="mainnav" onclick="dnshivedToggleNav()">&#9776; Menu</button>
@@ -298,7 +299,7 @@ function dnshivedInitTabs(){
     var panes=[].slice.call(host.querySelectorAll('.tab-pane[data-tab]'));
     var extra=[];
     try{ extra=JSON.parse(host.getAttribute('data-extra-tabs')||'[]'); }catch(e){}
-    if(panes.length+extra.length<2) return;
+    if(panes.length+extra.length<2){ host.classList.add('tabs-skip'); return; }
     panes.forEach(function(p,i){p.__i=i;});
     panes.sort(function(a,b){return ((+a.dataset.tabOrder||999)-(+b.dataset.tabOrder||999))||(a.__i-b.__i);});
     var strip=document.createElement('div');
@@ -637,6 +638,13 @@ border-bottom:3px solid transparent;border-radius:0;color:var(--muted);padding:.
 .tabs button:hover,.tabs a.tab-link:hover{color:var(--text);opacity:1;text-decoration:none}
 .tabs button[aria-selected=true],.tabs a.tab-link[aria-current=page]{color:var(--text);border-bottom-color:var(--accent)}
 .tab-host.tabs-ready .tab-pane{display:none}
+/* Until its tabs are built a tab host would show every pane stacked; keep it out of sight
+   (the animation reveals it after 2 s if the script never finishes). */
+.js .tab-host:not(.tabs-ready):not(.tabs-skip){visibility:hidden;max-height:0;overflow:hidden;animation:dnshived-reveal 0s 2s forwards}
+@keyframes dnshived-reveal{to{visibility:visible;max-height:none}}
+/* A row menu stays hidden until the script has placed it, so it never shows at its
+   unpositioned spot for a moment. */
+.js details.row-menu:not([data-placed])>.row-menu-list{visibility:hidden}
 .tab-host.tabs-ready .tab-pane.active{display:block}
 .tab-pane>h2:first-child{margin-top:0}
 /* line lists (dnshivedLineLists) */
