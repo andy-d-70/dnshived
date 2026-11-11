@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"dnsrelay/netsnap"
 )
 
 // ------------------------- Configuration -------------------------
@@ -1734,17 +1736,16 @@ func reconcileAddrSocketsLocked() {
 	desired := make(map[uint32]desiredAddr)
 
 	ifaces := allowedIfaces.Load()
-	if ifaces != nil {
+	if ifaces != nil && len(*ifaces) > 0 {
+		// One address dump for every interface; asking per interface made
+		// each pass cost interfaces x interfaces.
+		addrsByIndex, err := netsnap.TakeAddrs()
+		if err != nil {
+			logger.Printf("[SOCKET] cannot read the interface addresses: %v — keeping the open sockets this tick", err)
+			return
+		}
 		for idx, info := range *ifaces {
-			iface, err := net.InterfaceByIndex(idx)
-			if err != nil {
-				continue
-			}
-			addrs, err := iface.Addrs()
-			if err != nil {
-				continue
-			}
-			for _, a := range addrs {
+			for _, a := range addrsByIndex[idx] {
 				ipNet, ok := a.(*net.IPNet)
 				if !ok {
 					continue
