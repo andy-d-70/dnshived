@@ -52,6 +52,21 @@ list), plus the Pending changes button. Long pages are split into tabs.
   Nothing is enforced while any core is below the required version, so a
   rolling upgrade never blocks itself. Membership edits (add, replace,
   remove a core) keep their own rules and do not change the epoch.
+- **Scope list.** A scope served by a core other than its preferred worker
+  shows a `≠` marker; the tooltip names both nodes. In a scope's menu,
+  "Rebalance to preferred core" is greyed out when the scope has no
+  preferred worker or already runs there, and the server refuses a
+  rebalance for a scope without a preferred worker (HTTP 409).
+- **Probes page.** The results refresh in place every 20 seconds while the
+  Results tab is open and the page is visible; nothing else on the page
+  reloads, so typed text and the open tab stay. On the Behavior tab,
+  *Default DNS probe checks* takes one check per line: `NAME|TYPE`,
+  `NAME/TYPE` or `NAME TYPE` (a name alone means A). Types: A, AAAA, CNAME,
+  PTR, TXT, MX, SRV, NAPTR, CAA; RAW is refused because the probe cannot
+  query it. At most 100 checks; international names are written in
+  punycode (`xn--`). The box is checked while you type, and a refused
+  save keeps your text and names each bad line. A blank box means the
+  built-in `claude.ai.|A`; once any check is listed, only your list is used.
 - **Nodes** are onboarded, replaced or offboarded from Cluster settings
   (also staged); a new host's join code is required.
 - **Backups:** Back up now, automated encrypted backups replicated to
@@ -62,6 +77,25 @@ list), plus the Pending changes button. Long pages are split into tabs.
   when every staged change is within those rights; `readonly` can view.
   Users, password-reset links and mail settings are replicated between
   the cores' web UIs and apply without a commit.
+
+## Path beacons
+
+Two kinds of beacons, both signed with the cluster PSK, watch the paths
+between the cores:
+
+- **Trunk beacons** (UDP port 9446, broadcast on every trunk interface,
+  every 5 seconds) show which trunk interface of one core sees which
+  interface of another; the Cluster paths card is built from them.
+- **VLAN path beacons** (UDP port 9447, a routed unicast request and reply
+  per scope and peer) check that a scope's VLAN works between the cores.
+  One scheduler sends them, at most 10 per 100 ms. A healthy path is probed
+  every 10 seconds; a path that missed a reply is probed again after about
+  a second, and three misses in a row mean unreachable (a warning in the
+  log and a local sanity check). An unreachable path is probed every
+  5 seconds to notice its recovery. A scope that is rebuilt, or a trunk
+  that goes up or down, probes its paths at once. With very many scopes
+  the interval stretches by itself (a warning names it) instead of the
+  beacons falling behind.
 
 ## dnshived-top
 
@@ -94,7 +128,9 @@ drops, the others keep refreshing. Coherence checks every 2 seconds:
 - unserved scopes
 - version mismatch
 - epoch divergence between stable nodes
-- clock skew between this host and a node
+- clock skew between this host and a node (measured against the moment
+  the data was fetched, flagged after two fresh readings in a row over
+  5 seconds)
 - partition (two nodes can't see each other, both reachable from here)
 
 ### Authority drilldown ("Why?")

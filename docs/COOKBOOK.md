@@ -72,6 +72,28 @@ sudo systemctl start dnshived
 Don't delete `/var/lib/dnshived` before step 1: its
 `known-scopes.json` is what the teardown works from.
 
+## Probe your own DNS names
+
+The probe host asks every scope's DNS for a name and compares the answer. By
+default it asks for `claude.ai.` (type A). To check names of your own:
+
+1. Open **Probes → Behavior**.
+2. Under *Default DNS probe checks* write one check per line, for example
+
+   ```
+   claude.ai.|A
+   orf.at|A
+   ```
+
+   `orf.at/A` and `orf.at A` work too, and a name alone means A. A list that
+   is not empty replaces the default, so keep `claude.ai.|A` in it if you still
+   want that check.
+3. The line under the box says `2 checks OK` or names the first bad line.
+4. Save, then commit on Pending changes.
+
+Every check runs against every scope, so use names that every scope can
+resolve; a name only one scope's own DNS records know fails on the others.
+
 ## Probe host VLAN coverage
 
 A probe host can only test a scope if it has an interface on that
