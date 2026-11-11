@@ -6,6 +6,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"html"
 	"reflect"
 	"strings"
 	"testing"
@@ -1622,5 +1624,119 @@ func TestStatusTmpl_HealthChecksCarryTheFormerDetails(t *testing.T) {
 	}
 	if !strings.Contains(render(overviewData{Witness: "2 expired", ActiveTokens: 10}), ">2 expired · 10 active</td>") {
 		t.Error("expired tokens must show in the Witness value")
+	}
+}
+
+func TestGroupWarnings_ManyOfOneKindBecomeOneLine(t *testing.T) {
+	var ws []string
+	for i := 0; i < 12; i++ {
+		ws = append(ws, fmt.Sprintf("NO TOKEN: scope dante-%03d served by core-2 but no arbiter token exists", i))
+	}
+	ws = append(ws, "VERSION MISMATCH: core-1=0.9.8.9 core-2=0.9.8.10", "CLOCK SKEW: n1 is 7.0s off from core-2", "plain text without a kind")
+	items := groupWarnings(ws)
+	if len(items) != 4 {
+		t.Fatalf("want 1 grouped line plus the 3 single ones, got %d: %+v", len(items), items)
+	}
+	g := items[0]
+	if !strings.HasPrefix(g.Text, "NO TOKEN (12): scope dante-000") {
+		t.Errorf("grouped text = %q", g.Text)
+	}
+	for _, want := range []string{"dante-000", "dante-011"} {
+		if !strings.Contains(g.Title, want) {
+			t.Errorf("the tooltip must list every warning, lacks %q", want)
+		}
+	}
+	if items[1].Text != "VERSION MISMATCH: core-1=0.9.8.9 core-2=0.9.8.10" || items[3].Text != "plain text without a kind" {
+		t.Errorf("single warnings keep their text and order: %+v", items)
+	}
+	few := groupWarnings(ws[:3])
+	if len(few) != 3 {
+		t.Errorf("fewer than %d of a kind stay separate, got %d lines", attnGroupMin, len(few))
+	}
+	var many []string
+	for i := 0; i < 250; i++ {
+		many = append(many, fmt.Sprintf("NO TOKEN: scope s%03d served by core-1 but no arbiter token exists", i))
+	}
+	if t2 := groupWarnings(many)[0].Title; !strings.Contains(t2, "… and 150 more") {
+		t.Error("a tooltip lists at most 100 warnings and says how many more there are")
+	}
+}
+
+func TestOverviewData_AttentionNumbers(t *testing.T) {
+	d := overviewData{
+		Unreachable:  1,
+		DaemonIssues: []string{"a", "b"},
+		Coherence:    []string{"X: 1", "X: 2", "X: 3", "X: 4"},
+	}
+	for i := 0; i < 8; i++ {
+		d.ProbeIssues = append(d.ProbeIssues, probeIssue{Scope: fmt.Sprintf("s%d", i)})
+	}
+	if got := d.AttnCount(); got != 1+2+8+4 {
+		t.Errorf("AttnCount = %d, want every raw item counted (15)", got)
+	}
+	if len(d.ProbeShown()) != attnProbeShown || d.ProbeMore() != 3 {
+		t.Errorf("shown %d, more %d, want %d shown and 3 more", len(d.ProbeShown()), d.ProbeMore(), attnProbeShown)
+	}
+	if (overviewData{}).AttnCount() != 0 || (overviewData{}).ProbeMore() != 0 {
+		t.Error("nothing to attend to means zeros")
+	}
+}
+
+func TestStatusTmpl_NeedsAttentionIsCountedGroupedAndCapped(t *testing.T) {
+	d := overviewData{ClusterState: "STABLE"}
+	for i := 0; i < 20; i++ {
+		d.Coherence = append(d.Coherence, fmt.Sprintf("NO TOKEN: scope dante-%03d served by core-2 but no arbiter token exists", i))
+	}
+	for i := 0; i < 9; i++ {
+		d.ProbeIssues = append(d.ProbeIssues, probeIssue{Scope: fmt.Sprintf("p%d", i), Worker: "probe"})
+	}
+	var b bytes.Buffer
+	if err := statusTmpl.Execute(&b, d); err != nil {
+		t.Fatal(err)
+	}
+	out := html.UnescapeString(b.String())
+	for _, want := range []string{"Needs attention <span class=\"dim\">(29)</span>", "(20): ", "+ 4 more probe issue(s)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("card lacks %q", want)
+		}
+	}
+	if strings.Count(out, `class="crit" title="`) > 2 {
+		t.Errorf("20 alike warnings must be one line, got %d crit lines", strings.Count(out, `class="crit" title="`))
+	}
+	if strings.Contains(out, ">p5<") {
+		t.Error("only the first probe issues are listed")
+	}
+}
+
+func TestStatusTmpl_CardTablesHaveFixedColumns(t *testing.T) {
+	var b bytes.Buffer
+	d := overviewData{ClusterState: "STABLE", ProbeFig: probeFigures{Total: 3, Probed: 3}, PathDigest: []pathDigestRow{{From: "core-1", To: "core-2", Trunk: "ens19", Text: "reachable"}}}
+	if err := statusTmpl.Execute(&b, d); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	if got := strings.Count(out, `class="small kv-table fixed-table"><colgroup>`); got != 4 {
+		t.Errorf("the four card tables need explicit column widths, found %d", got)
+	}
+	for _, want := range []string{
+		"@media (min-width:701px){.card-grid{grid-template-rows:17rem 24rem}}",
+		".card-grid>.card{overflow:auto;scrollbar-gutter:stable;min-height:0}",
+		".kv-table.fixed-table td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+		".card-wide .scrollbox{height:12rem;max-height:none}",
+	} {
+		if !strings.Contains(styleHTML, want) {
+			t.Errorf("style lacks %q", want)
+		}
+	}
+}
+
+func TestStatusTmpl_ProbeHostInfoCarriesItsTooltip(t *testing.T) {
+	d := overviewData{ClusterState: "STABLE", ProbeHostRows: []probeHostOverviewRow{{Name: "probe", Info: "5/5 swept · settling", InfoTitle: "five of five swept, settling"}}}
+	var b bytes.Buffer
+	if err := statusTmpl.Execute(&b, d); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), `<td title="five of five swept, settling">5/5 swept · settling</td>`) {
+		t.Error("the node table's info cell must carry the tooltip")
 	}
 }

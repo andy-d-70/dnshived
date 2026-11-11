@@ -556,15 +556,15 @@ func sweptScopeCount(total, pending int) int {
 }
 
 // probeHostRowStatus computes Overview's probe-host row Class/Info pair.
-func probeHostRowStatus(swept, total, pending int, settlingNow bool) (class, info string) {
-	info = fmt.Sprintf("%d/%d scope(s) swept", swept, total)
+func probeHostRowStatus(swept, total, pending int, settlingNow bool) (class, info, title string) {
+	info = fmt.Sprintf("%d/%d swept", swept, total)
 	switch {
 	case pending > 0:
-		return "warn", info
+		return "warn", info, fmt.Sprintf("%d of %d scope(s) swept, %d still pending", swept, total, pending)
 	case settlingNow:
-		return "warn", info + " (predates the cluster's current settling — not yet re-confirmed)"
+		return "warn", info + " · settling", fmt.Sprintf("%d of %d scope(s) swept; the results predate the cluster's current settling and are not yet re-confirmed", swept, total)
 	default:
-		return "ok", info
+		return "ok", info, fmt.Sprintf("%d of %d scope(s) swept", swept, total)
 	}
 }
 

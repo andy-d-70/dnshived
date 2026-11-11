@@ -15,6 +15,8 @@
 
 - Overview: "More cluster details" is gone; its rows are part of the Health checks card.
 - Scope list: a scope served away from its preferred node gets a marker, and "Rebalance" is greyed out when it cannot apply.
+- Scope list: "Move to core-x" in a scope's menu stages a new preferred node and the rebalance approval in one pending change. Columns have fixed widths, so the list no longer reflows while scopes are probed.
+- Overview: the cards keep fixed heights and scroll inside; "Needs attention" shows a count, groups many alike warnings into one line and caps the probe issues. "NO TOKEN" warnings and DHCP no-answer probe issues appear only after 30 seconds (`?settle=off` shows them at once).
 - Probes, Behavior: the DNS checks box accepts `orf.at|A`, `orf.at/A` and `orf.at A`, checks every line while you type, and a refused save keeps what you typed and names each bad line.
 
 **Fixed**

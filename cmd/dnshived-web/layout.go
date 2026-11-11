@@ -365,6 +365,14 @@ function dnshivedInitTabs(){
   });
 }
 document.addEventListener('DOMContentLoaded', dnshivedInitTabs);
+// A cell whose text is cut off by the fixed layout gets the full text as its tooltip.
+function dnshivedFitTitles(root){
+  (root||document).querySelectorAll('.scope-table td,.scope-table th,.card td').forEach(function(el){
+    if(el.title||el.scrollWidth<=el.clientWidth+1) return;
+    el.title=el.textContent.replace(/\s+/g,' ').trim();
+  });
+}
+document.addEventListener('DOMContentLoaded', function(){ dnshivedFitTitles(); });
 // Line lists: a textarea marked data-line-list is shown as one line per entry with a
 // menu (Edit, Copy, Delete). The textarea stays the source of truth and is what the
 // form submits, so the server side does not change; "Edit as text" brings it back.
@@ -604,6 +612,16 @@ button.btn-sm,.row-menu>summary{min-height:36px}
 }
 /* cards: the Overview grid and every later page built from cards. */
 .card-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.9rem;margin:0 0 1rem}
+/* The Overview keeps its shape whatever the content: fixed card heights, each card scrolls inside itself. */
+@media (min-width:701px){.card-grid{grid-template-rows:17rem 24rem}}
+.card-grid>.card{overflow:auto;scrollbar-gutter:stable;min-height:0}
+@media (max-width:700px){.card-grid>.card{height:17rem}.card-grid>.card:nth-child(n+4){height:24rem}}
+.card-attn .card-list li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kv-table.fixed-table td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-wide .scrollbox{height:12rem;max-height:none}
+/* The scope list: fixed columns (a colgroup), one line per cell, a narrow window scrolls sideways. */
+.scope-table{table-layout:fixed;width:100%;min-width:64rem}
+.scope-table td,.scope-table th{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;min-width:0}
 .card h2{margin:0 0 .5rem;font-size:1rem}
 .card p{margin:.3rem 0}

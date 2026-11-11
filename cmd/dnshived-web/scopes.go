@@ -42,6 +42,8 @@ type scopeRow struct {
 	// RebalanceNote, when set, is why "Rebalance to preferred core" is
 	// greyed out for this scope.
 	RebalanceNote string
+	// MoveTargets are the cores the row menu offers "Move to" for.
+	MoveTargets []string
 	// WorkerClass is the same worker-identity color topology.go's own
 	// roleClass() uses everywhere else.
 	WorkerClass string
@@ -137,9 +139,10 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
 </div>
 ` + probeCellDefineHTML + `
 <div class="table-wrap">
-<table border="1" cellpadding="4" cellspacing="0">
+<table class="scope-table" border="1" cellpadding="4" cellspacing="0">
+<colgroup>{{if .HasProbeHosts}}<col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:6%"><col style="width:10%"><col style="width:9%"><col style="width:7%"><col style="width:13%"><col style="width:22rem"><col style="width:3.5rem">{{else}}<col style="width:15%"><col style="width:9%"><col style="width:13%"><col style="width:7%"><col style="width:16%"><col style="width:10%"><col style="width:10%"><col style="width:16%"><col style="width:3.5rem">{{end}}</colgroup>
 <tr>{{range .Headers}}<th aria-sort="{{.AriaSort}}" style="white-space:nowrap;vertical-align:middle"{{if .Title}} title="{{.Title}}"{{end}}><a href="{{.URL}}" style="color:inherit;text-decoration:none">{{.Label}}<span style="display:inline-block;width:1em">{{.Arrow}}</span></a></th>{{end}}<th></th></tr>
-{{range .Rows}}
+{{range .Rows}}{{$name := .Name}}
 <tr>
   <td style="white-space:nowrap">{{if .Color}}<span class="name-dot" style="background:{{.Color}}" title="color tag — change on the scope's own edit page"></span>{{end}}<a href="/scopes/{{.Name}}">{{.Display}}</a>{{if .PendingDelete}} <span class="crit" title="a pending change stages this scope's removal — still live and served until you commit from Pending changes">marked for deletion</span>{{end}}</td>
   <td class="{{.WorkerClass}}">{{.Worker}}<span class="pref-slot">{{if .OffPreferred}}<span class="warn" title="not on its preferred node: served by {{.Worker}}, preferred is {{.Preferred}}">&ne;</span>{{end}}</span></td>
@@ -149,13 +152,15 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
   <td>{{.Token}}</td>
   <td class="{{.Class}}"{{if .StatusTitle}} title="{{.StatusTitle}}"{{end}}>{{.Status}}</td>
   <td style="white-space:nowrap">{{if gt .PoolSize 0}}<span class="pool-bar"><span class="pool-fill {{.PoolClass}}" style="width:{{.PoolUsagePct}}%"></span></span><span class="{{.PoolClass}}">{{.PoolUsed}} of {{.PoolSize}} used</span>{{else}}<span class="dim">—</span>{{end}}</td>
-  {{if $.HasProbeHosts}}<td style="white-space:nowrap">{{range .ProbeCells}}{{template "probecell" .}}<br>{{end}}</td>{{end}}
+  {{if $.HasProbeHosts}}<td style="white-space:nowrap;font-variant-numeric:tabular-nums">{{range .ProbeCells}}{{template "probecell" .}}<br>{{end}}</td>{{end}}
   <td style="width:3rem;text-align:center"><details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.Name}}">&#9776;</summary>
   <div class="row-menu-list" role="menu">
   <a role="menuitem" href="/scopes/{{.Name}}">Open / edit</a>
   <form method="post" action="/scopes/{{.Name}}/toggle-disabled" onsubmit="return confirm('This will stage a pending change on every configured node ({{if .Disabled}}enable{{else}}disable{{end}} scope {{.Name}}) — nothing is applied until you commit from Pending changes. {{if not .Disabled}}DHCP, DNS and probing stop for this scope; the VIP and VRRP are released; the VLAN interface and node addresses stay up.{{end}} Continue?')"><button type="submit" role="menuitem">{{if .Disabled}}Enable{{else}}Disable{{end}}</button></form>
   {{if .RebalanceNote}}<span class="menu-off" title="{{.RebalanceNote}}"><button type="button" role="menuitem" disabled aria-disabled="true">Rebalance to preferred core</button></span>
   {{else}}<form method="post" action="/scopes/{{.Name}}/rebalance" onsubmit="return confirm('Approve a rebalance of scope {{.Name}} to its preferred core? This stages the approval as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')"><button type="submit" role="menuitem">Rebalance to preferred core</button></form>{{end}}
+  {{range .MoveTargets}}<form method="post" action="/scopes/{{$name}}/move-to-node" onsubmit="return confirm('Stage a move of scope {{$name}} to {{.}}? This makes {{.}} its preferred worker and approves the rebalance, so after you commit from Pending changes the scope moves there once {{.}} is alive and stable. Nothing is applied before that. Continue?')"><input type="hidden" name="node" value="{{.}}"><button type="submit" role="menuitem">Move to {{.}}</button></form>
+  {{end}}
   <form method="post" action="/scopes/{{.Name}}/delete" onsubmit="return confirm('Really delete scope {{.Name}}? This stages its removal as a pending change on every configured node — nothing is torn down until you commit from Pending changes. Continue?')"><button type="submit" role="menuitem" class="danger">Delete&hellip;</button></form>
   </div></details>
   </td>
@@ -277,6 +282,10 @@ func handleScopes(ref *configRef) http.HandlerFunc {
 		}
 
 		scopes := buildScopeRows(rows, configScopes, tokens, roles, iotSet, pendingDeletes)
+		cores := reachableCoreRoles(rows)
+		for i := range scopes {
+			scopes[i].MoveTargets = moveTargetsFor(cores, scopes[i].Worker)
+		}
 		populateScopePoolUsage(scopes, nodes)
 
 		if len(cfg.ProbeHosts) > 0 {

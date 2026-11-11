@@ -1182,7 +1182,7 @@ setting once every node is reachable.</strong></p>
   <td class="node-probe" title="probe · {{.Hostname}} · {{.Addr}} · {{.SysStr}}">{{.Name}}</td>
   <td class="{{.Class}} st">{{.Icon}} {{.State}}</td>
   <td class="ver">{{.Version}}</td>
-  <td>{{.Info}}</td>
+  <td{{if .InfoTitle}} title="{{.InfoTitle}}"{{end}}>{{.Info}}</td>
 </tr>
 {{end}}
 </table>
@@ -1192,7 +1192,7 @@ setting once every node is reachable.</strong></p>
 <h2>Scopes <span class="info-ico" title="how many of the cluster's configured scopes currently have exactly one node authoritatively serving DHCP for them — by design, never two at once; a scope can be temporarily unserved during startup/failover/rebalancing without that being an outage. Disabled scopes are not counted as serving and are listed separately">ⓘ</span></h2>
 <p class="{{.ServingClass}} card-big">{{.ServingText}}</p>
 <div class="meter {{.ServingMeter}}"><i style="width:{{.ServingPct}}%"></i></div>
-<table class="small kv-table">
+<table class="small kv-table fixed-table"><colgroup><col style="width:40%"><col style="width:60%"></colgroup>
 {{if .UnservedCount}}<tr><td>Not served</td><td class="warn">{{.UnservedCount}}</td></tr>{{end}}
 {{if .DisabledCount}}<tr><td>Paused (disabled)</td><td>{{.DisabledCount}}</td></tr>{{end}}
 {{range .ServingNodes}}<tr><td class="{{.Class}}">{{.Name}}</td><td><span class="meter mini"><i style="width:{{.Pct}}%"></i></span> {{.Count}} serving</td></tr>
@@ -1204,7 +1204,7 @@ setting once every node is reachable.</strong></p>
 <h2>Probes <span class="info-ico" title="real DHCP/DNS validation performed from an external probe host, on each scope's own client-facing VLAN — the closest thing to 'does this actually work for a real client', not just 'does the cluster believe it's serving'">ⓘ</span></h2>
 <p class="{{.ProbeSummaryClass}} card-big">{{.ProbeSummary}}</p>
 {{with .ProbeFig}}{{if .Total}}<div class="meter {{.Meter}}"><i style="width:{{.Pct}}%"></i></div>
-<table class="small kv-table">
+<table class="small kv-table fixed-table"><colgroup><col style="width:45%"><col style="width:55%"></colgroup>
 <tr><td>Probed</td><td>{{.Probed}} of {{.Total}}</td></tr>
 {{if .Issues}}<tr><td>With issues</td><td class="crit">{{.Issues}}{{if .Rogue}} ({{.Rogue}} rogue DHCP){{end}}</td></tr>{{end}}
 {{if .Pending}}<tr><td>Pending first sweep</td><td class="warn">{{.Pending}}</td></tr>{{end}}
@@ -1217,26 +1217,26 @@ setting once every node is reachable.</strong></p>
 </section>
 
 <section class="card card-attn">
-<h2>Needs attention</h2>
+<h2>Needs attention{{with .AttnCount}} <span class="dim">({{.}})</span>{{end}}</h2>
 {{if or .ProbeIssues .DaemonIssues .Coherence .Unreachable}}
 <ul class="card-list">
 {{if .Unreachable}}<li class="crit">{{.Unreachable}} node(s) unreachable{{if .UnreachableNames}}: {{.UnreachableNames}}{{end}}</li>{{end}}
 {{range .DaemonIssues}}<li class="crit">{{.}}</li>{{end}}
-{{range .ProbeIssues}}<li>{{if .Rogue}}<span class="rogue-badge">⚠ ROGUE DHCP SERVER</span> {{end}}<a href="/probes/{{.Scope}}/{{.Worker}}">{{.Scope}}</a> (from {{.Worker}}):
+{{range .ProbeShown}}<li>{{if .Rogue}}<span class="rogue-badge">⚠ ROGUE DHCP SERVER</span> {{end}}<a href="/probes/{{.Scope}}/{{.Worker}}">{{.Scope}}</a> (from {{.Worker}}):
 {{if .DNSText}} <span class="{{.DNSClass}}">{{.DNSText}}</span>{{end}}
 {{if .DHCPText}} <span class="{{.DHCPClass}}">{{.DHCPText}}</span>{{end}}
 {{if .Detail}} <span class="{{if .Rogue}}crit{{else}}dim{{end}}">{{.Detail}}</span>{{end}}</li>{{end}}
-{{range .Coherence}}<li class="crit" title="{{coherenceTitle .}}">{{.}}</li>{{end}}
+{{if .ProbeMore}}<li class="dim"><a href="/probes">+ {{.ProbeMore}} more probe issue(s) &rarr;</a></li>{{end}}
+{{range .AttnItems}}<li class="crit" title="{{.Title}}">{{.Text}}</li>{{end}}
 </ul>
 {{else}}
 <p class="ok">✔ Nothing needs attention.</p>
-{{end}}
-</section>
+{{end}}</section>
 
 <section class="card">
 <h2>Cluster paths <span class="info-ico" title="each worker trunk's own alternate path to every other core role — continuously monitored, not actively used until a peer's primary (mgmt) path goes down">ⓘ</span></h2>
 <p class="{{.PathsSummaryClass}} card-big">{{.PathsSummaryText}}</p>
-{{if .PathDigest}}<table class="small kv-table">
+{{if .PathDigest}}<table class="small kv-table fixed-table"><colgroup><col style="width:56%"><col style="width:44%"></colgroup>
 {{range .PathDigest}}<tr><td>{{.From}} → {{.To}} <span class="dim">{{.Trunk}}</span></td><td class="{{.Class}}">{{.Text}} · {{.Score}} %</td></tr>
 {{end}}</table>
 {{if .PathDigestMore}}<p class="dim">+ {{.PathDigestMore}} more trunk path(s)</p>{{end}}
@@ -1246,7 +1246,7 @@ setting once every node is reachable.</strong></p>
 
 <section class="card">
 <h2>Health checks</h2>
-<table class="small kv-table">
+<table class="small kv-table fixed-table"><colgroup><col style="width:38%"><col style="width:62%"></colgroup>
 <tr><td>State <span class="info-ico" title="the cluster's own quorum/failover state machine: STABLE means every serving decision has settled and held for the required settling window; DEGRADED/GETTING THERE/NOT CONVERGING mean scopes are still starting, rebalancing, or stuck — not necessarily an outage, but worth watching">ⓘ</span></td><td class="{{.ClusterClass}}">{{.ClusterState}}</td></tr>
 <tr><td>Stable for</td><td class="dim st"{{if .StableSince}} title="stable since {{.StableSince}} (this web host's time)"{{end}}>{{if .StableSince}}{{.StableFor}}{{else}}–{{end}}</td></tr>
 <tr><td>Configuration sane <span class="info-ico" title="every node's own real, live-observed state (interfaces, sockets, ...) checked against what's actually configured/intended — separate from State above, which is FSM/quorum health only">ⓘ</span></td><td class="{{.ConfigSaneClass}}"{{if .ConfigSaneTitle}} title="{{.ConfigSaneTitle}}"{{end}}>{{.ConfigSaneText}}</td></tr>
@@ -1328,6 +1328,84 @@ setting once every node is reachable.</strong></p>
 {{end}}
 `))
 
+// attnItem is one line of the Needs attention card.
+type attnItem struct{ Text, Title string }
+
+const (
+	attnGroupMin   = 4 // this many warnings of one kind collapse into one line
+	attnProbeShown = 5 // probe issues listed before "+ N more"
+)
+
+func warningKind(w string) string {
+	if i := strings.Index(w, ":"); i > 0 && w[:i] == strings.ToUpper(w[:i]) {
+		return w[:i]
+	}
+	return ""
+}
+
+// groupWarnings turns the coherence warnings into card lines: warnings of a kind
+// that occurs attnGroupMin times or more become one line with the first warning,
+// the count up front and the full list as tooltip, so many alike cannot fill the card.
+func groupWarnings(ws []string) []attnItem {
+	counts := map[string]int{}
+	for _, w := range ws {
+		counts[warningKind(w)]++
+	}
+	var out []attnItem
+	done := map[string]bool{}
+	for _, w := range ws {
+		k := warningKind(w)
+		if k == "" || counts[k] < attnGroupMin {
+			out = append(out, attnItem{Text: w, Title: coherenceWarningTitle(w)})
+			continue
+		}
+		if done[k] {
+			continue
+		}
+		done[k] = true
+		var all []string
+		for _, x := range ws {
+			if warningKind(x) == k {
+				all = append(all, x)
+			}
+		}
+		list := all
+		if len(list) > 100 {
+			list = append(append([]string(nil), all[:100]...), fmt.Sprintf("… and %d more", len(all)-100))
+		}
+		out = append(out, attnItem{
+			Text:  fmt.Sprintf("%s (%d): %s", k, len(all), strings.TrimPrefix(strings.TrimPrefix(w, k+":"), " ")),
+			Title: coherenceWarningTitle(w) + "\n\n" + strings.Join(list, "\n"),
+		})
+	}
+	return out
+}
+
+// AttnItems, AttnCount, ProbeShown and ProbeMore feed the Needs attention card.
+func (d overviewData) AttnItems() []attnItem { return groupWarnings(d.Coherence) }
+
+func (d overviewData) AttnCount() int {
+	n := len(d.DaemonIssues) + len(d.ProbeIssues) + len(d.Coherence)
+	if d.Unreachable > 0 {
+		n++
+	}
+	return n
+}
+
+func (d overviewData) ProbeShown() []probeIssue {
+	if len(d.ProbeIssues) > attnProbeShown {
+		return d.ProbeIssues[:attnProbeShown]
+	}
+	return d.ProbeIssues
+}
+
+func (d overviewData) ProbeMore() int {
+	if n := len(d.ProbeIssues) - attnProbeShown; n > 0 {
+		return n
+	}
+	return 0
+}
+
 type overviewData struct {
 	Rows                 []statusRow
 	Mismatch             bool
@@ -1395,14 +1473,15 @@ type overviewData struct {
 type probeHostOverviewRow struct {
 	Name string
 	// Hostname is the probe host's OS hostname, empty on a DOWN row.
-	Hostname string
-	Addr     string
-	Icon     string
-	Class    string
-	State    string
-	Info     string
-	Version  string
-	SysStr   string // same "load %.2f  mem %d%%" format as the real workers' own rows
+	Hostname  string
+	Addr      string
+	Icon      string
+	Class     string
+	State     string
+	Info      string
+	Version   string
+	SysStr    string // same "load %.2f  mem %d%%" format as the real workers' own rows
+	InfoTitle string
 }
 
 // probeHostRowName is a one-line pure wrapper around n.displayName().
@@ -1710,6 +1789,10 @@ func handleStatus(ref *configRef) http.HandlerFunc {
 		sort.Slice(probeIssues, func(i, j int) bool {
 			return probeIssues[i].Scope+probeIssues[i].Worker < probeIssues[j].Scope+probeIssues[j].Worker
 		})
+		coherence := append(checkCoherence(rows, tokens, selfObserverName(cfg)), checkPendingCoherence(cfg)...)
+		if r.URL.Query().Get("settle") != "off" {
+			coherence, probeIssues = settleState.settleFilter(time.Now(), coherence, probeIssues)
+		}
 		probeSummary, probeSummaryClass := probeSummaryWithCoverage(probeIssues, probePending, probeCov)
 
 		var stableSinceText, stableForText string
@@ -1730,7 +1813,7 @@ func handleStatus(ref *configRef) http.HandlerFunc {
 				row.Hostname = res.Value.Status.Hostname
 				pending := probePending
 				swept := sweptScopeCount(len(configuredScopes), pending)
-				row.Class, row.Info = probeHostRowStatus(swept, len(configuredScopes), pending, settlingNow)
+				row.Class, row.Info, row.InfoTitle = probeHostRowStatus(swept, len(configuredScopes), pending, settlingNow)
 				row.Version = res.Value.Status.Version
 				if res.Value.HasSystem {
 					row.SysStr = fmt.Sprintf("load %.2f  mem %d%%", res.Value.System.LoadAvg1, res.Value.System.MemPct)
@@ -1779,7 +1862,7 @@ func handleStatus(ref *configRef) http.HandlerFunc {
 			ProbeSummary:         probeSummary,
 			ProbeSummaryClass:    probeSummaryClass,
 			ProbeIssues:          probeIssues,
-			Coherence:            append(checkCoherence(rows, tokens, selfObserverName(cfg)), checkPendingCoherence(cfg)...),
+			Coherence:            coherence,
 			RecentEvents:         recentEventRows(cfg, nodesIncludingSelf(cfg), rows, 20),
 			ServingNodes:         buildServingNodes(rows, disabledScopes),
 			DisabledCount:        len(disabledScopes),

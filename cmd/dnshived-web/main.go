@@ -138,6 +138,7 @@ func main() {
 	mux.HandleFunc("POST /scopes/{name}/toggle-disabled", requirePermission(store, webauth.PermEditScopes, handleScopeDisableToggle(ref)))
 	mux.HandleFunc("POST /scopes/{name}/move", requirePermission(store, webauth.PermEditScopes, handleScopeMove(ref)))
 	mux.HandleFunc("POST /scopes/{name}/rebalance", requirePermission(store, webauth.PermEditScopes, handleScopeRebalance(ref)))
+	mux.HandleFunc("POST /scopes/{name}/move-to-node", requirePermission(store, webauth.PermEditScopes, handleScopeMoveToNode(ref)))
 	mux.HandleFunc("POST /scopes/rebalance-all", requirePermission(store, webauth.PermEditScopes, handleScopeRebalanceAll(ref)))
 	mux.HandleFunc("POST /scopes/{name}/delete", requirePermission(store, webauth.PermEditScopes, handleScopeDelete(ref)))
 	mux.HandleFunc("/probes", requirePermission(store, webauth.PermViewStatus, handleProbes(ref)))

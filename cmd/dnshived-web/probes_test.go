@@ -1195,33 +1195,36 @@ func TestSweptScopeCount_ClampsAtZero(t *testing.T) {
 }
 
 func TestProbeHostRowStatus_PendingIsWarnRegardlessOfSettling(t *testing.T) {
-	class, info := probeHostRowStatus(3, 5, 2, false)
+	class, info, title := probeHostRowStatus(3, 5, 2, false)
 	if class != "warn" {
 		t.Errorf("class = %q, want warn (pending > 0)", class)
 	}
-	if info != "3/5 scope(s) swept" {
+	if info != "3/5 swept" {
 		t.Errorf("info = %q, want unqualified swept text", info)
+	}
+	if !strings.Contains(title, "2 still pending") {
+		t.Errorf("title = %q, want the pending count in the tooltip", title)
 	}
 }
 
 func TestProbeHostRowStatus_SettlingWithZeroPendingIsWarnAndQualified(t *testing.T) {
-	class, info := probeHostRowStatus(1, 1, 0, true)
+	class, info, title := probeHostRowStatus(1, 1, 0, true)
 	if class != "warn" {
 		t.Errorf("class = %q, want warn (settling, even with pending==0)", class)
 	}
-	if !strings.Contains(info, "1/1 scope(s) swept") || !strings.Contains(info, "predates the cluster's current settling") {
-		t.Errorf("info = %q, want the swept count plus a settling qualifier", info)
+	if info != "1/1 swept · settling" || !strings.Contains(title, "predate the cluster's current settling") {
+		t.Errorf("info = %q, title = %q, want the short qualifier in the cell and the explanation in the tooltip", info, title)
 	}
 }
 
 // TestProbeHostRowStatus_FullySettledIsOk pins the clean-slate case — no
 // pending, cluster not settling, a real all-clear.
 func TestProbeHostRowStatus_FullySettledIsOk(t *testing.T) {
-	class, info := probeHostRowStatus(5, 5, 0, false)
+	class, info, _ := probeHostRowStatus(5, 5, 0, false)
 	if class != "ok" {
 		t.Errorf("class = %q, want ok", class)
 	}
-	if info != "5/5 scope(s) swept" {
+	if info != "5/5 swept" {
 		t.Errorf("info = %q, want unqualified swept text", info)
 	}
 }

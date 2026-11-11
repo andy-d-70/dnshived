@@ -198,3 +198,31 @@ func TestTabHost_StaysOutOfSightUntilItsTabsAreBuilt(t *testing.T) {
 		t.Error("a tab host with a single pane never gets tabs-ready, so it must be released with tabs-skip or it stays hidden for 2 s")
 	}
 }
+
+func TestScopesTmpl_TableHasFixedColumns(t *testing.T) {
+	with := renderScopes(t, []scopeRow{{Name: "alpha", Display: "alpha"}}, true)
+	without := renderScopes(t, []scopeRow{{Name: "alpha", Display: "alpha"}}, false)
+	for name, out := range map[string]string{"with probe column": with, "without": without} {
+		if !strings.Contains(out, `<table class="scope-table"`) || !strings.Contains(out, "<colgroup>") {
+			t.Errorf("%s: the scope list needs table-layout fixed through the scope-table class and a colgroup", name)
+		}
+	}
+	if got := strings.Count(strings.SplitN(with, "</colgroup>", 2)[0][strings.Index(with, "<colgroup>"):], "<col "); got != 10 {
+		t.Errorf("with the probe column the table has 10 columns, colgroup has %d", got)
+	}
+	if got := strings.Count(strings.SplitN(without, "</colgroup>", 2)[0][strings.Index(without, "<colgroup>"):], "<col "); got != 9 {
+		t.Errorf("without the probe column the table has 9 columns, colgroup has %d", got)
+	}
+	if !strings.Contains(with, "width:22rem") {
+		t.Error("the probe column keeps a fixed width that fits its text")
+	}
+	for _, want := range []string{
+		".scope-table{table-layout:fixed;width:100%;min-width:64rem}",
+		".scope-table td,.scope-table th{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+		"function dnshivedFitTitles(root)",
+	} {
+		if !strings.Contains(styleHTML+navHTML, want) {
+			t.Errorf("layout lacks %q", want)
+		}
+	}
+}
