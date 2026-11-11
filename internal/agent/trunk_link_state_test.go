@@ -188,3 +188,63 @@ func TestRestoreTrunkReliability_ReplacesLocalHistory(t *testing.T) {
 		t.Errorf("TrunkReliabilitySnapshot()[\"ens19\"] after restore = %+v, ok=%v, want Score=61", e, ok)
 	}
 }
+
+func TestCheckTrunkLinkState_StateChangeProbesTheScopesOfThatTrunk(t *testing.T) {
+	scopes := map[string]config.ScopeConfig{
+		"a": {Parent: "ens19", VLANID: 100},
+		"b": {Parent: "ens19", VLANID: 101},
+		"c": {Parent: "ens20", VLANID: 102},
+	}
+	a := newTestAgent("", scopes)
+	var probed [][]string
+	a.scopeProbeFn = func(names ...string) { probed = append(probed, append([]string(nil), names...)) }
+	carrier := map[string]bool{"ens19": true, "ens20": true}
+	saved := readCarrierFor
+	readCarrierFor = func(iface string) (bool, bool) { up, ok := carrier[iface]; return up, ok }
+	defer func() { readCarrierFor = saved }()
+
+	a.checkTrunkLinkState()
+	a.checkTrunkLinkState()
+	if len(probed) != 0 {
+		t.Fatalf("no state change, yet the scopes were probed: %v", probed)
+	}
+	carrier["ens19"] = false
+	a.checkTrunkLinkState()
+	if len(probed) != 1 || len(probed[0]) != 2 || probed[0][0] != "a" || probed[0][1] != "b" {
+		t.Fatalf("a trunk going down must probe exactly its own scopes, got %v", probed)
+	}
+	a.checkTrunkLinkState()
+	if len(probed) != 1 {
+		t.Errorf("a trunk that stays down must not be probed again, got %v", probed)
+	}
+	carrier["ens19"] = true
+	a.checkTrunkLinkState()
+	if len(probed) != 2 {
+		t.Errorf("a trunk coming back up must probe its scopes, got %v", probed)
+	}
+	delete(carrier, "ens20") // unreadable carrier: no change, no probe
+	a.checkTrunkLinkState()
+	if len(probed) != 2 {
+		t.Errorf("an unreadable carrier is not a state change, got %v", probed)
+	}
+}
+
+func TestProbeScopeBeacons_WithoutARunnerIsANoOp(t *testing.T) {
+	a := newTestAgent("", testScopes("office"))
+	a.probeScopeBeacons("office")
+	a.probeScopesOnTrunks([]string{"ens19"})
+}
+
+func TestProbeScopeBeacons_RebuiltScopesAreProbed(t *testing.T) {
+	a := newTestAgent("", testScopes("office"))
+	var probed []string
+	a.scopeProbeFn = func(names ...string) { probed = append(probed, names...) }
+	a.probeScopeBeacons()
+	if len(probed) != 0 {
+		t.Error("an empty list probes nothing")
+	}
+	a.probeScopeBeacons("office", "dante")
+	if len(probed) != 2 {
+		t.Errorf("probed %v", probed)
+	}
+}

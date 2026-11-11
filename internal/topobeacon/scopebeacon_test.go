@@ -11,6 +11,44 @@ import (
 	"time"
 )
 
+func fastConfig() schedConfig {
+	return schedConfig{
+		tick: 10 * time.Millisecond, batch: 10, tOK: 300 * time.Millisecond, tDown: 150 * time.Millisecond,
+		retry: 60 * time.Millisecond, early: 50 * time.Millisecond, replyTimeout: 120 * time.Millisecond, maxUtil: 0.6,
+	}
+}
+
+func newFastRunner(role string, psk []byte, m *ScopeMonitor) *ScopeBeaconRunner {
+	return newScopeBeaconRunner(role, psk, m, fastConfig(), time.Now, newUDPScopeProber)
+}
+
+const fastSettle = 700 * time.Millisecond
+
+// probeOnce sends one probe through the real prober and waits for its outcome.
+func probeOnce(t testing.TB, role string, target ScopeTarget, psk []byte, wait time.Duration) bool {
+	t.Helper()
+	p, err := newUDPScopeProber(role, psk, wait)
+	if err != nil {
+		t.Fatalf("prober: %v", err)
+	}
+	defer p.close()
+	res := make(chan bool, 1)
+	p.send(target, func(ok bool) { res <- ok })
+	deadline := time.After(wait + time.Second)
+	tk := time.NewTicker(10 * time.Millisecond)
+	defer tk.Stop()
+	for {
+		select {
+		case ok := <-res:
+			return ok
+		case <-tk.C:
+			p.sweep(time.Now())
+		case <-deadline:
+			t.Fatal("the probe never completed")
+		}
+	}
+}
+
 // TestScopeBeacon_RealLoopbackRoundTrip is the direct, real-socket proof
 // of the actual wire mechanism.
 func TestScopeBeacon_RealLoopbackRoundTrip(t *testing.T) {
@@ -22,9 +60,9 @@ func TestScopeBeacon_RealLoopbackRoundTrip(t *testing.T) {
 	time.Sleep(50 * time.Millisecond) // let the listener goroutine actually bind
 
 	target := ScopeTarget{Scope: "office", LocalAddr: "127.0.0.1", PeerRole: "core-2", PeerAddr: "127.0.0.1"}
-	ok := sendOneScopeBeacon("core-1", target, 1, psk)
+	ok := probeOnce(t, "core-1", target, psk, 500*time.Millisecond)
 	if !ok {
-		t.Fatal("sendOneScopeBeacon against a real listening loopback socket returned false, want true")
+		t.Fatal("a probe against a real listening loopback socket returned false, want true")
 	}
 
 	monitor := NewScopeMonitor(nil)
@@ -47,7 +85,7 @@ func TestScopeMonitor_DebounceFiresOnceOnTransitionThenRecoversImmediately(t *te
 	monitor := NewScopeMonitor(func(scope, peerRole string) { transitions++ })
 
 	for i := 0; i < scopeStaleAfterMisses+2; i++ {
-		ok := sendOneScopeBeacon("core-1", noListener, uint64(i), psk)
+		ok := probeOnce(t, "core-1", noListener, psk, 150*time.Millisecond)
 		monitor.recordResult(noListener.Scope, noListener.PeerRole, ok)
 	}
 
@@ -63,7 +101,7 @@ func TestScopeMonitor_DebounceFiresOnceOnTransitionThenRecoversImmediately(t *te
 	// reachable — no further debounce on the way back up.
 	ListenScopeBeacons(ctx, "core-3", []string{"127.0.0.2"}, psk)
 	time.Sleep(50 * time.Millisecond)
-	ok := sendOneScopeBeacon("core-1", noListener, 999, psk)
+	ok := probeOnce(t, "core-1", noListener, psk, 150*time.Millisecond)
 	if !ok {
 		t.Fatal("expected a real reply once a listener exists on 127.0.0.2")
 	}
@@ -85,7 +123,7 @@ func TestScopeBeacon_WrongPSKRequestRejected(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	target := ScopeTarget{Scope: "office", LocalAddr: "127.0.0.1", PeerRole: "core-2", PeerAddr: "127.0.0.1"}
-	ok := sendOneScopeBeacon("core-1", target, 1, attackerPSK)
+	ok := probeOnce(t, "core-1", target, attackerPSK, 300*time.Millisecond)
 	if ok {
 		t.Fatal("a request signed with the wrong PSK was accepted as a valid round trip — the listener should have silently dropped it, producing no reply at all")
 	}
@@ -124,7 +162,7 @@ func TestScopeBeacon_ForgedReplyRejected(t *testing.T) {
 	}()
 
 	target := ScopeTarget{Scope: "office", LocalAddr: "127.0.0.1", PeerRole: "core-2", PeerAddr: "127.0.0.3"}
-	ok := sendOneScopeBeacon("core-1", target, 1, realPSK)
+	ok := probeOnce(t, "core-1", target, realPSK, 300*time.Millisecond)
 	<-done
 	if ok {
 		t.Fatal("a reply forged under the wrong PSK (but with correct, plainly-visible Magic/Scope/Nonce) was accepted as valid — the signature check should have rejected it")
@@ -142,7 +180,7 @@ func TestScopeBeaconRunner_UpdateStartsNewTargetsAndStopsRemovedOnes(t *testing.
 	time.Sleep(50 * time.Millisecond)
 
 	monitor := NewScopeMonitor(nil)
-	runner := NewScopeBeaconRunner("core-1", psk, monitor)
+	runner := newFastRunner("core-1", psk, monitor)
 
 	kept := ScopeTarget{Scope: "kept", LocalAddr: "127.0.0.9", PeerRole: "core-2", PeerAddr: "127.0.0.1"}
 	removed := ScopeTarget{Scope: "removed", LocalAddr: "127.0.0.9", PeerRole: "core-2", PeerAddr: "127.0.0.2"}
@@ -150,7 +188,7 @@ func TestScopeBeaconRunner_UpdateStartsNewTargetsAndStopsRemovedOnes(t *testing.
 
 	runner.Update(ctx, []ScopeTarget{kept, removed})
 	// Let both targets' own tickers fire at least once.
-	time.Sleep(ScopeBeaconInterval + 200*time.Millisecond)
+	time.Sleep(fastSettle)
 
 	snap := runner.monitor.Snapshot()
 	if len(snap) != 2 {
@@ -160,7 +198,7 @@ func TestScopeBeaconRunner_UpdateStartsNewTargetsAndStopsRemovedOnes(t *testing.
 	runner.Update(ctx, []ScopeTarget{kept, added})
 	// Give the removed target's own goroutine time to actually exit,
 	// and the newly-added one time to fire at least once.
-	time.Sleep(ScopeBeaconInterval + 200*time.Millisecond)
+	time.Sleep(fastSettle)
 
 	snap = runner.monitor.Snapshot()
 	if len(snap) != 2 {
@@ -203,16 +241,16 @@ func TestScopeBeaconRunner_UpdateIsIdempotentForUnchangedTargets(t *testing.T) {
 	psk := []byte("test-cluster-psk")
 
 	monitor := NewScopeMonitor(nil)
-	runner := NewScopeBeaconRunner("core-1", psk, monitor)
+	runner := newFastRunner("core-1", psk, monitor)
 
 	target := ScopeTarget{Scope: "office", LocalAddr: "127.0.0.9", PeerRole: "core-3", PeerAddr: "127.0.0.250"}
 
 	runner.Update(ctx, []ScopeTarget{target})
-	time.Sleep(ScopeBeaconInterval + 200*time.Millisecond)
+	time.Sleep(fastSettle)
 	first := runner.monitor.Snapshot()[0].ConsecutiveMisses
 
 	runner.Update(ctx, []ScopeTarget{target})
-	time.Sleep(ScopeBeaconInterval + 200*time.Millisecond)
+	time.Sleep(fastSettle)
 	second := runner.monitor.Snapshot()[0].ConsecutiveMisses
 
 	if second <= first {
@@ -236,7 +274,7 @@ func TestScopeListenerRunner_UpdateOpensNewAndClosesRemovedLeavesUnchangedAlone(
 
 	for _, addr := range []string{kept, removed} {
 		target := ScopeTarget{Scope: "office", LocalAddr: "127.0.0.9", PeerRole: "core-2", PeerAddr: addr}
-		if ok := sendOneScopeBeacon("core-1", target, 1, psk); !ok {
+		if ok := probeOnce(t, "core-1", target, psk, 150*time.Millisecond); !ok {
 			t.Fatalf("address %s did not answer right after the first Update — its listener never bound", addr)
 		}
 	}
@@ -247,17 +285,17 @@ func TestScopeListenerRunner_UpdateOpensNewAndClosesRemovedLeavesUnchangedAlone(
 	time.Sleep(200 * time.Millisecond)
 
 	keptTarget := ScopeTarget{Scope: "office", LocalAddr: "127.0.0.9", PeerRole: "core-2", PeerAddr: kept}
-	if ok := sendOneScopeBeacon("core-1", keptTarget, 2, psk); !ok {
+	if ok := probeOnce(t, "core-1", keptTarget, psk, 150*time.Millisecond); !ok {
 		t.Error("the unchanged 'kept' address stopped answering after an unrelated Update call — it should never have been touched")
 	}
 
 	addedTarget := ScopeTarget{Scope: "office", LocalAddr: "127.0.0.9", PeerRole: "core-2", PeerAddr: added}
-	if ok := sendOneScopeBeacon("core-1", addedTarget, 3, psk); !ok {
+	if ok := probeOnce(t, "core-1", addedTarget, psk, 150*time.Millisecond); !ok {
 		t.Error("the newly-added address never started answering after Update")
 	}
 
 	removedTarget := ScopeTarget{Scope: "office", LocalAddr: "127.0.0.9", PeerRole: "core-2", PeerAddr: removed}
-	if ok := sendOneScopeBeacon("core-1", removedTarget, 4, psk); ok {
+	if ok := probeOnce(t, "core-1", removedTarget, psk, 150*time.Millisecond); ok {
 		t.Error("the removed address still answered after Update dropped it — its listener should have been torn down")
 	}
 
@@ -283,11 +321,11 @@ func TestScopeBeaconRunner_UpdateRestartsTargetWhenPeerAddrChanges(t *testing.T)
 	time.Sleep(50 * time.Millisecond)
 
 	monitor := NewScopeMonitor(nil)
-	runner := NewScopeBeaconRunner("core-1", psk, monitor)
+	runner := newFastRunner("core-1", psk, monitor)
 
 	target := ScopeTarget{Scope: "office", LocalAddr: "127.0.0.9", PeerRole: "core-2", PeerAddr: oldPeerAddr}
 	runner.Update(ctx, []ScopeTarget{target})
-	time.Sleep(ScopeBeaconInterval + 200*time.Millisecond)
+	time.Sleep(fastSettle)
 
 	snap := runner.monitor.Snapshot()
 	if len(snap) != 1 || !snap[0].Reachable {
@@ -296,7 +334,7 @@ func TestScopeBeaconRunner_UpdateRestartsTargetWhenPeerAddrChanges(t *testing.T)
 
 	changed := ScopeTarget{Scope: "office", LocalAddr: "127.0.0.9", PeerRole: "core-2", PeerAddr: newPeerAddr}
 	runner.Update(ctx, []ScopeTarget{changed})
-	time.Sleep(ScopeBeaconInterval + 200*time.Millisecond)
+	time.Sleep(fastSettle)
 
 	snap = runner.monitor.Snapshot()
 	if len(snap) != 1 {

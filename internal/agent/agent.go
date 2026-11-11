@@ -446,8 +446,10 @@ type Agent struct {
 
 	// scopeMonitor holds the live KindScope beacon state once
 	// StartScopeBeacons has been called.
-	scopeMonitor        *topobeacon.ScopeMonitor
-	scopeBeaconRunner   *topobeacon.ScopeBeaconRunner
+	scopeMonitor      *topobeacon.ScopeMonitor
+	scopeBeaconRunner *topobeacon.ScopeBeaconRunner
+	// scopeProbeFn asks the beacon scheduler to probe scopes at once; tests replace it.
+	scopeProbeFn        func(names ...string)
 	scopeBeaconCtx      context.Context
 	scopeListenerRunner *topobeacon.ScopeListenerRunner
 
@@ -1074,6 +1076,7 @@ func (a *Agent) StartScopeBeacons(ctx context.Context, role string, onUnreachabl
 	a.scopeListenerRunner.Update(ctx, a.scopeBeaconLocalAddrsList())
 	a.scopeBeaconCtx = ctx
 	a.scopeBeaconRunner = topobeacon.NewScopeBeaconRunner(role, psk, monitor)
+	a.scopeProbeFn = a.scopeBeaconRunner.ProbeScopes
 	targets := a.scopeBeaconTargets()
 	if len(targets) == 0 {
 		loglevel.Infof("[AGENT:SKIP] scope beacon not started — no (scope, peer) pairing could be resolved yet")
@@ -1082,6 +1085,34 @@ func (a *Agent) StartScopeBeacons(ctx context.Context, role string, onUnreachabl
 	loglevel.Infof("[AGENT:SCOPEBEACON] starting on %d (scope, peer) pairing(s)", len(targets))
 	a.scopeBeaconRunner.Update(ctx, targets)
 	return monitor
+}
+
+// probeScopeBeacons has the beacon scheduler probe the pairings of these scopes
+// at once, for an event (a scope was rebuilt, its trunk changed state); the
+// regular rotation would take up to the beacon interval to get there.
+func (a *Agent) probeScopeBeacons(names ...string) {
+	if a.scopeProbeFn != nil && len(names) > 0 {
+		a.scopeProbeFn(names...)
+	}
+}
+
+// probeScopesOnTrunks probes the pairings of every scope on the given trunks.
+func (a *Agent) probeScopesOnTrunks(trunks []string) {
+	if len(trunks) == 0 {
+		return
+	}
+	on := make(map[string]bool, len(trunks))
+	for _, t := range trunks {
+		on[t] = true
+	}
+	var names []string
+	for name, sc := range a.allScopes() {
+		if on[sc.Parent] {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	a.probeScopeBeacons(names...)
 }
 
 // RefreshScopeBeaconTargets recomputes the (scope, peer) pairing set and
@@ -1171,6 +1202,7 @@ func (a *Agent) ConstructPlane() {
 			a.mu.Lock()
 			a.ready[name] = time.Now()
 			a.mu.Unlock()
+			a.probeScopeBeacons(name)
 			built++
 		}
 	}
@@ -2514,18 +2546,22 @@ func (a *Agent) checkTrunkLinkState() []PlaneHealth {
 		up    bool
 	}
 	var readings []trunkReading
+	var changedTrunks []string
 
 	a.mu.Lock()
 	if a.trunkLinkDown == nil {
 		a.trunkLinkDown = make(map[string]bool)
 	}
 	for _, trunk := range names {
-		up, ok := readCarrier(a.localParent(trunk))
+		up, ok := readCarrierFor(a.localParent(trunk))
 		if !ok {
 			continue
 		}
 		readings = append(readings, trunkReading{trunk: trunk, up: up})
 		isDown := !up
+		if was, known := a.trunkLinkDown[trunk]; known && was != isDown {
+			changedTrunks = append(changedTrunks, trunk)
+		}
 		a.trunkLinkDown[trunk] = isDown
 		if isDown {
 			detail := fmt.Sprintf("carrier lost on %s — every scope on this trunk force-closed", trunk)
@@ -2542,6 +2578,7 @@ func (a *Agent) checkTrunkLinkState() []PlaneHealth {
 	}
 	a.mu.Unlock()
 
+	a.probeScopesOnTrunks(changedTrunks)
 	for _, r := range readings {
 		a.trunkReliability.Observe(r.trunk, r.up)
 	}
@@ -2602,6 +2639,9 @@ func (a *Agent) RestoreTrunkReliability(entries map[string]reliability.Entry) {
 // readCarrier reads /sys/class/net/<iface>/carrier — "1" means link up,
 // "0" means link down (cable pulled, switch port administratively
 // disabled).
+// readCarrierFor is readCarrier; tests replace it.
+var readCarrierFor = readCarrier
+
 func readCarrier(iface string) (up bool, ok bool) {
 	data, err := os.ReadFile(filepath.Join("/sys/class/net", iface, "carrier"))
 	if err != nil {
@@ -2920,9 +2960,13 @@ func (a *Agent) Reconcile(in ReconcileInputs) Decision {
 		a.vrrpPriority = committedPriorities
 	}
 
+	var rebuilt []string
 	for scope := range constructedScopes {
 		a.ready[scope] = time.Now()
+		rebuilt = append(rebuilt, scope)
 	}
+	sort.Strings(rebuilt)
+	a.probeScopeBeacons(rebuilt...)
 	if keepalivedConstructed {
 		a.keepalivedReady = true
 	}

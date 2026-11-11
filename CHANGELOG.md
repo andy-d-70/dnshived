@@ -8,6 +8,7 @@
 
 **Changed**
 
+- The per-VLAN path beacons are spread out: instead of every scope sending to every peer at the same instant every 2 seconds, one scheduler sends at most 10 per 100 ms from a long-lived socket, a healthy path is checked every 10 seconds, a path that missed a reply is re-checked after about a second (three misses in a row still mean unreachable), and an unreachable path every 5 seconds. A change on a trunk, or a scope that is rebuilt, probes its paths at once. If there are so many scopes that the beacons would use more than 60% of the scheduler's capacity, the interval stretches instead of the beacons falling behind. The trunk beacons are unchanged, and so is the packet format, so mixed versions work during an upgrade.
 - Overview: the "More cluster details" block is gone. Its rows now sit in the Health checks card: how long the cluster has been stable under State, the witness and the token counts under Arbiter quorum. The node list with addresses stays in the tooltip of each node name.
 - Scope list: a scope that is served by a node other than its preferred worker gets a marker, with a tooltip naming both nodes. The "Rebalance" entry in the scope menu is greyed out for a scope without a preferred worker or already on it, and the server refuses a rebalance for a scope without a preferred worker.
 
