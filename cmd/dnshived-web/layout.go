@@ -246,6 +246,7 @@ const navHTML = `<div class="nav-outer">
 </div>
 <script>
 function pollPendingMarker(){
+  if(document.hidden) return;
   fetch('/api/pending-summary').then(function(r){return r.json();}).then(function(d){
     var m=document.getElementById('pending-marker');
     if(d.hasChanges){
@@ -258,6 +259,7 @@ function pollPendingMarker(){
 }
 pollPendingMarker();
 setInterval(pollPendingMarker, 1000);
+document.addEventListener('visibilitychange', function(){ if(!document.hidden) pollPendingMarker(); });
 function dnshivedToggleNav(){
   var n=document.getElementById('mainnav'),b=document.getElementById('nav-menu-toggle');
   var open=n.classList.toggle('open');

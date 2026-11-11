@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -237,4 +238,46 @@ func BenchmarkConfigGet102Scopes(b *testing.B) {
 			h(rec, req)
 		}
 	})
+}
+
+func TestConfigStampHandler(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cluster.json")
+	writeFileAtomic(t, path, cacheTestCluster)
+	h := configStampHandler(func() string { return path }, func() string { return dir })
+	get := func() map[string]string {
+		rec := httptest.NewRecorder()
+		h(rec, httptest.NewRequest(http.MethodGet, "/api/v1/config/stamp", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status %d", rec.Code)
+		}
+		out := map[string]string{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	a := get()
+	if a["config_stamp"] == "" || a["candidate_stamp"] != "" {
+		t.Fatalf("config present, no candidate: %v", a)
+	}
+	if b := get(); b["config_stamp"] != a["config_stamp"] {
+		t.Error("an unchanged file keeps its stamp")
+	}
+	writeFileAtomic(t, path, cacheTestCluster+" ")
+	if c := get(); c["config_stamp"] == a["config_stamp"] {
+		t.Error("a replaced file must change the stamp")
+	}
+	writeFileAtomic(t, candidatePath(dir), cacheTestCluster)
+	d := get()
+	if d["candidate_stamp"] == "" {
+		t.Error("a staged candidate must show a stamp")
+	}
+	os.Remove(candidatePath(dir))
+	if e := get(); e["candidate_stamp"] != "" {
+		t.Error("a discarded candidate must have an empty stamp")
+	}
+	if strings.ContainsAny(a["config_stamp"], " \"\n") {
+		t.Errorf("the stamp must be a plain token: %q", a["config_stamp"])
+	}
 }

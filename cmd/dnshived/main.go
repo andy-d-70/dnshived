@@ -1166,6 +1166,7 @@ func main() {
 
 	var configResponses, candidateResponses responseCache
 	mux.HandleFunc("GET /api/v1/config", authMw.RequireAdmin(configGetHandler(func() string { return *cfgPath }, &configResponses)))
+	mux.HandleFunc("GET /api/v1/config/stamp", authMw.RequireAdmin(configStampHandler(func() string { return *cfgPath }, func() string { return dataDir(currentConfig.Load()) })))
 
 	mux.HandleFunc("GET /api/v1/probe-config", authMw.RequireProbeOrReadonly(func(w http.ResponseWriter, r *http.Request) {
 		current, err := config.Load(*cfgPath)

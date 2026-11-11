@@ -326,18 +326,33 @@ func basicAuth(store *webauth.Store, next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// requirePermission wraps next with authenticate AND a permission check.
-func requirePermission(store *webauth.Store, perm webauth.Permission, next http.HandlerFunc) http.HandlerFunc {
-	return authenticate(store, func(w http.ResponseWriter, r *http.Request) {
+// permitted checks the user's permission. A request that counts as activity
+// also remembers the page and marks the UI as in use; a background poll must not,
+// or one open browser tab keeps the whole UI busy around the clock.
+func permitted(perm webauth.Permission, activity bool, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		user, _ := userFromContext(r)
 		if !user.HasPermission(perm) {
 			http.Error(w, "forbidden: missing required permission", http.StatusForbidden)
 			return
 		}
-		rememberReturnPage(w, r)
-		noteUIActivity()
+		if activity {
+			rememberReturnPage(w, r)
+			noteUIActivity()
+		}
 		next(w, r)
-	})
+	}
+}
+
+// requirePermission wraps next with authenticate AND a permission check.
+func requirePermission(store *webauth.Store, perm webauth.Permission, next http.HandlerFunc) http.HandlerFunc {
+	return authenticate(store, permitted(perm, true, next))
+}
+
+// requirePermissionQuiet is requirePermission for a poll the page makes by itself:
+// the same checks, but it does not count as the operator using the UI.
+func requirePermissionQuiet(store *webauth.Store, perm webauth.Permission, next http.HandlerFunc) http.HandlerFunc {
+	return authenticate(store, permitted(perm, false, next))
 }
 
 func requirePermissionOrToken(store *webauth.Store, perm webauth.Permission, ref *configRef, next http.HandlerFunc) http.HandlerFunc {

@@ -69,6 +69,27 @@ func (c *responseCache) get(path string, maxAge time.Duration, now time.Time, bu
 	return body, nil
 }
 
+func (s fileStamp) String() string {
+	return fmt.Sprintf("%x-%x-%x-%x-%x", s.dev, s.ino, s.size, s.mtime, s.ctime)
+}
+
+// configStampHandler answers GET /api/v1/config/stamp: one short token per
+// document that changes whenever the configuration or the staged candidate
+// is replaced or written, and is empty when the file does not exist. A client
+// that already holds the documents asks this instead of fetching them again.
+func configStampHandler(cfgPath, dir func() string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		out := map[string]string{"config_stamp": "", "candidate_stamp": ""}
+		if s, err := statStamp(cfgPath()); err == nil {
+			out["config_stamp"] = s.String()
+		}
+		if s, err := statStamp(candidatePath(dir())); err == nil {
+			out["candidate_stamp"] = s.String()
+		}
+		writeJSON(w, http.StatusOK, out)
+	}
+}
+
 func encodeJSON(v interface{}) ([]byte, error) {
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(v); err != nil {
