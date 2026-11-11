@@ -111,6 +111,13 @@ Probe host API additions in 0.9.8.9 (new, so they follow the same rules):
 `GET /api/v1/history`; the probe config gains the optional keys `plain_http`,
 `manual_probes` and `history`.
 
+Daemon API addition in 0.9.8.10 (new, same rules): `GET /api/v1/config/stamp`
+(admin) answers `{"config_stamp": "...", "candidate_stamp": "..."}`, two opaque
+tokens that change whenever `cluster.json` or the staged `candidate.json` is
+replaced or written and are empty when the file does not exist. A client may
+only compare them for equality; an older daemon answers 404 and the client
+falls back to fetching the documents.
+
 **Contract break, 0.9.8.1:** dry-run was removed. `dry_run` is gone
 from `/api/v1/status` and `/api/v1/agent` and from cluster.json (the
 daemon strips an existing key on startup and serves). `psk` is

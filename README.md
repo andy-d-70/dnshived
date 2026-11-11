@@ -43,7 +43,8 @@ cluster paths and the health checks at a glance, with the newest events below.
 ![Overview](artwork/screenshots/overview.png)
 
 **Scopes**: one row per VLAN with serving node, pool usage and the probe host's
-live DHCP/DNS result; sortable columns and a menu per scope.
+live DHCP/DNS result; sortable columns and a menu per scope. A scope served away
+from its preferred node is marked.
 
 ![Scopes](artwork/screenshots/scopes.png)
 
