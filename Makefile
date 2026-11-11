@@ -66,5 +66,25 @@ rpm:
 	@echo "satisfy the spec's real BuildRequires check. A real RHEL/"
 	@echo "CentOS/Rocky build host resolves this normally."
 
+# Lab-only profiling build. It compiles the labprofile tool (a CPU/heap/goroutine
+# profile written on SIGWINCH, and only when /etc/dnshived/lab-profile.enable
+# exists) into the daemon and the DNS relay, and renames the packages so they
+# cannot be mistaken for a release. Never ship these; make release-guard
+# refuses them.
+.PHONY: lab-deb lab-rpm release-guard
+lab-deb:
+	rm -f ../dnshived_*_amd64.deb ../dnshived_*_amd64.LAB-PROFILE.deb
+	GOFLAGS=-tags=labprofile $(MAKE) deb
+	@f=$$(ls -t ../dnshived_*_amd64.deb | head -1); mv "$$f" "$${f%.deb}.LAB-PROFILE.deb"; echo "built $${f%.deb}.LAB-PROFILE.deb (lab only, never ship)"
+
+lab-rpm:
+	GOFLAGS=-tags=labprofile $(MAKE) rpm
+	@for f in $(RPM_TOPDIR)/RPMS/*/dnshived-*.rpm; do mv "$$f" "$${f%.rpm}.LAB-PROFILE.rpm"; echo "built $${f%.rpm}.LAB-PROFILE.rpm (lab only, never ship)"; done
+
+# Run before every release upload: fails when a package or binary carries the
+# lab profiling tool.
+release-guard:
+	tools/release-guard.sh
+
 rpm-check: rpm
 	rpmlint $(RPM_TOPDIR)/RPMS/*/dnshived-*.rpm || true

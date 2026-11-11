@@ -33,3 +33,15 @@ both.
 `snmp/` holds extend scripts for `net-snmp`'s `snmpd` and a Nagios-compatible
 cluster check (exit codes 0 OK, 1 WARNING, 2 CRITICAL). Setup is in
 `snmp/README.md`.
+
+## Profiling build (development hosts only)
+
+`make lab-deb` and `make lab-rpm` build packages that carry a small profiling
+tool: root sends `SIGWINCH` to the daemon or the DNS relay and the process
+writes a CPU, heap and goroutine profile under its state directory (mode 0600).
+It is compiled in only with the `labprofile` build tag, does nothing unless a
+root-owned `/etc/dnshived/lab-profile.enable` exists (its first word may set the
+profile length in seconds, default 30), and the packages are named
+`*.LAB-PROFILE.*` and report `[LAB PROFILE BUILD]` in `--version`. Never install
+them outside a development host. `make release-guard` (`tools/release-guard.sh`)
+scans packages and binaries for the tool and must pass before every release.

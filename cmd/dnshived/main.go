@@ -49,6 +49,7 @@ import (
 	"dnshived/internal/helper"
 	"dnshived/internal/identity"
 	"dnshived/internal/ifname"
+	"dnshived/internal/labprofile"
 	"dnshived/internal/lease"
 	"dnshived/internal/leasesync"
 	"dnshived/internal/loglevel"
@@ -197,7 +198,7 @@ func main() {
 	cliguard.Parse("dnshived", false)
 
 	if *showVersion {
-		fmt.Println("dnshived", version)
+		fmt.Println("dnshived", version+labprofile.VersionSuffix())
 		os.Exit(0)
 	}
 
@@ -231,6 +232,7 @@ func main() {
 	}
 	go loglevel.Summarize(context.Background())
 	currentConfig.Store(cfg)
+	labprofile.Start(func() string { return dataDir(currentConfig.Load()) })
 	outage.rules.active.Store(cfg.OutageRulesActive)
 	setBeaconLinkUp(helperSocketFor(cfg))
 

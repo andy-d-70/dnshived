@@ -2525,7 +2525,7 @@ func main() {
 	guardParse("dnshived-dnsrelay")
 
 	if *showVersion {
-		fmt.Println("dnshived-dnsrelay", version)
+		fmt.Println("dnshived-dnsrelay", version+labVersionSuffix())
 		os.Exit(0)
 	}
 
@@ -2586,6 +2586,12 @@ func main() {
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGUSR1, syscall.SIGUSR2)
+	labStart(func() string {
+		if d := os.Getenv("STATE_DIRECTORY"); d != "" {
+			return d
+		}
+		return os.TempDir()
+	})
 
 	numWorkers := runtime.GOMAXPROCS(0) * 8
 	jobs = make(chan udpJob, 1024)
