@@ -83,12 +83,11 @@ bootstrap ports (TCP 80/443, UDP 9445) and the cluster ports before
 installing (not yet tested with firewalld active).
 
 **SELinux, tested under Enforcing.** With no dnshived policy, systemd
-runs the services as `unconfined_service_t`. Interface creation, the
-0.9.8.4 nftables gate, gate queries and teardown through the helper, and the
-daemon's bootstrap mode all ran with zero AVC denials, under Permissive
-and Enforcing, on both distros. That run was on 0.9.8.4. The DHCP gate
-is now the relay's (authorize and revoke over the relay socket), so
-re-test under Enforcing on 0.9.8.6 before relying on this.
+runs the services as `unconfined_service_t`. Interface creation, helper calls and the daemon's bootstrap mode all ran with zero
+AVC denials, under Permissive and Enforcing, on both distros. That run was on
+0.9.8.4. The DHCP gate has since moved into the relay (authorize and revoke over
+the relay's socket) and has not been tested under Enforcing: re-test before
+relying on this.
 
 One real gap, now handled by the `.rpm`: keepalived and dnsmasq run in
 the confined `keepalived_t`/`dnsmasq_t` domains, which cannot read a

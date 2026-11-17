@@ -118,6 +118,11 @@ replaced or written and are empty when the file does not exist. A client may
 only compare them for equality; an older daemon answers 404 and the client
 falls back to fetching the documents.
 
+Web UI additions in 0.9.8.10 (new, same rules): `GET /api/footer` (view role) and
+`POST /api/update-check` (edit-configuration role, form field `enabled=1`);
+`web.json` gains the optional key `update_check`; the scope list and the probe
+results accept `per=10|25|50|100|all` and ignore any other value.
+
 **Contract break, 0.9.8.1:** dry-run was removed. `dry_run` is gone
 from `/api/v1/status` and `/api/v1/agent` and from cluster.json (the
 daemon strips an existing key on startup and serves). `psk` is

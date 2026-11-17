@@ -16,7 +16,7 @@ API layer: Bearer tokens with roles; peer endpoints PSK-signed and
 Control plane (user dnshived): authority predicate, reconciliation loop
     │  Unix socket (JSON, scope allowlist)
     ▼
-Helper (root): ip, nft, systemctl
+Helper (root): ip, systemctl (nft only to remove the table an old release left)
     ▼
 dnsmasq, keepalived, relays (data plane)
 ```

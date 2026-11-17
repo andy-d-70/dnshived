@@ -57,6 +57,29 @@ list), plus the Pending changes button. Long pages are split into tabs.
   "Rebalance to preferred core" is greyed out when the scope has no
   preferred worker or already runs there, and the server refuses a
   rebalance for a scope without a preferred worker (HTTP 409).
+- **Long lists.** The scope list, the probe results and Recent events on the
+  Overview show 10 rows (Recent events: 5) with a "Show 10 / 25 / 50 / 100 /
+  all" choice above the list and a slim page bar above and below. The scope
+  list and the probe results keep the sort and the choice in the address
+  (`?per=25`); Recent events keeps it in the browser. A list with no more rows
+  than its default shows no bar. Recent events takes the height that is left
+  above the footer and scrolls inside itself.
+- **Footer.** Every page ends with a fixed footer: version, cluster state, uptime
+  and load of each core, the configuration revision and the newest event. The dot
+  beats every two seconds while fresh cluster data arrives: green when all is
+  fine, amber with warnings, red with an alert (the counts are those of the
+  Overview's Needs attention card), grey and still when the data is more than 30
+  seconds old. The footer reads the cached cluster snapshot (`GET /api/footer`,
+  answer cached 2 seconds while the UI is in use, 20 seconds when idle) and does
+  not count as UI activity.
+- **Update notice.** Off until someone with the edit-configuration role turns it on
+  in the footer (`web.json` key `update_check`, absent means off). Once a day the
+  web UI asks GitHub for the newest release and compares it with its own
+  version; the footer shows "↑ x.y.z available" with a link to the release notes.
+  "Got it" silences that version in that browser. The request is one GET with a
+  generic user agent, no cookies and no cluster or user data; nothing is ever
+  downloaded or installed, and a host without internet access shows "update: no
+  answer" and carries on.
 - **Probes page.** The results refresh in place every 20 seconds while the
   Results tab is open and the page is visible; nothing else on the page
   reloads, so typed text and the open tab stay. On the Behavior tab,
@@ -212,10 +235,10 @@ actions, audit) need an admin token and are used by the web UI.
 ## SNMP
 
 Extend scripts for Observium, LibreNMS or Nagios; installation is in
-`tools/snmp/README.md`. Per node: `dnshived-health` (state, serving
-count, epoch, generation, version) and `dnshived-scopes` (served
-scopes). Cluster-wide: `dnshived-cluster-check <node-ip>:9443`, exit
-codes 0=OK, 1=WARNING, 2=CRITICAL.
+`tools/snmp/README.md`. Per node, the extends `dnshived-health` (script
+`dnshived-node-health`: state, serving count, epoch, generation, version) and
+`dnshived-scopes` (script `dnshived-node-scopes`: served scopes). Cluster-wide:
+`dnshived-cluster-check <node-ip>:9443`, exit codes 0=OK, 1=WARNING, 2=CRITICAL.
 
 ## Log levels
 
