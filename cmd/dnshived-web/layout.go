@@ -589,9 +589,14 @@ nav .brand svg.brand-mark .auth{stroke:var(--accent)}
 .nav-sep{width:1px;height:1.4rem;background:var(--border);margin:0 .3rem;align-self:center}
 .nav-menu-toggle{display:none;background:transparent;color:var(--text);border:1px solid var(--border);font-weight:600}
 .nav-outer .nav-pending-btn{flex-shrink:0;background:var(--accent);color:var(--on-accent);
-box-shadow:0 1px 2px rgba(0,0,0,.06)}
+box-shadow:0 1px 2px rgba(0,0,0,.06);position:relative}
+/* the three blue buttons share one box; the marker is out of the flow so it cannot shift the label */
+.nav-outer .nav-pending-btn,.nav-outer .nav-theme-select{box-sizing:border-box;height:2.4rem;padding:0 1rem;
+border:1px solid var(--accent);border-radius:7px;font-size:.9rem;font-weight:600;line-height:1.2;
+display:inline-flex;align-items:center;justify-content:center;white-space:nowrap}
+#pending-marker{position:absolute;right:.3rem;top:50%;transform:translateY(-50%);margin:0!important;font-size:.6rem}
 .nav-outer .nav-pending-btn:hover{background:var(--accent);opacity:.9}
-.nav-outer .nav-pending-btn[aria-current=page]{border-bottom-color:var(--on-accent)}
+.nav-outer .nav-pending-btn[aria-current=page]{box-shadow:inset 0 -2px 0 var(--on-accent)}
 .nav-theme-select{flex-shrink:0;align-self:center}
 /* the label changes with the theme; a fixed width keeps the buttons beside it from moving */
 #theme_switcher{width:5.6rem;text-align:center}
@@ -795,7 +800,14 @@ font-size:1.28em;margin-left:.25em;text-decoration:none}
 padding:.1rem .4rem;border-radius:3px;font-size:.82rem}
 /* .vip-badge: marks the node holding the mgmt VIP; a location, not a health state. */
 .vip-badge{background:var(--accent);color:var(--on-accent);font-weight:700;
-padding:.1rem .4rem;border-radius:3px;font-size:.82rem}
+padding:.05rem .25rem;border-radius:3px;font-size:.7rem;line-height:1;display:inline-block}
+.vip-slot{display:inline-flex;align-items:center;width:2rem;height:1em;line-height:1;vertical-align:middle}
+.nodes-table td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* probe cell: the text takes what is left and is cut with an ellipsis; detail and the button keep their place at the right edge */
+.probe-cell{display:flex;align-items:center;gap:.4rem;min-width:0}
+.pc-text{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+.pc-act{flex:none;display:flex;align-items:center;gap:.4rem}
+.pc-act form{margin:0}
 .name-dot{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:.3rem;
 vertical-align:middle;border:1px solid var(--border)}
 .pool-bar{display:inline-block;width:70px;height:8px;background:var(--border);border-radius:4px;

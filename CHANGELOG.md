@@ -18,6 +18,9 @@
 - Scope list: "Move to core-x" in a scope's menu stages a new preferred node and the rebalance approval in one pending change. Columns have fixed widths, so the list no longer reflows while scopes are probed.
 - Overview: the cards keep fixed heights and scroll inside; "Needs attention" shows a count, groups many alike warnings into one line and caps the probe issues. "NO TOKEN" warnings and DHCP no-answer probe issues appear only after 30 seconds (`?settle=off` shows them at once).
 - Probes, Behavior: the DNS checks box accepts `orf.at|A`, `orf.at/A` and `orf.at A`, checks every line while you type, and a refused save keeps what you typed and names each bad line.
+- Scope list and Probes results: the age text and the "probe now" button sit in separate parts of the cell, so the button no longer moves when the age gains a digit. Pool shows "used/size", the Token Owner header is no longer cut off.
+- Overview: the node cards keep one line per row, the VIP badge has a fixed slot left of the node name, "Config sane" keeps its info icon visible, and a grouped warning line shows the same example every refresh.
+- The Pending changes, theme and Log out buttons share one height, radius and padding with the label centred.
 
 **Fixed**
 

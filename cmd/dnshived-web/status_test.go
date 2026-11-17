@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"html/template"
 	"reflect"
 	"strings"
 	"testing"
@@ -1738,5 +1739,40 @@ func TestStatusTmpl_ProbeHostInfoCarriesItsTooltip(t *testing.T) {
 	}
 	if !strings.Contains(b.String(), `<td title="five of five swept, settling">5/5 swept · settling</td>`) {
 		t.Error("the node table's info cell must carry the tooltip")
+	}
+}
+
+func TestGroupWarnings_ExampleIsStableAcrossOrders(t *testing.T) {
+	var a, b []string
+	for i := 0; i < 8; i++ {
+		a = append(a, fmt.Sprintf("UNSERVED: scope dante-%03d has active token (x) but no core node is serving it", i))
+	}
+	for i := len(a) - 1; i >= 0; i-- {
+		b = append(b, a[i])
+	}
+	ta, tb := groupWarnings(a)[0].Text, groupWarnings(b)[0].Text
+	if ta != tb {
+		t.Fatalf("example depends on input order: %q vs %q", ta, tb)
+	}
+	if !strings.Contains(ta, "dante-000") || !strings.HasPrefix(ta, "UNSERVED (8):") {
+		t.Errorf("want the first scope by name and the count up front, got %q", ta)
+	}
+}
+
+func TestProbeCell_ButtonSitsInItsOwnFixedPart(t *testing.T) {
+	tmpl := template.Must(template.New("t").Parse(probeCellDefineHTML + `{{template "probecell" .}}`))
+	for _, note := range []string{"1s ago", "99s ago"} {
+		var b strings.Builder
+		if err := tmpl.Execute(&b, probeCellData{Scope: "s", Worker: "p", DNSText: "ok", Note: note}); err != nil {
+			t.Fatal(err)
+		}
+		out := b.String()
+		i, j := strings.Index(out, `<span class="pc-act">`), strings.Index(out, note)
+		if i < 0 || j < 0 || j > i {
+			t.Errorf("the age (%q) must come before the fixed action part: %s", note, out)
+		}
+		if !strings.Contains(out[i:], "probe now") || !strings.Contains(out[i:], "detail") {
+			t.Errorf("detail and the button belong to the action part: %s", out)
+		}
 	}
 }

@@ -606,7 +606,7 @@ type probeCellData struct {
 const probeAutoRefreshSeconds = 20
 
 // probeCellDefineHTML is the "probecell" named template.
-const probeCellDefineHTML = `{{define "probecell"}}<span class="{{.DNSClass}}"{{if .Title}} title="{{.Title}}"{{end}}>{{.DNSText}}</span>{{if .DHCPText}} <span class="{{.DHCPClass}}">{{.DHCPText}}</span>{{end}}{{if .Note}} <span class="dim">({{.Note}})</span>{{end}} <a class="dim probe-detail" href="/probes/{{.Scope}}/{{.Worker}}">detail</a> <form class="probe-now-form" method="post" action="/probes/{{.Scope}}/{{.Worker}}/refresh" style="display:inline"><button type="submit" class="btn-sm">probe now</button></form>{{end}}`
+const probeCellDefineHTML = `{{define "probecell"}}<div class="probe-cell"><span class="pc-text"><span class="{{.DNSClass}}"{{if .Title}} title="{{.Title}}"{{end}}>{{.DNSText}}</span>{{if .DHCPText}} <span class="{{.DHCPClass}}">{{.DHCPText}}</span>{{end}}{{if .Note}} <span class="dim">({{.Note}})</span>{{end}}</span><span class="pc-act"><a class="dim probe-detail" href="/probes/{{.Scope}}/{{.Worker}}">detail</a><form class="probe-now-form" method="post" action="/probes/{{.Scope}}/{{.Worker}}/refresh"><button type="submit" class="btn-sm">probe now</button></form></span></div>{{end}}`
 
 // probePopupHTML is the dialog and the script that fill it with the probe
 // detail; without JavaScript the "detail" link and "probe now" still open the

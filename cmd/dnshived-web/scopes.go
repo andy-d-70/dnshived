@@ -140,7 +140,7 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
 ` + probeCellDefineHTML + `
 <div class="table-wrap">
 <table class="scope-table" border="1" cellpadding="4" cellspacing="0">
-<colgroup>{{if .HasProbeHosts}}<col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:6%"><col style="width:10%"><col style="width:9%"><col style="width:7%"><col style="width:13%"><col style="width:22rem"><col style="width:3.5rem">{{else}}<col style="width:15%"><col style="width:9%"><col style="width:13%"><col style="width:7%"><col style="width:16%"><col style="width:10%"><col style="width:10%"><col style="width:16%"><col style="width:3.5rem">{{end}}</colgroup>
+<colgroup>{{if .HasProbeHosts}}<col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:6%"><col style="width:10%"><col style="width:11%"><col style="width:7%"><col style="width:10%"><col style="width:22rem"><col style="width:3.5rem">{{else}}<col style="width:14%"><col style="width:9%"><col style="width:12%"><col style="width:7%"><col style="width:15%"><col style="width:12%"><col style="width:10%"><col style="width:17%"><col style="width:3.5rem">{{end}}</colgroup>
 <tr>{{range .Headers}}<th aria-sort="{{.AriaSort}}" style="white-space:nowrap;vertical-align:middle"{{if .Title}} title="{{.Title}}"{{end}}><a href="{{.URL}}" style="color:inherit;text-decoration:none">{{.Label}}<span style="display:inline-block;width:1em">{{.Arrow}}</span></a></th>{{end}}<th></th></tr>
 {{range .Rows}}{{$name := .Name}}
 <tr>
@@ -151,8 +151,8 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
   <td>{{.Subnet}}</td>
   <td>{{.Token}}</td>
   <td class="{{.Class}}"{{if .StatusTitle}} title="{{.StatusTitle}}"{{end}}>{{.Status}}</td>
-  <td style="white-space:nowrap">{{if gt .PoolSize 0}}<span class="pool-bar"><span class="pool-fill {{.PoolClass}}" style="width:{{.PoolUsagePct}}%"></span></span><span class="{{.PoolClass}}">{{.PoolUsed}} of {{.PoolSize}} used</span>{{else}}<span class="dim">—</span>{{end}}</td>
-  {{if $.HasProbeHosts}}<td style="white-space:nowrap;font-variant-numeric:tabular-nums">{{range .ProbeCells}}{{template "probecell" .}}<br>{{end}}</td>{{end}}
+  <td style="white-space:nowrap">{{if gt .PoolSize 0}}<span class="pool-bar"><span class="pool-fill {{.PoolClass}}" style="width:{{.PoolUsagePct}}%"></span></span><span class="{{.PoolClass}}" title="{{.PoolUsed}} of {{.PoolSize}} addresses in use">{{.PoolUsed}}/{{.PoolSize}}</span>{{else}}<span class="dim">—</span>{{end}}</td>
+  {{if $.HasProbeHosts}}<td style="white-space:nowrap;font-variant-numeric:tabular-nums">{{range .ProbeCells}}{{template "probecell" .}}{{end}}</td>{{end}}
   <td style="width:3rem;text-align:center"><details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.Name}}">&#9776;</summary>
   <div class="row-menu-list" role="menu">
   <a role="menuitem" href="/scopes/{{.Name}}">Open / edit</a>

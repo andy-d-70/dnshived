@@ -1156,18 +1156,18 @@ setting once every node is reachable.</strong></p>
 <div class="card-grid">
 <section class="card">
 <h2>Cluster nodes</h2>
-<table class="small fixed-table" data-stack>
-<colgroup><col style="width:16%"><col style="width:25%"><col style="width:35%"><col style="width:24%"></colgroup>
+<table class="small fixed-table nodes-table" data-stack>
+<colgroup><col style="width:22%"><col style="width:22%"><col style="width:30%"><col style="width:26%"></colgroup>
 <tr><th>Name</th><th>State</th><th>Version</th><th>Info</th></tr>
 {{range .Rows}}
 <tr>
-  <td class="{{.RoleClass}}"{{if not .FetchError}} title="{{.Status.Role}} · {{.Status.Hostname}} · {{.Node.Addr}} · {{.SysStr}}"{{end}}>{{.Nickname}}{{if .HoldsMgmtVIP}} <span class="vip-badge" title="currently answering as the management-VIP's VRRP MASTER">VIP</span>{{end}}</td>
+  <td class="{{.RoleClass}}"{{if not .FetchError}} title="{{.Status.Role}} · {{.Status.Hostname}} · {{.Node.Addr}} · {{.SysStr}}"{{end}}><span class="vip-slot">{{if .HoldsMgmtVIP}}<span class="vip-badge" title="currently answering as the management-VIP's VRRP MASTER">VIP</span>{{end}}</span>{{.Nickname}}</td>
   {{if .FetchError}}
-  <td colspan="3" class="crit">UNREACHABLE: {{.FetchError}}</td>
+  <td colspan="3" class="crit" title="UNREACHABLE: {{.FetchError}}">UNREACHABLE: {{.FetchError}}</td>
   {{else}}
   <td class="{{.Class}} st">{{.Icon}} {{.Status.State}}</td>
-  <td class="ver">{{.Status.Version}}</td>
-  <td>{{.Info}}</td>
+  <td class="ver" title="{{.Status.Version}}">{{.Status.Version}}</td>
+  <td title="{{.Info}}">{{.Info}}</td>
   {{end}}
 </tr>
 {{end}}
@@ -1249,7 +1249,7 @@ setting once every node is reachable.</strong></p>
 <table class="small kv-table fixed-table"><colgroup><col style="width:38%"><col style="width:62%"></colgroup>
 <tr><td>State <span class="info-ico" title="the cluster's own quorum/failover state machine: STABLE means every serving decision has settled and held for the required settling window; DEGRADED/GETTING THERE/NOT CONVERGING mean scopes are still starting, rebalancing, or stuck — not necessarily an outage, but worth watching">ⓘ</span></td><td class="{{.ClusterClass}}">{{.ClusterState}}</td></tr>
 <tr><td>Stable for</td><td class="dim st"{{if .StableSince}} title="stable since {{.StableSince}} (this web host's time)"{{end}}>{{if .StableSince}}{{.StableFor}}{{else}}–{{end}}</td></tr>
-<tr><td>Configuration sane <span class="info-ico" title="every node's own real, live-observed state (interfaces, sockets, ...) checked against what's actually configured/intended — separate from State above, which is FSM/quorum health only">ⓘ</span></td><td class="{{.ConfigSaneClass}}"{{if .ConfigSaneTitle}} title="{{.ConfigSaneTitle}}"{{end}}>{{.ConfigSaneText}}</td></tr>
+<tr><td title="Configuration sane">Config sane <span class="info-ico" title="every node's own real, live-observed state (interfaces, sockets, ...) checked against what's actually configured/intended — separate from State above, which is FSM/quorum health only">ⓘ</span></td><td class="{{.ConfigSaneClass}}"{{if .ConfigSaneTitle}} title="{{.ConfigSaneTitle}}"{{end}}>{{.ConfigSaneText}}</td></tr>
 <tr><td>Interfaces <span class="info-ico" title="physical trunk carrier state (link up/down) per node — a link-down trunk force-closes DHCP for every scope on it">ⓘ</span></td><td class="{{.InterfaceHealthClass}}">{{.InterfaceHealthText}}</td></tr>
 <tr><td>Trunks <span class="info-ico" title="every configured trunk on every stable core: verified once that node has heard a topology beacon from another core on it, assumed while nothing has been heard (the configured interface name is then unconfirmed)">ⓘ</span></td><td class="{{.TrunksClass}}"{{if .TrunksTitle}} title="{{.TrunksTitle}}"{{end}}>{{.TrunksText}}</td></tr>
 <tr><td>Arbiter quorum <span class="info-ico" title="every core node also runs its own arbiter instance since 0.9.8 — a witness grant needs 2 of these 3 to agree, so this is 'who is arbiter now', not a single node">ⓘ</span></td><td class="{{.ArbiterQuorumClass}}">{{.ArbiterQuorumText}}</td></tr>
@@ -1369,6 +1369,8 @@ func groupWarnings(ws []string) []attnItem {
 				all = append(all, x)
 			}
 		}
+		sort.Strings(all)
+		w = all[0]
 		list := all
 		if len(list) > 100 {
 			list = append(append([]string(nil), all[:100]...), fmt.Sprintf("… and %d more", len(all)-100))
