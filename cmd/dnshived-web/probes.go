@@ -587,7 +587,27 @@ func cachedMismatch(scope, probeHost string) bool {
 // probeRow is one scope's rendered cells.
 type probeRow struct {
 	Scope          string
+	Name           string
+	Worker         string
+	WorkerClass    string
+	Interface      string
+	VLANID         int
+	Subnet         string
+	Token          string
+	Status         string
+	Class          string
+	StatusTitle    string
 	ProbeHostCells []probeCellData
+}
+
+// hasIssue reports whether any probe cell of the row shows a failure.
+func (r probeRow) hasIssue() bool {
+	for _, c := range r.ProbeHostCells {
+		if c.DNSClass == "crit" || c.DHCPClass == "crit" {
+			return true
+		}
+	}
+	return false
 }
 
 // probeCellData holds DNS and DHCP as independently colored halves.
@@ -814,34 +834,47 @@ function addSelectedDNSChecks(){
 </form>
 </section>`
 
-var probesTmpl = template.Must(template.New("probes").Parse(`` + probeCellDefineHTML + pagerBarDefineHTML + `{{define "probe-results-body"}}<p>{{.Total}} scope(s), {{.ErrorCount}} error(s){{if .PendingCount}}, <span class="dim">{{.PendingCount}} pending</span>{{end}}{{if .CoverageText}} — <span class="dim">{{.CoverageText}}</span>{{end}} — page {{.Page}}/{{.TotalPages}}
-</p>
-{{template "pagerbar" .PagerTop}}
-<table border="1" cellpadding="4" cellspacing="0">
-<tr><th>Scope</th>{{range .ProbeHostNames}}<th>from {{.}}</th>{{end}}</tr>
+var probesTmpl = template.Must(template.New("probes").Parse(`` + probeCellDefineHTML + pagerBarDefineHTML + `{{define "probe-results-body"}}{{template "pagerbar" .PagerTop}}
+<div class="table-wrap">
+<table class="list-table probe-table" border="1" cellpadding="4" cellspacing="0">
+<colgroup><col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:6%"><col style="width:10%"><col style="width:11%"><col style="width:7%">{{range .ProbeHostNames}}<col style="width:22rem">{{end}}<col></colgroup>
+<tr><th>Scope</th><th>Worker</th><th>Interface</th><th>VLAN</th><th>Subnet</th><th>Token Owner</th><th>Status</th>{{range .ProbeHostNames}}<th>from {{.}}</th>{{end}}<th></th></tr>
 {{range .Rows}}
 <tr>
-  <td>{{.Scope}}</td>
+  <td><a href="/scopes/{{.Name}}">{{.Scope}}</a></td>
+  <td class="{{.WorkerClass}}">{{.Worker}}</td>
+  <td>{{.Interface}}</td>
+  <td>{{.VLANID}}</td>
+  <td>{{.Subnet}}</td>
+  <td>{{.Token}}</td>
+  <td class="{{.Class}}"{{if .StatusTitle}} title="{{.StatusTitle}}"{{end}}>{{.Status}}</td>
   {{range .ProbeHostCells}}<td>{{template "probecell" .}}</td>{{end}}
+  <td></td>
 </tr>
 {{end}}
 </table>
+</div>
 {{template "pagerbar" .PagerBottom}}
-{{if eq .Total 0}}<p class="dim">(no scopes configured)</p>{{end}}
-<p class="dim">Ages are as of the probe host's own check, not when this page loaded.
+{{if eq .Total 0}}<p class="dim">{{if or .Q .Show}}(no scope matches the filter){{else}}(no scopes configured){{end}}</p>{{end}}
+<p class="dim">{{.Total}} scope(s), {{.ErrorCount}} error(s){{if .PendingCount}}, {{.PendingCount}} pending{{end}}{{if .CoverageText}} — {{.CoverageText}}{{end}}. Ages are as of the probe host's own check, not when this page loaded.
 Updated {{.UpdatedAt}}, refreshes every ` + fmt.Sprint(probeAutoRefreshSeconds) + `s while this tab is open —
-<a href="?page={{.Page}}&per={{.Per}}#results">refresh now</a>.</p>
+<a href="?page={{.Page}}&per={{.Per}}{{if .Q}}&q={{.Q}}{{end}}{{if .Show}}&show={{.Show}}{{end}}#results">refresh now</a>.</p>
 {{end}}<!doctype html>
 <title>dnshived-web — probes</title>
 ` + styleHTML + `
 ` + navHTML + pendingBannerHTML + `
-<h1>Probes (DNS/DHCP)</h1>
+<div class="pagehead"><h1>Probes</h1></div>
 
 <div class="tab-host">
 ` + probeManagementHTML + `
 <section class="tab-pane" id="tab-results" data-tab="Results" data-tab-order="1" data-tab-default>
-<h2 id="results">Results</h2>
-<div id="probe-results" data-page="{{.Page}}" data-per="{{.Per}}" data-seconds="` + fmt.Sprint(probeAutoRefreshSeconds) + `">{{template "probe-results-body" .}}</div>
+<div class="listbar" id="results">
+<form method="get" action="/probes">{{range .FilterHidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}<input type="search" name="q" value="{{.Q}}" placeholder="Filter: name, VLAN, subnet…" aria-label="Filter probe results"></form>
+{{range .Chips}}<a class="lchip{{if .Active}} sel{{end}}" href="{{.URL}}">{{.Label}}</a>{{end}}
+<span class="grow"></span>
+<a class="lbtn" href="/probes/history">Open the history →</a>
+</div>
+<div id="probe-results" data-page="{{.Page}}" data-per="{{.Per}}" data-q="{{.Q}}" data-show="{{.Show}}" data-seconds="` + fmt.Sprint(probeAutoRefreshSeconds) + `">{{template "probe-results-body" .}}</div>
 <script>
 (function(){
   var box=document.getElementById('probe-results'), pane=document.getElementById('tab-results');
@@ -856,7 +889,7 @@ Updated {{.UpdatedAt}}, refreshes every ` + fmt.Sprint(probeAutoRefreshSeconds) 
   function refresh(){
     if(!due()) return;
     busy=true;
-    fetch('/probes?fragment=results&page='+encodeURIComponent(box.getAttribute('data-page'))+'&per='+encodeURIComponent(box.getAttribute('data-per')||''),{credentials:'same-origin'})
+    fetch('/probes?fragment=results&page='+encodeURIComponent(box.getAttribute('data-page'))+'&per='+encodeURIComponent(box.getAttribute('data-per')||'')+'&q='+encodeURIComponent(box.getAttribute('data-q')||'')+'&show='+encodeURIComponent(box.getAttribute('data-show')||''),{credentials:'same-origin'})
       .then(function(r){ if(!r.ok||r.headers.get('X-Probe-Fragment')!=='1') throw 0; return r.text(); })
       .then(function(t){ if(!document.querySelector('dialog[open]')&&!selected()){ box.innerHTML=t; } last=Date.now(); })
       .catch(function(){})
@@ -919,6 +952,10 @@ type probesPageData struct {
 	Page         int
 	TotalPages   int
 	Per          string
+	Q            string
+	Show         string
+	Chips        []listChip
+	FilterHidden []formField
 	PagerTop     pagerBar
 	PagerBottom  pagerBar
 	PrevPage     int
@@ -1206,7 +1243,7 @@ func handleProbes(ref *configRef) http.HandlerFunc {
 		renderNow := time.Now()
 		var probeRows []probeRow
 		for _, sc := range scopeNames {
-			pr := probeRow{Scope: scopeDisplayName(sc, iotSet[sc])}
+			pr := probeRow{Scope: scopeDisplayName(sc, iotSet[sc]), Name: sc}
 			tok, hasToken := tokens[sc]
 			for _, h := range cfg.ProbeHosts {
 				res, ok := fetched[sc][h.Name]
@@ -1229,7 +1266,43 @@ func handleProbes(ref *configRef) http.HandlerFunc {
 			probeRows = append(probeRows, pr)
 		}
 
+		cfgScopes := map[string]config.ScopeConfig{}
+		if c, _, err := firstReachableConfig(nodesIncludingSelf(cfg)); err == nil {
+			cfgScopes = c.Scopes
+		}
+		info := map[string]scopeRow{}
+		for _, sr := range buildScopeRows(statusRows, cfgScopes, tokens, roleByNodeID(statusRows), iotSet, nil) {
+			info[sr.Name] = sr
+		}
+		nAll, nIssues := len(probeRows), 0
+		q := listQuery(r.URL.Query())
+		show := listShow(r.URL.Query().Get("show"), "issues")
+		var kept []probeRow
+		for i := range probeRows {
+			pr := &probeRows[i]
+			if sr, ok := info[pr.Name]; ok {
+				pr.Worker, pr.WorkerClass, pr.Interface, pr.VLANID, pr.Subnet = sr.Worker, sr.WorkerClass, sr.Interface, sr.VLANID, sr.Subnet
+				pr.Token, pr.Status, pr.Class, pr.StatusTitle = sr.Token, sr.Status, sr.Class, sr.StatusTitle
+			}
+			if pr.hasIssue() {
+				nIssues++
+			}
+			if !listMatch(q, pr.Name, pr.Worker, pr.Interface, strconv.Itoa(pr.VLANID), pr.Subnet) || (show == "issues" && !pr.hasIssue()) {
+				continue
+			}
+			kept = append(kept, *pr)
+		}
+		probeRows = kept
+
 		per := pagerPer(r.URL.Query())
+		keep := pagerKeep(nil, per)
+		if q != "" {
+			keep.Set("q", q)
+		}
+		if show != "" {
+			keep.Set("show", show)
+		}
+		chips := listChips("/probes", "#results", keep, show, []chipDef{{"", "All", nAll}, {"issues", "Issues", nIssues}})
 		size := pagerSize(per, len(probeRows))
 		totalPages := (len(probeRows) + size - 1) / size
 		if totalPages == 0 {
@@ -1247,7 +1320,7 @@ func handleProbes(ref *configRef) http.HandlerFunc {
 		if end > len(probeRows) {
 			end = len(probeRows)
 		}
-		pagerTop, pagerBottom := newPagerBars("/probes", nil, per, len(probeRows), page, totalPages, start, end)
+		pagerTop, pagerBottom := newPagerBars("/probes", keep, per, len(probeRows), page, totalPages, start, end)
 		pagerTop.anchor("#results")
 		pagerBottom.anchor("#results")
 
@@ -1259,6 +1332,10 @@ func handleProbes(ref *configRef) http.HandlerFunc {
 			CoverageText:        probeCoverageOf(results, renderNow, disabledSet).text(),
 			Page:                page,
 			Per:                 per,
+			Q:                   q,
+			Show:                show,
+			Chips:               chips,
+			FilterHidden:        hiddenFields(keep, "per", "show"),
 			PagerTop:            pagerTop,
 			PagerBottom:         pagerBottom,
 			TotalPages:          totalPages,

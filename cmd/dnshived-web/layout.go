@@ -822,7 +822,7 @@ overflow:hidden;vertical-align:middle;margin-right:.4rem}
 .node-core-2{color:var(--core-2)}
 .node-core-3{color:var(--core-3)}
 .node-probe{color:var(--worker-probe)}
-` + footerStyle + pagerStyle + `</style>`
+` + footerStyle + pagerStyle + listBarStyle + `</style>`
 
 func tabLinksHTML(items [][2]string, active string) string {
 	var b strings.Builder

@@ -203,7 +203,7 @@ func TestScopesTmpl_TableHasFixedColumns(t *testing.T) {
 	with := renderScopes(t, []scopeRow{{Name: "alpha", Display: "alpha"}}, true)
 	without := renderScopes(t, []scopeRow{{Name: "alpha", Display: "alpha"}}, false)
 	for name, out := range map[string]string{"with probe column": with, "without": without} {
-		if !strings.Contains(out, `<table class="scope-table"`) || !strings.Contains(out, "<colgroup>") {
+		if !strings.Contains(out, `<table class="scope-table list-table"`) || !strings.Contains(out, "<colgroup>") {
 			t.Errorf("%s: the scope list needs table-layout fixed through the scope-table class and a colgroup", name)
 		}
 	}

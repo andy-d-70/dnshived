@@ -57,6 +57,7 @@ list), plus the Pending changes button. Long pages are split into tabs.
   "Rebalance to preferred core" is greyed out when the scope has no
   preferred worker or already runs there, and the server refuses a
   rebalance for a scope without a preferred worker (HTTP 409).
+- **Scopes and Probes lists.** Both pages use the same layout: heading row, tab row, filter bar, page bar and table, with the same first columns (Scope, Worker, Interface, VLAN, Subnet, Token Owner, Status). The filter box matches name, worker, interface, VLAN and subnet (every word must occur); the chips are All, Problems and Disabled on the scope list and All and Issues on the probe results (`?q=`, `?show=problems|disabled|issues`). The probe results then show one column per probe host.
 - **Long lists.** The scope list, the probe results and Recent events on the
   Overview show 10 rows (Recent events: 5) with a "Show 10 / 25 / 50 / 100 /
   all" choice above the list and a slim page bar above and below. The scope

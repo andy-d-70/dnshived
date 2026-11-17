@@ -121,19 +121,20 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
 <title>dnshived-web — scopes</title>
 ` + styleHTML + `
 ` + navHTML + `
-<h1>Scopes</h1>
-
-<div class="view-tabs"><span class="active">List view</span><a href="/topology">Topology view &rarr;</a><a href="/scopes/options">Defaults for new scopes &rarr;</a></div>
-<p><a href="/scopes/wizard">+ Add scope (guided wizard)</a> &middot; <a href="/scopes/move-all">Move all scopes from one interface to another</a></p>
-
-<div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
-<p style="margin:.5rem 0">{{.Total}} configured scope(s) — <a href="/config/scopes#new-scope-slot">add via the bulk editor</a></p>
-{{if gt .Total 0}}<form method="post" action="/scopes/rebalance-all" style="margin:0" onsubmit="return confirm('Approve a rebalance to each scope\'s own preferred core, cluster-wide? This stages the approval as a pending change on every configured node — nothing moves until you commit from Pending changes, and each scope only actually moves once its own preferred core is confirmed alive and stable. Continue?')" title="a scope never moves back to its preferred core automatically while a different node is already serving it correctly — this explicitly approves doing so now, for every scope at once" title="Moves every scope to its own preferred core. This is not a trivial change: it is staged as a pending change on every node and nothing happens until you review and commit it."><button type="submit" class="btn-quiet">Rebalance all scopes to their preferred core&hellip; (pending change)</button></form>{{end}}
+<div class="pagehead"><h1>Scopes</h1><span class="viewseg"><span class="on">List</span><a href="/topology">Topology</a></span></div>
+<div class="tabs" role="tablist"><a class="tab-link" href="/scopes" aria-selected="true">Scopes</a><a class="tab-link" href="/scopes/options" aria-selected="false">Defaults for new scopes</a></div>
+<div class="listbar">
+<form method="get" action="/scopes">{{range .FilterHidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}<input type="search" name="q" value="{{.Q}}" placeholder="Filter: name, VLAN, subnet…" aria-label="Filter scopes"></form>
+{{range .Chips}}<a class="lchip{{if .Active}} sel{{end}}" href="{{.URL}}">{{.Label}}</a>{{end}}
+<span class="grow"></span>
+{{if gt .Total 0}}<form method="post" action="/scopes/rebalance-all" onsubmit="return confirm('Approve a rebalance to each scope\'s own preferred core, cluster-wide? This stages the approval as a pending change on every configured node — nothing moves until you commit from Pending changes, and each scope only actually moves once its own preferred core is confirmed alive and stable. Continue?')" title="a scope never moves back to its preferred core automatically while a different node is already serving it correctly — this explicitly approves doing so now, for every scope at once" title="Moves every scope to its own preferred core. This is not a trivial change: it is staged as a pending change on every node and nothing happens until you review and commit it."><button class="lbtn caution" type="submit" class="btn-quiet">Rebalance all scopes to their preferred core&hellip; (pending change)</button></form>{{end}}
+<a class="lbtn" href="/scopes/move-all">Move scopes…</a>
+<a class="lbtn primary" href="/scopes/wizard">+ Add scope</a>
 </div>
 ` + probeCellDefineHTML + pagerBarDefineHTML + `
 {{template "pagerbar" .PagerTop}}
 <div class="table-wrap">
-<table class="scope-table" border="1" cellpadding="4" cellspacing="0">
+<table class="scope-table list-table" border="1" cellpadding="4" cellspacing="0">
 <colgroup>{{if .HasProbeHosts}}<col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:6%"><col style="width:10%"><col style="width:11%"><col style="width:7%"><col style="width:10%"><col style="width:22rem"><col style="width:3.5rem">{{else}}<col style="width:14%"><col style="width:9%"><col style="width:12%"><col style="width:7%"><col style="width:15%"><col style="width:12%"><col style="width:10%"><col style="width:17%"><col style="width:3.5rem">{{end}}</colgroup>
 <tr>{{range .Headers}}<th aria-sort="{{.AriaSort}}" style="white-space:nowrap;vertical-align:middle"{{if .Title}} title="{{.Title}}"{{end}}><a href="{{.URL}}" style="color:inherit;text-decoration:none">{{.Label}}<span style="display:inline-block;width:1em">{{.Arrow}}</span></a></th>{{end}}<th></th></tr>
 {{range .Rows}}{{$name := .Name}}
@@ -163,7 +164,7 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
 </table>
 </div>
 {{template "pagerbar" .PagerBottom}}
-{{if eq .Total 0}}<p class="dim">(no scopes configured)</p>{{end}}
+{{if eq .Total 0}}<p class="dim">{{if or .Q .Show}}(no scope matches the filter){{else}}(no scopes configured){{end}}</p>{{end}}
 <p class="dim">Interface is the VLAN sub-interface this scope is actually constructed
 on, on the Worker column's node — parent trunk NIC + VLAN ID
 (<code>parent.vlan_id</code>), the same naming the daemon itself uses.
@@ -185,6 +186,10 @@ type scopesPageData struct {
 	NextURL       string
 	PagerTop      pagerBar
 	PagerBottom   pagerBar
+	Q             string
+	Show          string
+	Chips         []listChip
+	FilterHidden  []formField
 }
 
 // buildScopeRows builds the Scopes page's row set — extracted as a pure
@@ -295,11 +300,31 @@ func handleScopes(ref *configRef) http.HandlerFunc {
 		}
 		desc := r.URL.Query().Get("dir") == "desc"
 		sortScopeRows(scopes, sortCol, desc)
+		q := listQuery(r.URL.Query())
+		show := listShow(r.URL.Query().Get("show"), "problems", "disabled")
+		var nProblems, nDisabled int
+		for _, sc := range scopes {
+			if sc.Disabled {
+				nDisabled++
+			} else if scopeProblem(sc) {
+				nProblems++
+			}
+		}
+		nAll := len(scopes)
+		scopes = filterScopeRows(scopes, q, show)
+
 		per := pagerPer(r.URL.Query())
 		keep := pagerKeep(url.Values{"sort": {sortCol}}, per)
 		if desc {
 			keep.Set("dir", "desc")
 		}
+		if q != "" {
+			keep.Set("q", q)
+		}
+		if show != "" {
+			keep.Set("show", show)
+		}
+		chips := listChips("/scopes", "", keep, show, []chipDef{{"", "All", nAll}, {"problems", "Problems", nProblems}, {"disabled", "Disabled", nDisabled}})
 
 		size := pagerSize(per, len(scopes))
 		totalPages := (len(scopes) + size - 1) / size
@@ -328,11 +353,15 @@ func handleScopes(ref *configRef) http.HandlerFunc {
 			PrevPage:      page - 1,
 			NextPage:      page + 1,
 			HasProbeHosts: len(cfg.ProbeHosts) > 0,
-			Headers:       scopeSortHeaders(sortCol, desc, pagerKeep(nil, per), len(cfg.ProbeHosts) > 0),
+			Headers:       scopeSortHeaders(sortCol, desc, sortKeep(keep), len(cfg.ProbeHosts) > 0),
 			PrevURL:       pageURL(keep, page-1),
 			NextURL:       pageURL(keep, page+1),
 			PagerTop:      pagerTop,
 			PagerBottom:   pagerBottom,
+			Q:             q,
+			Show:          show,
+			Chips:         chips,
+			FilterHidden:  hiddenFields(keep, "sort", "dir", "per", "show"),
 		}
 		renderTemplate(w, scopesTmpl, data, "scopes")
 	}
@@ -1537,4 +1566,43 @@ func handleScopeRebalanceAll(ref *configRef) http.HandlerFunc {
 		user, _ := userFromContext(r)
 		pushCandidateAndRenderResult(w, cfg, payload, user, "/scopes", "back to scopes")
 	}
+}
+
+// scopeProblem marks a scope that needs a look: an expired token or no serving core.
+func scopeProblem(r scopeRow) bool { return r.Class == "crit" || r.Status == "not served" }
+
+// filterScopeRows keeps the rows that match the filter text and the chip.
+func filterScopeRows(rows []scopeRow, q, show string) []scopeRow {
+	if q == "" && show == "" {
+		return rows
+	}
+	var out []scopeRow
+	for _, r := range rows {
+		if !listMatch(q, r.Name, r.Worker, r.Interface, strconv.Itoa(r.VLANID), r.Subnet) {
+			continue
+		}
+		switch show {
+		case "problems":
+			if r.Disabled || !scopeProblem(r) {
+				continue
+			}
+		case "disabled":
+			if !r.Disabled {
+				continue
+			}
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// sortKeep is what a sort link keeps: the page-size choice, the filter text and the chip.
+func sortKeep(keep url.Values) url.Values {
+	out := url.Values{}
+	for _, k := range []string{"per", "q", "show"} {
+		if v := keep.Get(k); v != "" {
+			out.Set(k, v)
+		}
+	}
+	return out
 }
