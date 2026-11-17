@@ -527,7 +527,7 @@ function dnshivedCycleTheme(){
   try{ localStorage.setItem('dnshived-theme', next); }catch(e){}
   dnshivedApplyTheme(next);
 }
-</script>` + comboboxScriptHTML
+</script>` + footerHTML + pagerScriptHTML + comboboxScriptHTML
 
 // styleHTML is inserted right after <title> on every page (see its call
 // sites).
@@ -535,6 +535,7 @@ const styleHTML = `<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <script>(function(){try{var t=localStorage.getItem('dnshived-theme');if(t==='glowing'||t==='dark'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();</script>
 <style>
 :root{
+--fs-xs:.8rem;--fs-sm:.86rem;--fs-md:.9rem;--fs-lg:1rem;--fs-xl:1.1rem;--fs-h1:1.3rem;
 --bg:#f2f4f7;--panel:#fff;--border:#dde1e7;--text:#1b1f24;--muted:#5f6772;
 --accent:#2563eb;--head:#eaedf2;
 --ok:#0a7a34;--warn:#955806;--crit:#c0392b;
@@ -561,10 +562,11 @@ const styleHTML = `<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 --tint-1:rgba(255,107,107,.14);--tint-2:rgba(91,157,255,.14);--tint-3:rgba(231,235,240,.14);--tint-crit:rgba(255,107,107,.14);
 }
 *{box-sizing:border-box}
+html{font-size:14.5px}
 body{margin:0;padding:1.5rem;max-width:1400px;background:var(--bg);color:var(--text);
 font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-font-size:14px;line-height:1.5}
-h1{font-size:1.35rem;margin:0 0 .75rem;font-weight:650}
+font-size:13px;line-height:1.45}
+h1{font-size:var(--fs-h1);margin:0 0 .75rem;font-weight:650}
 h2,h3{font-weight:600}
 a{color:var(--accent);text-decoration:none}
 a:hover{text-decoration:underline}
@@ -572,13 +574,13 @@ a:hover{text-decoration:underline}
 position:sticky;top:0;z-index:20}
 nav{display:flex;flex-wrap:wrap;align-items:stretch;gap:.15rem;background:var(--panel);
 border:1px solid var(--border);border-radius:8px;padding:.35rem .5rem;
-box-shadow:0 1px 2px rgba(0,0,0,.06);font-size:.87rem;flex:1;min-width:0}
+box-shadow:0 1px 2px rgba(0,0,0,.06);font-size:var(--fs-sm);flex:1;min-width:0}
 /* scoped to .nav-outer so the Pending Changes button outside nav matches too. */
 .nav-outer .nav-item{flex-shrink:0;display:flex;align-items:center;
 padding:.4rem .7rem;border-radius:7px;color:var(--text);text-decoration:none;line-height:1.2;border-bottom:2px solid transparent}
 .nav-outer .nav-item:hover{background:var(--head);text-decoration:none}
 .nav-outer .nav-item[aria-current=page]{background:var(--head);border-bottom-color:var(--accent)}
-.nav-outer .nav-name{font-weight:600;font-size:.9rem;display:flex;align-items:center;gap:.4rem;white-space:nowrap}
+.nav-outer .nav-name{font-weight:600;font-size:var(--fs-md);display:flex;align-items:center;gap:.4rem;white-space:nowrap}
 nav .brand .nav-name{font-weight:700}
 /* 1.5em: the mark's artwork has empty margin, so 1em reads smaller than the text. */
 nav .brand svg.brand-mark{display:block;width:1.5em;height:1.5em}
@@ -592,7 +594,7 @@ nav .brand svg.brand-mark .auth{stroke:var(--accent)}
 box-shadow:0 1px 2px rgba(0,0,0,.06);position:relative}
 /* the three blue buttons share one box; the marker is out of the flow so it cannot shift the label */
 .nav-outer .nav-pending-btn,.nav-outer .nav-theme-select{box-sizing:border-box;height:2.4rem;padding:0 1rem;
-border:1px solid var(--accent);border-radius:7px;font-size:.9rem;font-weight:600;line-height:1.2;
+border:1px solid var(--accent);border-radius:7px;font-size:var(--fs-md);font-weight:600;line-height:1.2;
 display:inline-flex;align-items:center;justify-content:center;white-space:nowrap}
 #pending-marker{position:absolute;right:.3rem;top:50%;transform:translateY(-50%);margin:0!important;font-size:.6rem}
 .nav-outer .nav-pending-btn:hover{background:var(--accent);opacity:.9}
@@ -628,10 +630,10 @@ button.btn-sm,.row-menu>summary{min-height:36px}
 .scope-table{table-layout:fixed;width:100%;min-width:64rem}
 .scope-table td,.scope-table th{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:.8rem 1rem;min-width:0}
-.card h2{margin:0 0 .5rem;font-size:1rem}
+.card h2{margin:0 0 .5rem;font-size:var(--fs-lg)}
 .card p{margin:.3rem 0}
 .card table{border:0;margin:0;border-radius:0}
-.card-big{font-size:1.15rem}
+.card-big{font-size:var(--fs-xl)}
 .card-list{list-style:none;margin:0;padding:0}
 .card-list li{padding:.35rem 0;border-bottom:1px solid var(--border)}
 .card-list li:last-child{border-bottom:0}
@@ -639,9 +641,9 @@ button.btn-sm,.row-menu>summary{min-height:36px}
 .banner.ok{border-left-color:var(--ok)}
 .banner.warn{border-left-color:var(--warn)}
 .banner.crit{border-left-color:var(--crit)}
-table.small th,table.small td{padding:.3rem .5rem;font-size:.9rem}
+table.small th,table.small td{padding:.3rem .5rem;font-size:var(--fs-md)}
 .kv-table td:first-child{color:var(--muted);white-space:nowrap}
-td.ver{white-space:nowrap;font-size:.8rem}
+td.ver{white-space:nowrap;font-size:var(--fs-xs)}
 td.st{white-space:nowrap}
 .events li{padding:.3rem 0;overflow-wrap:anywhere}
 .ev-time{white-space:nowrap;margin-right:.3rem}
@@ -676,7 +678,7 @@ border-bottom:3px solid transparent;border-radius:0;color:var(--muted);padding:.
 .line-list-tools input{min-width:12rem}
 .line-list-row{display:flex;gap:.5rem;align-items:center;padding:.25rem .6rem;border-bottom:1px solid var(--border)}
 .line-list-row:last-child{border-bottom:0}
-.line-list-row code{flex:1;min-width:0;overflow-wrap:anywhere;font-size:.9rem}
+.line-list-row code{flex:1;min-width:0;overflow-wrap:anywhere;font-size:var(--fs-md)}
 .line-list-row input.edit{flex:1;min-width:0}
 button.mini{font-size:.85em;padding:.05rem .5rem;background:transparent;color:var(--text);border:1px solid var(--border)}
 button.mini:hover{background:var(--head);opacity:1}
@@ -687,12 +689,12 @@ table[data-stack],table[data-stack] tbody,table[data-stack] tr,table[data-stack]
 table[data-stack] tr.stack-head{display:none}
 table[data-stack] tr{background:var(--panel);border:1px solid var(--border);border-radius:8px;margin:0 0 .6rem;padding:.4rem .7rem}
 table[data-stack] td{border:0;padding:.15rem 0;display:flex;gap:.6rem;align-items:baseline;white-space:normal}
-table[data-stack] td[data-label]::before{content:attr(data-label);color:var(--muted);min-width:5.5rem;flex:0 0 auto;font-size:.86em}
+table[data-stack] td[data-label]::before{content:attr(data-label);color:var(--muted);min-width:5.5rem;flex:0 0 auto;font-size:.85em}
 table[data-stack] td:first-child{font-weight:600}
 }
 /* view-tabs: pill tabs linking two related pages. */
 .view-tabs{display:flex;gap:.3rem;margin:0 0 1rem}
-.view-tabs a,.view-tabs .active{padding:.3rem .7rem;border-radius:6px;font-size:.9rem;font-weight:600}
+.view-tabs a,.view-tabs .active{padding:.3rem .7rem;border-radius:6px;font-size:var(--fs-md);font-weight:600}
 .view-tabs .active{background:var(--accent);color:var(--on-accent)}
 .view-tabs a{background:var(--panel);border:1px solid var(--border);color:var(--text);text-decoration:none}
 .view-tabs a:hover{background:var(--bg);text-decoration:none}
@@ -704,7 +706,7 @@ border-radius:8px;overflow:hidden;margin:0 0 1.1rem}
 .fixed-table{table-layout:fixed}
 .fixed-table td,.fixed-table th{overflow-wrap:break-word}
 .fixed-table td{vertical-align:top;line-height:1.3}
-th,td{padding:.4rem .6rem;text-align:left;border-bottom:1px solid var(--border);font-size:.92rem}
+th,td{padding:.4rem .6rem;text-align:left;border-bottom:1px solid var(--border);font-size:var(--fs-md)}
 th{background:var(--head);font-weight:600}
 tr:last-child td{border-bottom:none}
 details{background:var(--panel);border:1px solid var(--border);border-radius:8px;
@@ -726,7 +728,7 @@ button.btn-quiet:hover{background:var(--head);opacity:1}
 /* row-menu: the per-row actions menu of the scope list (a details element). */
 .row-menu{position:relative;display:inline-block;background:transparent;border:0;box-shadow:none;padding:0;margin:0}
 .row-menu>summary{list-style:none;cursor:pointer;user-select:none;width:2rem;text-align:center;padding:.15rem 0;font-weight:400;
-border:1px solid var(--border);border-radius:5px;background:var(--panel);color:var(--text);font-size:1.1rem;line-height:1.2}
+border:1px solid var(--border);border-radius:5px;background:var(--panel);color:var(--text);font-size:var(--fs-xl);line-height:1.2}
 .row-menu>summary::-webkit-details-marker{display:none}
 .row-menu[open]>summary{background:var(--head)}
 .row-menu-list{position:fixed;z-index:60;min-width:13rem;background:var(--panel);border:1px solid var(--border);
@@ -758,9 +760,9 @@ button.btn-warn{background:var(--warn);border-color:var(--warn);color:var(--on-w
 .combo-list{position:absolute;z-index:30;top:100%;left:0;right:0;margin-top:2px;
 max-height:14rem;overflow-y:auto;background:var(--panel);border:1px solid var(--border);
 border-radius:6px;box-shadow:0 4px 10px rgba(0,0,0,.15)}
-.combo-item{padding:.3rem .5rem;font-size:.92rem;cursor:pointer}
+.combo-item{padding:.3rem .5rem;font-size:var(--fs-md);cursor:pointer}
 .combo-item:hover,.combo-item-active{background:var(--accent);color:var(--on-accent)}
-.combo-empty,.combo-more{padding:.3rem .5rem;font-size:.85rem;color:var(--muted)}
+.combo-empty,.combo-more{padding:.3rem .5rem;font-size:var(--fs-sm);color:var(--muted)}
 .combo-more{border-top:1px solid var(--border);cursor:default}
 /* log-modal: a small window over the page; dialog::backdrop and showModal() do the rest. */
 dialog#log-modal{background:var(--panel);color:var(--text);border:1px solid var(--border);
@@ -785,7 +787,7 @@ dialog#paths-modal .modal-head form{margin:0}
 border-radius:4px;overflow:hidden;vertical-align:middle;margin-right:.4rem}
 .trust-bar-fill{height:100%}
 /* pre-wrap so long note lines wrap instead of scrolling sideways. */
-dialog#log-modal pre{font-size:.82rem;white-space:pre-wrap;word-break:break-word}
+dialog#log-modal pre{font-size:var(--fs-sm);white-space:pre-wrap;word-break:break-word}
 dialog#log-modal form{margin:.8rem 0 0;text-align:right}
 .ok{color:var(--ok);font-weight:600}
 .warn{color:var(--warn);font-weight:600}
@@ -797,7 +799,7 @@ font-size:1.28em;margin-left:.25em;text-decoration:none}
 .info-ico:hover{color:var(--accent)}
 /* .rogue-badge: solid crit badge for a rogue DHCP server finding. */
 .rogue-badge{background:var(--crit);color:var(--on-crit);font-weight:700;
-padding:.1rem .4rem;border-radius:3px;font-size:.82rem}
+padding:.1rem .4rem;border-radius:3px;font-size:var(--fs-sm)}
 /* .vip-badge: marks the node holding the mgmt VIP; a location, not a health state. */
 .vip-badge{background:var(--accent);color:var(--on-accent);font-weight:700;
 padding:.05rem .25rem;border-radius:3px;font-size:.7rem;line-height:1;display:inline-block}
@@ -820,7 +822,7 @@ overflow:hidden;vertical-align:middle;margin-right:.4rem}
 .node-core-2{color:var(--core-2)}
 .node-core-3{color:var(--core-3)}
 .node-probe{color:var(--worker-probe)}
-</style>`
+` + footerStyle + pagerStyle + `</style>`
 
 func tabLinksHTML(items [][2]string, active string) string {
 	var b strings.Builder

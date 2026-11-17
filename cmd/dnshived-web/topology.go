@@ -636,14 +636,14 @@ const topologyStyleHTML = `<style>
 /* sticky just below the sticky nav. */
 .topo-rail{display:flex;flex-direction:column;gap:.6rem;position:sticky;top:calc(var(--nav-h) + 1rem)}
 .rail-node{display:flex;align-items:center;gap:.5rem;padding:.5rem .7rem;background:var(--panel);
-border:1px solid var(--border);border-left:4px solid currentColor;border-radius:6px;font-size:.88rem}
+border:1px solid var(--border);border-left:4px solid currentColor;border-radius:6px;font-size:var(--fs-sm)}
 .rail-node .dot{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;
 background:currentColor;flex:none}
 .topo-canvas{display:flex;flex-direction:column;gap:1.4rem;min-width:0}
 .iface-branch{position:relative;padding-left:1.2rem}
 .iface-branch::before{content:"";position:absolute;top:1.7rem;bottom:.1rem;left:0;width:2px;
 background:var(--border)}
-.iface-label{cursor:pointer;font-weight:600;font-size:.8rem;color:var(--muted);text-transform:uppercase;
+.iface-label{cursor:pointer;font-weight:600;font-size:var(--fs-xs);color:var(--muted);text-transform:uppercase;
 letter-spacing:.04em;margin:0 0 .55rem}
 .scope-row{display:flex;flex-wrap:wrap;gap:.7rem}
 .scope-chip{position:relative;display:block;border:1px solid var(--border);border-left:4px solid var(--border);
@@ -657,21 +657,21 @@ background:var(--border)}
 .scope-chip.serve-none{border-left-color:var(--crit);background:var(--tint-crit)}
 .scope-chip.has-error{outline:2px solid var(--crit);outline-offset:-1px}
 .scope-chip .chip-name{font-weight:600}
-.scope-chip .chip-vlan{font-size:.78rem}
-.scope-chip .chip-err{float:right;color:var(--crit);font-weight:700;font-size:.95rem;line-height:1}
+.scope-chip .chip-vlan{font-size:var(--fs-xs)}
+.scope-chip .chip-err{float:right;color:var(--crit);font-weight:700;font-size:var(--fs-md);line-height:1}
 .mini-eps{display:flex;gap:.3rem;margin-top:.45rem}
 .mini-ep{display:inline-block;width:1.1rem;height:.3rem;border-radius:2px;background:currentColor}
 .topo-summary{display:flex;align-items:center;gap:.6rem;background:var(--panel);border:1px solid var(--border);
-border-radius:8px;padding:.6rem .9rem;margin:0 0 1.1rem;font-size:.95rem}
-.topo-summary strong{font-size:1.1rem}
+border-radius:8px;padding:.6rem .9rem;margin:0 0 1.1rem;font-size:var(--fs-md)}
+.topo-summary strong{font-size:var(--fs-xl)}
 .topo-summary .sep{color:var(--border)}
 .popup{display:none;position:fixed;inset:0;background:rgba(15,18,22,.45);z-index:50;
 align-items:center;justify-content:center;padding:1rem}
 .popup:target{display:flex}
 .popup-inner{background:var(--panel);border-radius:10px;padding:1rem 1.3rem;max-width:360px;
 width:100%;box-shadow:0 10px 30px rgba(0,0,0,.28);position:relative}
-.popup-inner h3{margin:0 0 .3rem;font-size:1.02rem}
-.popup-close{position:absolute;top:.4rem;right:.6rem;font-size:1.15rem;color:var(--muted);line-height:1}
+.popup-inner h3{margin:0 0 .3rem;font-size:var(--fs-lg)}
+.popup-close{position:absolute;top:.4rem;right:.6rem;font-size:var(--fs-xl);color:var(--muted);line-height:1}
 .popup-inner ul{margin:.5rem 0 0;padding-left:1.15rem}
 </style>`
 

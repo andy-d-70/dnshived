@@ -1259,14 +1259,26 @@ setting once every node is reachable.</strong></p>
 </section>
 </div>
 
-<section class="card card-wide">
+<section class="card card-wide" id="events-card">
 <h2>Recent events <a href="/logs" style="font-weight:400;font-size:.9em">open the logs →</a></h2>
 {{if .RecentEvents}}
-<div class="scrollbox"><ul class="card-list events">
+<div class="scrollbox"><ul class="card-list events" data-pager="5,10,25,50,all" data-pager-key="events">
 {{range .RecentEvents}}<li><span class="dim ev-time">{{.Time}}</span> <span class="{{.NodeClass}}">{{.Node}}</span> <span class="{{.Class}}">{{.Level}}</span> {{if .Prefix}}<span class="dim">{{.Prefix}}</span> {{end}}{{.Message}}</li>
 {{end}}</ul></div>
 {{else}}<p class="dim">(no events yet)</p>{{end}}
 </section>
+<script>
+(function(){
+  var c=document.getElementById('events-card');if(!c)return;
+  function fit(){
+    var f=document.getElementById('appfoot'),fh=f?f.offsetHeight:0;
+    var top=c.getBoundingClientRect().top+window.scrollY;
+    var h=Math.max(180,window.innerHeight-(top-window.scrollY)-fh-20);
+    c.style.height=h+'px';
+  }
+  fit();window.addEventListener('resize',fit);document.addEventListener('dnshived-pager',fit);
+})();
+</script>
 
 {{if .PathRows}}
 <dialog id="paths-modal">
@@ -1889,6 +1901,7 @@ func handleStatus(ref *configRef) http.HandlerFunc {
 			data.ServingMeter = "warn"
 		}
 		data.PathDigest, data.PathDigestMore, data.VLANPaths = buildPathDigest(pathRows, 6)
+		noteOverviewAttention(&data)
 		renderTemplate(w, statusTmpl, data, "overview")
 	}
 }

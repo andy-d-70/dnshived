@@ -6,7 +6,7 @@ package main
 import "html/template"
 
 const scopeEditorStyleHTML = `<style>
-.scope-search{width:100%;max-width:32rem;margin:0 0 .8rem;font-size:1rem}
+.scope-search{width:100%;max-width:32rem;margin:0 0 .8rem;font-size:var(--fs-lg)}
 .scope-table-wrap{overflow-x:auto;margin:0 0 1rem}
 #scope-table{white-space:nowrap}
 #scope-table td,#scope-table th{white-space:nowrap;vertical-align:top}

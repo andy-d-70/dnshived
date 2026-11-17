@@ -23,9 +23,6 @@ import (
 	"dnshived/internal/ifname"
 )
 
-// scopesPerPage matches dnshived-top's own pagination size (15/page).
-const scopesPerPage = 15
-
 // scopeRow is one (scope, worker) pairing.
 type scopeRow struct {
 	// Name is the bare scope name, used for the /scopes/<name> link — must
@@ -130,14 +127,11 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
 <p><a href="/scopes/wizard">+ Add scope (guided wizard)</a> &middot; <a href="/scopes/move-all">Move all scopes from one interface to another</a></p>
 
 <div style="display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap">
-<p style="margin:.5rem 0">{{.Total}} configured scope(s) — page {{.Page}}/{{.TotalPages}}
-{{if gt .Page 1}}<a href="{{.PrevURL}}">prev</a>{{else}}<span class="dim">prev</span>{{end}}
-{{if lt .Page .TotalPages}}<a href="{{.NextURL}}">next</a>{{end}}
-— <a href="/config/scopes#new-scope-slot">add via the bulk editor</a>
-</p>
+<p style="margin:.5rem 0">{{.Total}} configured scope(s) — <a href="/config/scopes#new-scope-slot">add via the bulk editor</a></p>
 {{if gt .Total 0}}<form method="post" action="/scopes/rebalance-all" style="margin:0" onsubmit="return confirm('Approve a rebalance to each scope\'s own preferred core, cluster-wide? This stages the approval as a pending change on every configured node — nothing moves until you commit from Pending changes, and each scope only actually moves once its own preferred core is confirmed alive and stable. Continue?')" title="a scope never moves back to its preferred core automatically while a different node is already serving it correctly — this explicitly approves doing so now, for every scope at once" title="Moves every scope to its own preferred core. This is not a trivial change: it is staged as a pending change on every node and nothing happens until you review and commit it."><button type="submit" class="btn-quiet">Rebalance all scopes to their preferred core&hellip; (pending change)</button></form>{{end}}
 </div>
-` + probeCellDefineHTML + `
+` + probeCellDefineHTML + pagerBarDefineHTML + `
+{{template "pagerbar" .PagerTop}}
 <div class="table-wrap">
 <table class="scope-table" border="1" cellpadding="4" cellspacing="0">
 <colgroup>{{if .HasProbeHosts}}<col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:6%"><col style="width:10%"><col style="width:11%"><col style="width:7%"><col style="width:10%"><col style="width:22rem"><col style="width:3.5rem">{{else}}<col style="width:14%"><col style="width:9%"><col style="width:12%"><col style="width:7%"><col style="width:15%"><col style="width:12%"><col style="width:10%"><col style="width:17%"><col style="width:3.5rem">{{end}}</colgroup>
@@ -168,6 +162,7 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
 {{end}}
 </table>
 </div>
+{{template "pagerbar" .PagerBottom}}
 {{if eq .Total 0}}<p class="dim">(no scopes configured)</p>{{end}}
 <p class="dim">Interface is the VLAN sub-interface this scope is actually constructed
 on, on the Worker column's node — parent trunk NIC + VLAN ID
@@ -188,6 +183,8 @@ type scopesPageData struct {
 	Headers       []sortHeader
 	PrevURL       string
 	NextURL       string
+	PagerTop      pagerBar
+	PagerBottom   pagerBar
 }
 
 // buildScopeRows builds the Scopes page's row set — extracted as a pure
@@ -298,12 +295,14 @@ func handleScopes(ref *configRef) http.HandlerFunc {
 		}
 		desc := r.URL.Query().Get("dir") == "desc"
 		sortScopeRows(scopes, sortCol, desc)
-		keep := url.Values{"sort": {sortCol}}
+		per := pagerPer(r.URL.Query())
+		keep := pagerKeep(url.Values{"sort": {sortCol}}, per)
 		if desc {
 			keep.Set("dir", "desc")
 		}
 
-		totalPages := (len(scopes) + scopesPerPage - 1) / scopesPerPage
+		size := pagerSize(per, len(scopes))
+		totalPages := (len(scopes) + size - 1) / size
 		if totalPages == 0 {
 			totalPages = 1
 		}
@@ -314,11 +313,12 @@ func handleScopes(ref *configRef) http.HandlerFunc {
 		if page > totalPages {
 			page = totalPages
 		}
-		start := (page - 1) * scopesPerPage
-		end := start + scopesPerPage
+		start := (page - 1) * size
+		end := start + size
 		if end > len(scopes) {
 			end = len(scopes)
 		}
+		pagerTop, pagerBottom := newPagerBars("/scopes", keep, per, len(scopes), page, totalPages, start, end)
 
 		data := scopesPageData{
 			Rows:          scopes[start:end],
@@ -328,9 +328,11 @@ func handleScopes(ref *configRef) http.HandlerFunc {
 			PrevPage:      page - 1,
 			NextPage:      page + 1,
 			HasProbeHosts: len(cfg.ProbeHosts) > 0,
-			Headers:       scopeSortHeaders(sortCol, desc, nil, len(cfg.ProbeHosts) > 0),
+			Headers:       scopeSortHeaders(sortCol, desc, pagerKeep(nil, per), len(cfg.ProbeHosts) > 0),
 			PrevURL:       pageURL(keep, page-1),
 			NextURL:       pageURL(keep, page+1),
+			PagerTop:      pagerTop,
+			PagerBottom:   pagerBottom,
 		}
 		renderTemplate(w, scopesTmpl, data, "scopes")
 	}

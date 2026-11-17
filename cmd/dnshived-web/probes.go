@@ -814,10 +814,9 @@ function addSelectedDNSChecks(){
 </form>
 </section>`
 
-var probesTmpl = template.Must(template.New("probes").Parse(`` + probeCellDefineHTML + `{{define "probe-results-body"}}<p>{{.Total}} scope(s), {{.ErrorCount}} error(s){{if .PendingCount}}, <span class="dim">{{.PendingCount}} pending</span>{{end}}{{if .CoverageText}} — <span class="dim">{{.CoverageText}}</span>{{end}} — page {{.Page}}/{{.TotalPages}}
-{{if gt .Page 1}}<a href="/probes?page={{.PrevPage}}#results">prev</a>{{else}}<span class="dim">prev</span>{{end}}
-{{if lt .Page .TotalPages}}<a href="/probes?page={{.NextPage}}#results">next</a>{{end}}
+var probesTmpl = template.Must(template.New("probes").Parse(`` + probeCellDefineHTML + pagerBarDefineHTML + `{{define "probe-results-body"}}<p>{{.Total}} scope(s), {{.ErrorCount}} error(s){{if .PendingCount}}, <span class="dim">{{.PendingCount}} pending</span>{{end}}{{if .CoverageText}} — <span class="dim">{{.CoverageText}}</span>{{end}} — page {{.Page}}/{{.TotalPages}}
 </p>
+{{template "pagerbar" .PagerTop}}
 <table border="1" cellpadding="4" cellspacing="0">
 <tr><th>Scope</th>{{range .ProbeHostNames}}<th>from {{.}}</th>{{end}}</tr>
 {{range .Rows}}
@@ -827,10 +826,11 @@ var probesTmpl = template.Must(template.New("probes").Parse(`` + probeCellDefine
 </tr>
 {{end}}
 </table>
+{{template "pagerbar" .PagerBottom}}
 {{if eq .Total 0}}<p class="dim">(no scopes configured)</p>{{end}}
 <p class="dim">Ages are as of the probe host's own check, not when this page loaded.
 Updated {{.UpdatedAt}}, refreshes every ` + fmt.Sprint(probeAutoRefreshSeconds) + `s while this tab is open —
-<a href="?page={{.Page}}#results">refresh now</a>.</p>
+<a href="?page={{.Page}}&per={{.Per}}#results">refresh now</a>.</p>
 {{end}}<!doctype html>
 <title>dnshived-web — probes</title>
 ` + styleHTML + `
@@ -841,7 +841,7 @@ Updated {{.UpdatedAt}}, refreshes every ` + fmt.Sprint(probeAutoRefreshSeconds) 
 ` + probeManagementHTML + `
 <section class="tab-pane" id="tab-results" data-tab="Results" data-tab-order="1" data-tab-default>
 <h2 id="results">Results</h2>
-<div id="probe-results" data-page="{{.Page}}" data-seconds="` + fmt.Sprint(probeAutoRefreshSeconds) + `">{{template "probe-results-body" .}}</div>
+<div id="probe-results" data-page="{{.Page}}" data-per="{{.Per}}" data-seconds="` + fmt.Sprint(probeAutoRefreshSeconds) + `">{{template "probe-results-body" .}}</div>
 <script>
 (function(){
   var box=document.getElementById('probe-results'), pane=document.getElementById('tab-results');
@@ -856,7 +856,7 @@ Updated {{.UpdatedAt}}, refreshes every ` + fmt.Sprint(probeAutoRefreshSeconds) 
   function refresh(){
     if(!due()) return;
     busy=true;
-    fetch('/probes?fragment=results&page='+encodeURIComponent(box.getAttribute('data-page')),{credentials:'same-origin'})
+    fetch('/probes?fragment=results&page='+encodeURIComponent(box.getAttribute('data-page'))+'&per='+encodeURIComponent(box.getAttribute('data-per')||''),{credentials:'same-origin'})
       .then(function(r){ if(!r.ok||r.headers.get('X-Probe-Fragment')!=='1') throw 0; return r.text(); })
       .then(function(t){ if(!document.querySelector('dialog[open]')&&!selected()){ box.innerHTML=t; } last=Date.now(); })
       .catch(function(){})
@@ -918,6 +918,9 @@ type probesPageData struct {
 	CoverageText string
 	Page         int
 	TotalPages   int
+	Per          string
+	PagerTop     pagerBar
+	PagerBottom  pagerBar
 	PrevPage     int
 	NextPage     int
 	UpdatedAt    string
@@ -1226,7 +1229,9 @@ func handleProbes(ref *configRef) http.HandlerFunc {
 			probeRows = append(probeRows, pr)
 		}
 
-		totalPages := (len(probeRows) + scopesPerPage - 1) / scopesPerPage
+		per := pagerPer(r.URL.Query())
+		size := pagerSize(per, len(probeRows))
+		totalPages := (len(probeRows) + size - 1) / size
 		if totalPages == 0 {
 			totalPages = 1
 		}
@@ -1237,11 +1242,14 @@ func handleProbes(ref *configRef) http.HandlerFunc {
 		if page > totalPages {
 			page = totalPages
 		}
-		start := (page - 1) * scopesPerPage
-		end := start + scopesPerPage
+		start := (page - 1) * size
+		end := start + size
 		if end > len(probeRows) {
 			end = len(probeRows)
 		}
+		pagerTop, pagerBottom := newPagerBars("/probes", nil, per, len(probeRows), page, totalPages, start, end)
+		pagerTop.anchor("#results")
+		pagerBottom.anchor("#results")
 
 		data := probesPageData{
 			Rows:                probeRows[start:end],
@@ -1250,6 +1258,9 @@ func handleProbes(ref *configRef) http.HandlerFunc {
 			PendingCount:        pendingCount,
 			CoverageText:        probeCoverageOf(results, renderNow, disabledSet).text(),
 			Page:                page,
+			Per:                 per,
+			PagerTop:            pagerTop,
+			PagerBottom:         pagerBottom,
 			TotalPages:          totalPages,
 			PrevPage:            page - 1,
 			NextPage:            page + 1,

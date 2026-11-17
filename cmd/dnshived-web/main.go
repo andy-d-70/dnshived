@@ -113,6 +113,7 @@ func main() {
 	startVerifyCacheCleanup()
 	watchUsersFile(store, cfg.UsersFile, func() { go repl.pushAll() })
 	go refreshSnapshotLoop(ref)
+	go updates.run(ref)
 
 	mux := http.NewServeMux()
 
@@ -220,6 +221,8 @@ func main() {
 	// /pending: candidate review and commit (pending.go).
 	mux.HandleFunc("/pending", requirePermission(store, webauth.PermViewStatus, handlePending(ref)))
 	mux.HandleFunc("GET /api/pending-summary", requirePermissionQuiet(store, webauth.PermViewStatus, handlePendingSummary()))
+	mux.HandleFunc("GET /api/footer", requirePermissionQuiet(store, webauth.PermViewStatus, handleFooter(ref)))
+	mux.HandleFunc("POST /api/update-check", requirePermission(store, webauth.PermEditConfig, handleUpdateCheckToggle(*cfgPath, ref)))
 	mux.HandleFunc("POST /pending/commit", requirePermission(store, webauth.PermEditScopes, handlePendingCommit(*cfgPath, ref)))
 	mux.HandleFunc("POST /pending/discard", requirePermission(store, webauth.PermEditScopes, handlePendingDiscard(ref)))
 	mux.HandleFunc("POST /pending/discard/scopes/{scope}", requirePermission(store, webauth.PermEditScopes, handlePendingDiscardScope(ref)))

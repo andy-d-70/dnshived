@@ -46,6 +46,10 @@ type WebConfig struct {
 	// library (templates.go, scope_wizard.go).
 	TemplatesFile string `json:"templates_file,omitempty"`
 
+	// UpdateCheck turns on the once-a-day look at GitHub for a newer release;
+	// absent means off and no request is made.
+	UpdateCheck bool `json:"update_check,omitempty"`
+
 	// VIPHost is the mgmt VIP's hostname or bare IP (no port).
 	VIPHost string `json:"vip_host,omitempty"`
 

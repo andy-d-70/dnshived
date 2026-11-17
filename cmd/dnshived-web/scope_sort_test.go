@@ -135,7 +135,8 @@ func TestPageURL_KeepsTheSort(t *testing.T) {
 }
 
 func TestScopesTmpl_HeadingsAreSortLinks(t *testing.T) {
-	data := scopesPageData{Total: 1, Page: 1, TotalPages: 2, HasProbeHosts: true, NextURL: "/scopes?page=2&sort=vlan",
+	top, bottom := newPagerBars("/scopes", url.Values{"sort": {"vlan"}}, "10", 15, 1, 2, 0, 10)
+	data := scopesPageData{Total: 15, Page: 1, TotalPages: 2, HasProbeHosts: true, PagerTop: top, PagerBottom: bottom,
 		Headers: scopeSortHeaders("vlan", false, nil, true)}
 	var buf strings.Builder
 	if err := scopesTmpl.Execute(&buf, data); err != nil {

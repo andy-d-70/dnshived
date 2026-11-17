@@ -171,9 +171,13 @@ func TestManualProbeIssues_OnlyARogueFindingIsAnIssue(t *testing.T) {
 }
 
 func TestProbesTmpl_PagingLinksKeepThePositionOnTheResultsTable(t *testing.T) {
+	top, bottom := newPagerBars("/probes", nil, "10", 40, 2, 4, 10, 20)
+	top.anchor("#results")
+	bottom.anchor("#results")
 	data := probesPageData{
 		ProbeHostNames: []string{"probe"},
-		Page:           2, TotalPages: 3, PrevPage: 1, NextPage: 3,
+		Page:           2, Per: "10", TotalPages: 4, PrevPage: 1, NextPage: 3,
+		PagerTop: top, PagerBottom: bottom,
 		probeManagementData: probeManagementData{ProbeHostDisplayNames: map[string]string{}},
 	}
 	var buf strings.Builder
@@ -181,7 +185,7 @@ func TestProbesTmpl_PagingLinksKeepThePositionOnTheResultsTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	for _, want := range []string{`href="/probes?page=1#results"`, `href="/probes?page=3#results"`, `href="?page=2#results"`} {
+	for _, want := range []string{`href="/probes?page=1#results"`, `href="/probes?page=3#results"`, `href="?page=2&per=10#results"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q: without the anchor the browser loads the page from the top, far above the results table", want)
 		}

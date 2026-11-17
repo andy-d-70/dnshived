@@ -9,6 +9,8 @@
 
 **Added**
 
+- Optional update notice in the footer: once a day the web UI can ask GitHub for the newest release and show "update available" with a link to its notes. It is off until someone turns it on in the footer (needs the edit-configuration role), sends no cluster or user data, never downloads or installs anything, and "Got it" silences that version in that browser. New web.json key `update_check` (absent means off).
+- `GET /api/footer` (web UI, view role): the footer's data, taken from the cached cluster snapshot.
 - `GET /api/v1/config/stamp` (admin): a short token that changes when the configuration or the staged candidate is replaced. The web UI uses it to skip fetching unchanged documents; an older daemon without it is handled as before.
 
 **Changed**
@@ -21,6 +23,9 @@
 - Scope list and Probes results: the age text and the "probe now" button sit in separate parts of the cell, so the button no longer moves when the age gains a digit. Pool shows "used/size", the Token Owner header is no longer cut off.
 - Overview: the node cards keep one line per row, the VIP badge has a fixed slot left of the node name, "Config sane" keeps its info icon visible, and a grouped warning line shows the same example every refresh.
 - The Pending changes, theme and Log out buttons share one height, radius and padding with the label centred.
+- Smaller type: 13 px body and table text (was 14 and about 14.7 px) from a handful of size tokens instead of about twenty values.
+- Every page has a fixed footer: version, cluster state, uptime and load of each core, configuration revision and the newest event. A dot beats every two seconds while fresh cluster data arrives: green when all is fine, amber with warnings, red with an alert, grey and still when the data is more than 30 seconds old.
+- Long lists show 10 rows by default with a "Show 10 / 25 / 50 / 100 / all" choice and a page bar above and below, on the scope list and the probe results; the sort and the choice stay when you page. Recent events on the Overview show 5 and take the height that is left above the footer.
 
 **Fixed**
 
