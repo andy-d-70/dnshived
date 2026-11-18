@@ -16,6 +16,11 @@ import (
 // features that change the stored format switch on. Nothing consults it yet.
 const FeatureVersion = "0.9.9.0"
 
+// AccessListVersion is the version every core member must run before the
+// access list (who is served) is handed to the relays and the web interface.
+// It is the first lab build that has it; the release is higher.
+const AccessListVersion = "0.9.8.10~dev-10"
+
 // OutageRulesVersion is the version every core member must run before the
 // outage rules (write quorum, stale-base refusal, config verification,
 // membership epoch) are enforced. It is the first lab build that has them;

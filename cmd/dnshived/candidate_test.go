@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 
@@ -275,5 +276,46 @@ func TestDiscardCandidateScope_NoCandidateIsANoOp(t *testing.T) {
 	dataDir := t.TempDir()
 	if err := discardCandidateScope(dataDir, cfgPath, "anything"); err != nil {
 		t.Errorf("discard scope with no candidate at all: %v", err)
+	}
+}
+
+func TestApplyCandidateUpdate_StagesTheAccessList(t *testing.T) {
+	cfgPath := writeBaseConfig(t)
+	dataDir := t.TempDir()
+	base := configUpdate{PSK: testPSK, Platform: testPlatform()}
+
+	staged := base
+	staged.Access = json.RawMessage(`{"mode":"enforce","entries":[{"net":"203.0.113.0/24","dhcp":"deny"}]}`)
+	if status, body := applyCandidateUpdate(dataDir, cfgPath, staged); status != http.StatusOK {
+		t.Fatalf("status = %d, body = %+v", status, body)
+	}
+	cand, exists, err := loadCandidateConfig(dataDir)
+	if err != nil || !exists {
+		t.Fatalf("candidate: %v, exists=%v", err, exists)
+	}
+	if cand.Access == nil || cand.Access.Mode != "enforce" || len(cand.Access.Entries) != 1 {
+		t.Fatalf("the staged candidate lost the access list: %+v", cand.Access)
+	}
+	live, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.Access != nil {
+		t.Error("staging must not touch the live configuration")
+	}
+
+	withoutKey := base
+	if status, _ := applyCandidateUpdate(dataDir, cfgPath, withoutKey); status != http.StatusOK {
+		t.Fatalf("status = %d", status)
+	}
+	cand, _, _ = loadCandidateConfig(dataDir)
+	if cand.Access != nil {
+		t.Error("a push without the key starts from the live configuration, which has no list")
+	}
+
+	bad := base
+	bad.Access = json.RawMessage(`{"entries":[{"net":"nope"}]}`)
+	if status, _ := applyCandidateUpdate(dataDir, cfgPath, bad); status != http.StatusBadRequest {
+		t.Errorf("an invalid list must be refused, status = %d", status)
 	}
 }

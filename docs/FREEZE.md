@@ -123,6 +123,20 @@ Web UI additions in 0.9.8.10 (new, same rules): `GET /api/footer` (view role) an
 `web.json` gains the optional key `update_check`; the scope list and the probe
 results accept `per=10|25|50|100|all` and ignore any other value.
 
+Access list in 0.9.8.10 (new, same rules): `cluster.json` gains the optional
+key `access` (mode `report` or `enforce`, the private-networks entry,
+`entries` with `net`, `note`, `off` and `dns`/`dhcp`/`web` set to `allow` or
+`deny`, and `hosts` with `addr`, `mac`, `note` and `dns`/`dhcp`/`web`) and the
+node-local latch `access_list_active`; without the key everyone is served, as
+before. A configuration push without the `access` key leaves the list
+unchanged, `null` clears it. `relay.json` gains `access`, `access_always` and
+a per-interface `network`; `dnsrelay.json` gains `access` and
+`access_always`; both are absent until every core runs the version that has
+the list, and older relays ignore them. `GET /api/v1/access` (admin) answers
+the activation state, the list and the relay reports. The web interface gains
+`/config/access`, `/config/access/hosts`, `/config/access/report` and
+`POST /config/access/save`.
+
 **Contract break, 0.9.8.1:** dry-run was removed. `dry_run` is gone
 from `/api/v1/status` and `/api/v1/agent` and from cluster.json (the
 daemon strips an existing key on startup and serves). `psk` is

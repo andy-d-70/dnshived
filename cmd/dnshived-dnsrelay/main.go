@@ -18,6 +18,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"runtime"
@@ -27,6 +28,7 @@ import (
 	"syscall"
 	"time"
 
+	"dnsrelay/access"
 	"dnsrelay/netsnap"
 )
 
@@ -83,6 +85,10 @@ type Config struct {
 	// Rewrites holds the cluster-wide query/answer rewrite rules, applied to
 	// every configured interface.
 	Rewrites []RewriteRule `json:"rewrites,omitempty"`
+	// Access is the cluster's access list; AccessAlways are the addresses served
+	// no matter what. Both are absent until every core can enforce the list.
+	Access       *access.Config `json:"access,omitempty"`
+	AccessAlways []string       `json:"access_always,omitempty"`
 }
 
 // ACLConfig is one interface's policy override.
@@ -701,6 +707,64 @@ func cacheFlushAll() int {
 	}
 	cacheBytesUsed.Store(0)
 	return cleared
+}
+
+// ------------------------- Access list -------------------------
+
+// accessReportPath is where the access report is written for the Access page.
+const accessReportPath = "/var/lib/dnshived-dnsrelay/access-report.json"
+
+var (
+	accessM         atomic.Pointer[access.Matcher]
+	accessRep       = access.NewReporter(0)
+	accessDropped   atomic.Uint64
+	accessWouldDrop atomic.Uint64
+)
+
+// applyAccess compiles c's access list and swaps it in. No list serves everyone.
+func applyAccess(c Config) {
+	if c.Access == nil {
+		accessM.Store(nil)
+		return
+	}
+	var always []netip.Addr
+	for _, a := range c.AccessAlways {
+		if ip, err := netip.ParseAddr(a); err == nil {
+			always = append(always, ip)
+		}
+	}
+	m, err := access.New(c.Access, always)
+	if err != nil {
+		logThrottled("access_list_invalid", "[ACCESS] access list ignored: %v", err)
+		accessM.Store(nil)
+		return
+	}
+	accessM.Store(m)
+}
+
+func accessEnforcing() bool { return accessM.Load().Enforcing() }
+
+// accessPermits judges one source for DNS. In report mode it counts the source and lets it through.
+func accessPermits(ip net.IP, ifName string) bool {
+	m := accessM.Load()
+	if m == nil {
+		return true
+	}
+	addr, ok := netip.AddrFromSlice(ip)
+	if !ok {
+		return true
+	}
+	if m.Check(access.DNS, addr).Allowed {
+		return true
+	}
+	accessRep.Add(access.DNS, addr, time.Now())
+	if !m.Enforcing() {
+		accessWouldDrop.Add(1)
+		return true
+	}
+	accessDropped.Add(1)
+	logThrottled("access_list:"+ifName, "[ACCESS] dropped DNS from %s on %s: the access list does not allow it", ip, ifName)
+	return false
 }
 
 // ------------------------- Cache stats file -------------------------
@@ -1917,6 +1981,7 @@ func reloadInterfaces(configPath string) {
 		logger.Printf("[RELOAD] parse config: %v (keeping current interfaces, nothing changed)", err)
 		return
 	}
+	applyAccess(newCfg)
 	prevInterfaceACLs := cfg.InterfaceACLs
 	prevRewrites := cfg.Rewrites
 	cfg.InterfaceACLs = newCfg.InterfaceACLs
@@ -2027,6 +2092,10 @@ func udpReadLoopForSocket(sock *addrSocket) {
 		}
 		info := sock.ifInfo.Load()
 		if info.subnet != nil && !info.subnet.Contains(remoteAddr.IP) {
+			droppedTotal.Add(1)
+			continue
+		}
+		if !accessPermits(remoteAddr.IP, info.name) {
 			droppedTotal.Add(1)
 			continue
 		}
@@ -2248,6 +2317,11 @@ func tcpAcceptLoopForSocket(sock *addrSocket) {
 		info := sock.ifInfo.Load()
 		srcIP := conn.RemoteAddr().(*net.TCPAddr).IP
 		if info.subnet != nil && !info.subnet.Contains(srcIP) {
+			droppedTotal.Add(1)
+			conn.Close()
+			continue
+		}
+		if !accessPermits(srcIP, info.name) {
 			droppedTotal.Add(1)
 			conn.Close()
 			continue
@@ -2557,6 +2631,7 @@ func main() {
 	}
 	tcpConnPerSrc = make(map[string]int)
 	initCacheShards()
+	applyAccess(cfg)
 
 	// register allowed interfaces
 	initialIfaces := make(map[int]*ifaceInfo, len(cfg.AllowedInterfaces))
@@ -2606,6 +2681,7 @@ func main() {
 	addrRefreshInterval := cfg.AddrRefreshInterval.D()
 	go addrSocketReconcileLoop(shutdownCtx, addrRefreshInterval)
 	go statsFileLoop(shutdownCtx, 15*time.Second)
+	go accessRep.Run(shutdownCtx, accessReportPath, 10*time.Second, accessEnforcing, logger.Printf)
 
 	logger.Printf("dnsrelay started: listen_port=%s upstreams=%v allowed_ifaces=%v cache_size=%d cache_max_bytes=%d max_outstanding=%d rate_scope=%s socket_pool=%d addr_refresh=%s cluster_rewrites=%d",
 		cfg.ListenAddr, cfg.Upstreams, cfg.AllowedInterfaces, cfg.CacheSize, cfg.CacheMaxBytes, cfg.MaxOutstanding, cfg.RateLimitScope, cfg.UpstreamSocketPoolSize, addrRefreshInterval, len(cfg.Rewrites))

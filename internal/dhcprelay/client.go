@@ -64,6 +64,12 @@ func (r *Relay) handleClientRequest(ci *clientInterface, packet []byte, from *ne
 		return
 	}
 
+	if !r.accessAllows(ci, packet, now) {
+		r.metrics.requestsDropped.Add(1)
+		ci.stats.drop(dropAccess)
+		return
+	}
+
 	if !ip4IsZero(packet[bootpGIAddrOffset:]) {
 		r.metrics.requestsDropped.Add(1)
 		ci.stats.drop(dropMalformed)

@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"dnshived/internal/access"
 )
 
 var dhcpLeaseTimePattern = regexp.MustCompile(`^\d+[smhd]?$`)
@@ -655,6 +657,15 @@ type Cluster struct {
 	// version that enforces the outage rules; it stays set while peers are away.
 	OutageRulesActive bool `json:"outage_rules_active,omitempty"`
 
+	// AccessListActive latches once every configured core was seen running a
+	// version that enforces the access list; until then the list is stored but
+	// not handed to the relays or the web interface.
+	AccessListActive bool `json:"access_list_active,omitempty"`
+
+	// AccessAlwaysFrom is set by the agent when it renders a relay config from a partial cluster copy: it replaces
+	// the list AccessAlways would derive. It is never stored.
+	AccessAlwaysFrom []string `json:"-"`
+
 	ClusterID   string   `json:"cluster_id"`
 	NodeID      string   `json:"node_id"`
 	Role        string   `json:"role"`
@@ -714,6 +725,10 @@ type Cluster struct {
 	GlobalDNSRecords []DNSRecord `json:"global_dns_records,omitempty"`
 
 	LocalDomains []LocalDomain `json:"local_domains,omitempty"`
+
+	// Access is the list of who the cluster serves (see internal/access). Nil
+	// means everyone is served, as before the list existed.
+	Access *access.Config `json:"access,omitempty"`
 
 	ScopeDefaults *ScopeDefaults `json:"scope_defaults,omitempty"`
 
@@ -856,6 +871,9 @@ type documentV2Extra struct {
 	BackupRetentionCount   int    `json:"backup_retention_count"`
 	BackupPassword         string `json:"backup_password"`
 	BackupReplicateToPeers bool   `json:"backup_replicate_to_peers"`
+
+	// Access is left out of the hash while there is no list, so a cluster without one keeps its hash.
+	Access *access.Config `json:"access,omitempty"`
 }
 
 // ConfigDocumentHash returns a stable, truncated SHA-256 digest over every
@@ -917,6 +935,7 @@ func (c *Cluster) ConfigDocumentHashes() (v1, v2 string) {
 		SanityCheckDisabled: c.SanityCheckDisabled, BackupEnabled: c.BackupEnabled,
 		BackupIntervalHours: c.BackupIntervalHours, BackupRetentionCount: c.BackupRetentionCount,
 		BackupPassword: c.BackupPassword, BackupReplicateToPeers: c.BackupReplicateToPeers,
+		Access: c.Access,
 	})
 	if err != nil {
 		return v1, ""
@@ -1217,6 +1236,9 @@ func (c *Cluster) validate() error {
 		return err
 	}
 	if err := validateLocalDomains(c.LocalDomains); err != nil {
+		return err
+	}
+	if err := c.Access.Validate(); err != nil {
 		return err
 	}
 	if err := ValidateDHCPOptions(c.DefaultDHCPOptions, "default_dhcp_options"); err != nil {

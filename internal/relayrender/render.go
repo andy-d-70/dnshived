@@ -6,6 +6,7 @@ package relayrender
 import (
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"os"
 	"os/user"
 	"sort"
@@ -46,16 +47,25 @@ func RenderRelayConfig(cluster config.Cluster, serverAddr string) (dhcprelay.Con
 		giaddr, _, _ := strings.Cut(sc.NodeIP, "/")
 		serverIdentifier, _, _ := strings.Cut(sc.VIP, "/")
 
+		var network string
+		if p, err := netip.ParsePrefix(sc.NodeIP); err == nil {
+			network = p.Masked().String()
+		}
 		cfg.ClientInterfaces = append(cfg.ClientInterfaces, dhcprelay.ClientInterfaceConfig{
 			Name:             ifname.InterfaceName(sc.Parent, sc.VLANID),
 			GIAddr:           giaddr,
 			ServerIdentifier: serverIdentifier,
 			Scope:            name,
+			Network:          network,
 		})
 	}
 
 	if len(cfg.ClientInterfaces) == 0 {
 		return dhcprelay.Config{}, fmt.Errorf("no scope in cluster config has a node_ip set -- nothing for the relay to serve")
+	}
+	if cluster.Access != nil && cluster.AccessListActive {
+		cfg.Access = cluster.Access
+		cfg.AccessAlways = cluster.AccessAlways()
 	}
 	if err := cfg.Validate(); err != nil {
 		return dhcprelay.Config{}, fmt.Errorf("rendered relay config is invalid: %w", err)

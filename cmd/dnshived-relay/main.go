@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -83,6 +85,10 @@ func main() {
 		log.Fatalf("[RELAY] start: %v", err)
 	}
 	log.Printf("[RELAY] started: %d client interface(s), server %s", len(cfg.ClientInterfaces), cfg.ServerAddr)
+
+	accessCtx, accessStop := context.WithCancel(context.Background())
+	defer accessStop()
+	go r.AccessReporter().Run(accessCtx, filepath.Join(*runtimeDir, "access-report.json"), 10*time.Second, r.AccessEnforcing, log.Printf)
 
 	stopStatus := make(chan struct{})
 	if *statusInterval > 0 {

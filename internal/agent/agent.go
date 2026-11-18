@@ -29,6 +29,7 @@ import (
 	"text/template"
 	"time"
 
+	"dnshived/internal/access"
 	"dnshived/internal/arbiter"
 	"dnshived/internal/cluster"
 	"dnshived/internal/config"
@@ -372,6 +373,9 @@ type Agent struct {
 	dnsRelayCacheSize     int
 	dnsRelayCacheMaxBytes int
 
+	// accessState mirrors config.Cluster.Access with the always-allowed addresses and the activation latch.
+	accessState atomic.Pointer[agentAccess]
+
 	// keepalivedReady is whether the consolidated keepalived instance has been
 	// successfully started at least once.
 	keepalivedReady bool
@@ -643,7 +647,7 @@ func (a *Agent) relayCluster(relayScopes map[string]config.ScopeConfig) config.C
 	if a.observer != nil {
 		c.Peers = a.observer.AllPeerAddrs()
 	}
-	return c
+	return a.withAccess(c)
 }
 
 // authorizeRelay gives the relay the PSK and opens scope there with the held tokens.
@@ -1152,6 +1156,29 @@ func (a *Agent) SetCoreDNSQueryLogging(enabled bool) {
 	a.coreDNSQueryLogging = enabled
 }
 
+// agentAccess is the access list as the agent hands it to the relay renderers.
+type agentAccess struct {
+	cfg    *access.Config
+	always []string
+	active bool
+}
+
+// SetAccess stores the access list, the addresses that are always served and whether every core can enforce the
+// list. The relay configs follow on the next reconcile.
+func (a *Agent) SetAccess(cfg *access.Config, always []string, active bool) {
+	a.accessState.Store(&agentAccess{cfg: cfg, always: append([]string(nil), always...), active: active})
+}
+
+// withAccess adds the access list to a cluster copy that is about to be rendered into a relay config.
+func (a *Agent) withAccess(c config.Cluster) config.Cluster {
+	if st := a.accessState.Load(); st != nil {
+		c.Access = st.cfg
+		c.AccessListActive = st.active
+		c.AccessAlwaysFrom = st.always
+	}
+	return c
+}
+
 func (a *Agent) SetDNSRelayCacheSize(size int) {
 	a.dnsRelayCacheSize = size
 }
@@ -1441,6 +1468,7 @@ func (a *Agent) applyDNSRelayConfig(scopes map[string]config.ScopeConfig) (resta
 		DNSRelayCacheSize:     a.dnsRelayCacheSize,
 		DNSRelayCacheMaxBytes: a.dnsRelayCacheMaxBytes,
 	}
+	cluster = a.withAccess(cluster)
 	rendered, err := dnsrelayrender.RenderRelayConfig(cluster)
 	if err != nil {
 		return false, false, fmt.Errorf("render dnsrelay config: %w", err)

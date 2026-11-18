@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"dnshived/internal/access"
 )
 
 // testPSK is a fixture-only value; validate() requires a non-empty psk
@@ -2032,5 +2034,34 @@ func TestNodeIPSuffixesOutOfRange_Errors(t *testing.T) {
 		if !found {
 			t.Errorf("suffix %q: expected a range error, got: %v", bad, res.Errors)
 		}
+	}
+}
+
+func TestAccess_RoundTripAndOldConfigsStayValid(t *testing.T) {
+	c := servingCluster(nil, nil)
+	if c.Access != nil {
+		t.Fatal("a cluster without the key must not get an access list")
+	}
+	if err := c.validate(); err != nil {
+		t.Fatalf("a config without access must stay valid: %v", err)
+	}
+	c.Access = &access.Config{Mode: access.ModeReport, Entries: []access.Entry{{Net: "203.0.113.0/24", DHCP: access.Deny}}, Hosts: []access.Host{{Addr: "172.32.0.5", DNS: true}}}
+	if err := c.validate(); err != nil {
+		t.Fatalf("a valid access list must pass: %v", err)
+	}
+	data, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back Cluster
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	if back.Access == nil || len(back.Access.Entries) != 1 || back.Access.Entries[0].DHCP != access.Deny {
+		t.Fatalf("round trip lost the list: %+v", back.Access)
+	}
+	c.Access.Entries = append(c.Access.Entries, access.Entry{Net: "not-a-network"})
+	if err := c.validate(); err == nil {
+		t.Fatal("an invalid access list must be refused when the configuration is validated")
 	}
 }

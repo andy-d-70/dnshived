@@ -11,7 +11,7 @@ Reachable at `https://<mgmt-vip>:8443/` or on any core node's own
 address; ports 80/443 redirect there. Menu: the dnshived logo (Overview),
 Scopes (list, topology view, defaults for new scopes), Probes, DHCP & DNS,
 Security (API tokens, users, mail), Maintenance (backup, restore, export),
-Cluster settings (nodes, interfaces, addresses) and Logs (with the daemon
+Cluster settings (nodes, interfaces, addresses, access list) and Logs (with the daemon
 list), plus the Pending changes button. Long pages are split into tabs.
 
 - **Changes are staged, then committed.** Every edit becomes a pending
@@ -20,7 +20,7 @@ list), plus the Pending changes button. Long pages are split into tabs.
   Scope changes hot-reload; see `docs/SCOPE_LIFECYCLE.md`.
 - **Config hashes.** `config_hash` covers the settings a commit distributes
   except the sanity-check and backup settings; `config_hash_v2` also covers
-  those. The Overview, the catch-up and the start-up check compare the
+  those and the access list (when there is one). The Overview, the catch-up and the start-up check compare the
   second one when every core reports it, otherwise the first.
 - **Config revision.** Every commit raises the cluster's config
   revision (`config_revision` in `cluster.json` and in
@@ -101,6 +101,39 @@ list), plus the Pending changes button. Long pages are split into tabs.
   when every staged change is within those rights; `readonly` can view.
   Users, password-reset links and mail settings are replicated between
   the cores' web UIs and apply without a commit.
+
+## Access list
+
+Cluster settings, Access: one list of who this cluster serves, for DNS, DHCP
+and the web interface. The private networks (10/8, 172.16/12, 192.168/16 and
+fc00::/7) are allowed by default and can be switched off. Other networks
+are added in CIDR form; every entry allows or denies DNS, DHCP and the web
+interface on its own, and the most specific entry decides (on equal size,
+deny wins). Whitelisted hosts are served before any entry: by address for
+DNS and the web interface, by MAC for DHCP (a DHCP client has no source
+address yet, so DHCP is judged by the client's network, the scope's
+subnet). A source that is not allowed gets no answer: the DNS relay drops
+the query, the DHCP relay drops the request, the web interface closes the
+connection.
+
+- **Report only first.** The mode is *Report only* until someone switches it
+  to *Enforce*: nothing is dropped, and the relays and the web interface
+  count the sources that would have been dropped (page *Report and test*).
+  Enter a network in the list before enforcing; a scope's own subnet is not
+  added for you.
+- **Always allowed.** Loopback, every scope's VIP, gateway and node
+  addresses, the management VIP and the peers are served no matter what, so
+  the cluster cannot cut itself off. A change that would cut the operator
+  off from the web interface is refused.
+- **Switches on with the last core.** The list is stored at once but handed
+  to the relays and the web interface only when every configured core runs
+  a version that has it (`GET /api/v1/access` names the cores that hold it
+  back). An older web interface that does not know the list leaves it
+  unchanged when it commits.
+- **Behind a reverse proxy** the web interface sees the proxy's address, not
+  the client's; forwarded-for headers are not trusted.
+- The dropped-source tables hold at most 256 sources per relay; the list holds
+  at most 1000 networks and 5000 hosts.
 
 ## Path beacons
 
@@ -218,6 +251,7 @@ Main read endpoints:
 | `/api/v1/status` | node state, serving, configured and disabled scopes, epoch, generation, version, config revision, config hash and hash v2, membership epoch, outage rules |
 | `/api/v1/cluster` | peers and reachability |
 | `/api/v1/cluster/snapshot` | status, system, events, daemons of every node in one call |
+| `/api/v1/access` | (admin) whether the access list is switched on, which cores hold it back, the list, and what the relays report |
 | `/api/v1/cluster/activation` | whether every configured core runs at least the version a later feature needs, and which nodes do not (nothing uses it yet) |
 | `/api/v1/authority/<scope>` | predicate evaluation (all five checks) |
 | `/api/v1/readiness/<scope>` | network-plane state for a scope |

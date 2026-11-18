@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"testing"
 
+	"dnshived/internal/access"
 	"dnshived/internal/config"
 	"dnshived/internal/dhcprelay"
 )
@@ -356,5 +357,39 @@ func TestRender_CarriesNodeIDAndCoreCount(t *testing.T) {
 	}
 	if cfg.NodeID != "core-1-701bf1ca87ae" || cfg.CoreCount != 3 {
 		t.Fatalf("node_id=%q core_count=%d, want the node ID and 3", cfg.NodeID, cfg.CoreCount)
+	}
+}
+
+func TestRenderRelayConfig_AccessList(t *testing.T) {
+	cluster := config.Cluster{
+		NodeID: "n1", Peers: []string{"192.0.2.23:9443"},
+		Scopes: map[string]config.ScopeConfig{"a": {Parent: "eth1", VLANID: 10, VIP: "198.51.100.1/24", NodeIP: "198.51.100.22/24"}},
+		Access: &access.Config{Mode: access.ModeEnforce},
+	}
+	cfg, err := RenderRelayConfig(cluster, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ClientInterfaces[0].Network != "198.51.100.0/24" {
+		t.Errorf("network = %q, want the scope's subnet", cfg.ClientInterfaces[0].Network)
+	}
+	if cfg.Access != nil {
+		t.Error("the list must not reach the relay before every core can enforce it")
+	}
+	cluster.AccessListActive = true
+	cfg, err = RenderRelayConfig(cluster, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Access == nil || !cfg.Access.Enforcing() {
+		t.Fatalf("the active list must be rendered: %+v", cfg.Access)
+	}
+	if len(cfg.AccessAlways) == 0 {
+		t.Error("the always-allowed addresses must come with it")
+	}
+	cluster.Access = nil
+	cfg, _ = RenderRelayConfig(cluster, "")
+	if cfg.Access != nil {
+		t.Error("a cluster without a list renders no list")
 	}
 }

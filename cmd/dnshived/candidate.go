@@ -49,8 +49,13 @@ func applyCandidateUpdate(dataDir, cfgPath string, upd configUpdate) (status int
 		return http.StatusInternalServerError, map[string]string{"error": "load live config: " + err.Error()}
 	}
 
+	accessUpd, err := parseAccessUpdate(upd.Access)
+	if err != nil {
+		return http.StatusBadRequest, map[string]string{"error": err.Error()}
+	}
 	candidate := *live
 	upd.applyTo(&candidate)
+	accessUpd.applyTo(&candidate)
 
 	result := candidate.ValidateExtended()
 	if !result.OK() {

@@ -170,6 +170,10 @@ func main() {
 	mux.HandleFunc("/config/scopes", requirePermission(store, webauth.PermViewStatus, handleScopesConfigGet(ref)))
 	mux.HandleFunc("POST /config/scopes", requirePermission(store, webauth.PermEditScopes, handleScopesConfigPost(ref)))
 	mux.HandleFunc("/config/dns", requirePermission(store, webauth.PermViewStatus, handleDHCPDNSConfigGet(ref, templates)))
+	mux.HandleFunc("/config/access", requirePermission(store, webauth.PermViewStatus, handleAccessPage(ref, "networks")))
+	mux.HandleFunc("/config/access/hosts", requirePermission(store, webauth.PermViewStatus, handleAccessPage(ref, "hosts")))
+	mux.HandleFunc("/config/access/report", requirePermission(store, webauth.PermViewStatus, handleAccessPage(ref, "report")))
+	mux.HandleFunc("POST /config/access/save", requirePermission(store, webauth.PermEditConfig, handleAccessSave(ref)))
 	mux.HandleFunc("POST /config/dns", requirePermission(store, webauth.PermEditScopes, handleDNSConfigPost(ref)))
 	mux.HandleFunc("POST /config/dhcp", requirePermission(store, webauth.PermEditScopes, handleDHCPConfigPost(ref)))
 	mux.HandleFunc("POST /config/domains/new", requirePermission(store, webauth.PermEditScopes, handleLocalDomainAddPost(ref)))
@@ -296,7 +300,9 @@ func main() {
 		handler = vipHostMiddleware(liveVIPHost, cfg.ExternalHosts, scheme, port, mux, floating)
 	}
 	allowedOrigins := func() []string { return append([]string{ref.Load().VIPHost}, cfg.ExternalHosts...) }
-	handler = securityHeaders(sameOriginGuard(allowedOrigins, limitBody(compressResponses(handler))))
+	handler = accessGuard(securityHeaders(sameOriginGuard(allowedOrigins, limitBody(compressResponses(handler)))))
+	primeAccess(ref)
+	go runAccessRefresh(context.Background(), ref)
 
 	if cfg.TLSCert != "" && cfg.TLSKey != "" {
 		if cfg.HTTPAddr != "" {
@@ -304,13 +310,13 @@ func main() {
 				redirectMux := http.NewServeMux()
 				redirectMux.HandleFunc("/", redirectToHTTPS(cfg.ListenAddr, liveVIPHost))
 				log.Printf("[http] listening on %s (redirects to https)", cfg.HTTPAddr)
-				if err := newServer(cfg.HTTPAddr, securityHeaders(redirectMux)).ListenAndServe(); err != nil {
+				if err := newServer(cfg.HTTPAddr, accessGuard(securityHeaders(redirectMux))).ListenAndServe(); err != nil {
 					log.Printf("[ERROR] http redirect listener on %s: %v", cfg.HTTPAddr, err)
 				}
 			}()
 		}
 		// :80/:443 are the bootstrap wizard's ports.
-		portRedirect := securityHeaders(redirectToHTTPS(cfg.ListenAddr, liveVIPHost))
+		portRedirect := accessGuard(securityHeaders(redirectToHTTPS(cfg.ListenAddr, liveVIPHost)))
 		go serveRedirectWithRetry(memberHTTPAddr, "", "", portRedirect)
 		go serveRedirectWithRetry(memberHTTPSAddr, cfg.TLSCert, cfg.TLSKey, portRedirect)
 		log.Printf("[http] listening on %s (TLS)", cfg.ListenAddr)

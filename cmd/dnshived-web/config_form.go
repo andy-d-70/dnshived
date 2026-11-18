@@ -31,6 +31,11 @@ moved to <a href="/probes">probes &rarr;</a>.</p>
 <div class="tab-host">
 <form method="post" action="/config" onsubmit="return confirm('This will stage these cluster settings as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">
 
+<section class="tab-pane" id="tab-access" data-tab="Access" data-tab-order="5">
+<h2>Access list</h2>
+<p>Who is allowed to be served by this cluster: DNS, DHCP and this web interface. The private networks are allowed by default; other networks and single hosts are added there, each with allow or deny per service.
+<a href="/config/access">Open the access list &rarr;</a></p>
+</section>
 <section class="tab-pane" id="tab-misc" data-tab="Misc" data-tab-order="4">
 <h2>Cluster-wide settings</h2>
 <table border="1" cellpadding="4">

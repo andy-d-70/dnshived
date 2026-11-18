@@ -11,6 +11,7 @@ import (
 	"os"
 	"sort"
 
+	"dnshived/internal/access"
 	"dnshived/internal/config"
 	"dnshived/internal/dnscentralrender"
 	"dnshived/internal/ifname"
@@ -24,6 +25,11 @@ type RelayConfig struct {
 	AllowedInterfaces []string `json:"allowed_interfaces"`
 	CacheSize         int      `json:"cache_size,omitempty"`
 	CacheMaxBytes     int      `json:"cache_max_bytes,omitempty"`
+
+	// Access and AccessAlways are the access list and the addresses served no matter what; both stay empty until
+	// every core can enforce the list.
+	Access       *access.Config `json:"access,omitempty"`
+	AccessAlways []string       `json:"access_always,omitempty"`
 }
 
 func RenderRelayConfig(cluster config.Cluster) (RelayConfig, error) {
@@ -35,6 +41,11 @@ func RenderRelayConfig(cluster config.Cluster) (RelayConfig, error) {
 		Upstreams:     []string{upstream},
 		CacheSize:     cluster.DNSRelayCacheSize,
 		CacheMaxBytes: cluster.DNSRelayCacheMaxBytes,
+	}
+
+	if cluster.Access != nil && cluster.AccessListActive {
+		cfg.Access = cluster.Access
+		cfg.AccessAlways = cluster.AccessAlways()
 	}
 
 	names := make([]string, 0, len(cluster.Scopes))
@@ -85,6 +96,13 @@ func WriteRelayConfig(path string, cluster config.Cluster) error {
 	}
 	if rendered.CacheMaxBytes != 0 {
 		existing["cache_max_bytes"] = rendered.CacheMaxBytes
+	}
+	if rendered.Access != nil {
+		existing["access"] = rendered.Access
+		existing["access_always"] = rendered.AccessAlways
+	} else {
+		delete(existing, "access")
+		delete(existing, "access_always")
 	}
 
 	data, err := json.MarshalIndent(existing, "", "  ")

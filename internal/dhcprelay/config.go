@@ -7,7 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
+
+	"dnshived/internal/access"
 )
 
 // Config is the relay's standalone configuration.
@@ -40,6 +43,11 @@ type Config struct {
 	// default quorum is its majority. Both are optional for old files; without them every gate stays closed.
 	NodeID    string `json:"node_id,omitempty"`
 	CoreCount int    `json:"core_count,omitempty"`
+
+	// Access is the cluster's access list; AccessAlways are the addresses served no matter what. Both are absent
+	// until every core runs a version that has the list.
+	Access       *access.Config `json:"access,omitempty"`
+	AccessAlways []string       `json:"access_always,omitempty"`
 }
 
 type ClientInterfaceConfig struct {
@@ -65,6 +73,10 @@ type ClientInterfaceConfig struct {
 	// Scope is the scope whose authority gates this interface. Empty means the
 	// interface stays closed.
 	Scope string `json:"scope,omitempty"`
+
+	// Network is the scope's subnet in CIDR form. The access list judges DHCP by the client's network, because a
+	// DHCP client has no source address yet.
+	Network string `json:"network,omitempty"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -107,6 +119,21 @@ func (c *Config) Validate() error {
 
 	if c.CoreCount < 0 {
 		return fmt.Errorf("core_count must not be negative")
+	}
+	if err := c.Access.Validate(); err != nil {
+		return err
+	}
+	for _, a := range c.AccessAlways {
+		if _, err := netip.ParseAddr(a); err != nil {
+			return fmt.Errorf("access_always %q: %w", a, err)
+		}
+	}
+	for _, ci := range c.ClientInterfaces {
+		if ci.Network != "" {
+			if _, err := netip.ParsePrefix(ci.Network); err != nil {
+				return fmt.Errorf("client interface %s: network %q: %w", ci.Name, ci.Network, err)
+			}
+		}
 	}
 
 	seenNames := make(map[string]bool, len(c.ClientInterfaces))

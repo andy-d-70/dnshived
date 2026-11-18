@@ -3,7 +3,11 @@
 
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"dnshived/internal/access"
+)
 
 func hashFixture() Cluster {
 	return Cluster{
@@ -22,7 +26,7 @@ func TestConfigDocumentHash_KeepsItsValue(t *testing.T) {
 	}
 }
 
-func TestConfigDocumentHashV2_CoversTheSixSettings(t *testing.T) {
+func TestConfigDocumentHashV2_CoversTheSettingsItAdds(t *testing.T) {
 	base := hashFixture()
 	v1, v2 := base.ConfigDocumentHash(), base.ConfigDocumentHashV2()
 	if v2 == "" || v2 == v1 {
@@ -35,6 +39,7 @@ func TestConfigDocumentHashV2_CoversTheSixSettings(t *testing.T) {
 		"backup_retention_count":    func(c *Cluster) { c.BackupRetentionCount = 3 },
 		"backup_password":           func(c *Cluster) { c.BackupPassword = "x" },
 		"backup_replicate_to_peers": func(c *Cluster) { c.BackupReplicateToPeers = true },
+		"access":                    func(c *Cluster) { c.Access = &access.Config{Mode: access.ModeEnforce} },
 	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
@@ -67,8 +72,8 @@ func TestConfigDocumentHashes_IgnoreNodeLocalAndMetadataFields(t *testing.T) {
 
 func TestHashedKeys(t *testing.T) {
 	v1, v2 := HashedKeys()
-	if len(v1) != 21 || len(v2) != 27 {
-		t.Errorf("v1 has %d keys, v2 has %d, want 21 and 27", len(v1), len(v2))
+	if len(v1) != 21 || len(v2) != 28 {
+		t.Errorf("v1 has %d keys, v2 has %d, want 21 and 28", len(v1), len(v2))
 	}
 	set := map[string]bool{}
 	for _, k := range v2 {

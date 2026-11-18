@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"dnshived/internal/access"
 	"dnshived/internal/unixsock"
 )
 
@@ -59,6 +60,8 @@ type metrics struct {
 	repliesDropped      atomic.Int64
 	gateClosedRequests  atomic.Int64
 	gateClosedReplies   atomic.Int64
+	accessDropped       atomic.Int64
+	accessWouldDrop     atomic.Int64
 }
 
 // Metrics is a point-in-time snapshot of Relay's counters, safe to log or
@@ -76,6 +79,8 @@ type Metrics struct {
 	Pending             int64
 	GateClosedRequests  int64
 	GateClosedReplies   int64
+	AccessDropped       int64
+	AccessWouldDrop     int64
 }
 
 type Relay struct {
@@ -112,6 +117,9 @@ type Relay struct {
 	runDir     string
 	version    string
 	startedAt  time.Time
+
+	access       atomic.Pointer[accessState]
+	accessReport *access.Reporter
 }
 
 type serverSocket struct{ udpConn }
@@ -191,10 +199,12 @@ func New(cfg Config) (*Relay, error) {
 		throttleSeen: make(map[throttleKey]time.Time),
 		gates:        newGateTable(),
 		startedAt:    time.Now(),
+		accessReport: access.NewReporter(0),
 	}
 	r.gates.applyConfig(cfg.NodeID, cfg.CoreCount)
 
 	r.applyOptionalLimits(cfg)
+	r.applyAccess(cfg)
 
 	for _, ci := range cfg.ClientInterfaces {
 		newCif, err := newClientInterface(ci, cfg, &r.clientTracked, r.gates)
@@ -449,6 +459,7 @@ func (r *Relay) Reconfigure(newCfg Config) error {
 	}
 
 	r.applyOptionalLimits(newCfg)
+	r.applyAccess(newCfg)
 	r.cfg = newCfg
 	r.gates.applyConfig(newCfg.NodeID, newCfg.CoreCount)
 	keep := make(map[string]bool, len(newCfg.ClientInterfaces))
@@ -573,6 +584,8 @@ func (r *Relay) Snapshot() Metrics {
 		Pending:             r.pending.globalCnt.Load(),
 		GateClosedRequests:  r.metrics.gateClosedRequests.Load(),
 		GateClosedReplies:   r.metrics.gateClosedReplies.Load(),
+		AccessDropped:       r.metrics.accessDropped.Load(),
+		AccessWouldDrop:     r.metrics.accessWouldDrop.Load(),
 	}
 }
 

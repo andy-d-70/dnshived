@@ -234,6 +234,7 @@ func main() {
 	currentConfig.Store(cfg)
 	labprofile.Start(func() string { return dataDir(currentConfig.Load()) })
 	outage.rules.active.Store(cfg.OutageRulesActive)
+	accessGate.active.Store(cfg.AccessListActive)
 	setBeaconLinkUp(helperSocketFor(cfg))
 
 	if *checkConfig {
@@ -313,6 +314,10 @@ func main() {
 		defer t.Stop()
 		for range t.C {
 			cur := currentConfig.Load()
+			if accessGate.refreshAt(activation.AccessListVersion, version, len(cur.Peers), peerViews(observer.Snapshot()), func() error { return persistAccessLatch(*cfgPath) }) {
+				loglevel.Infof("[ACCESS] every configured core runs %s or newer: the access list is now handed to the relays and the web interface", activation.AccessListVersion)
+				applyAccessToAgent(accessAgent.Load(), currentConfig.Load())
+			}
 			if outage.rules.refresh(version, len(cur.Peers), peerViews(observer.Snapshot()), func() error { return persistOutageLatch(*cfgPath) }) {
 				loglevel.Infof("[OUTAGE] every configured core runs %s or newer: write quorum, stale-base refusal, config verification and the membership epoch are now enforced", activation.OutageRulesVersion)
 			}
@@ -364,6 +369,8 @@ func main() {
 	ag.SetCoreDNSQueryLogging(cfg.CoreDNSQueryLogging)
 	ag.SetDNSRelayCacheSize(cfg.DNSRelayCacheSize)
 	ag.SetDNSRelayCacheMaxBytes(cfg.DNSRelayCacheMaxBytes)
+	accessAgent.Store(ag)
+	applyAccessToAgent(ag, cfg)
 	ag.SetSanityCheckDisabled(cfg.SanityCheckDisabled)
 	ag.SetSelfAddr(cfg.ControlAddr)
 	ag.SetMgmtIface(mgmtIfaceFromConfig(cfg))
@@ -1163,6 +1170,7 @@ func main() {
 	})
 
 	mux.HandleFunc("/api/v1/dnsrelay-stats", dnsRelayStatsHandler())
+	mux.HandleFunc("GET /api/v1/access", authMw.RequireAdmin(accessStateHandler(observer)))
 
 	var configResponses, candidateResponses responseCache
 	mux.HandleFunc("GET /api/v1/config", authMw.RequireAdmin(configGetHandler(func() string { return *cfgPath }, &configResponses)))
@@ -1997,6 +2005,9 @@ type configUpdate struct {
 	DNSRelayCacheMaxBytes int                           `json:"dnsrelay_cache_max_bytes"`
 	SanityCheckDisabled   bool                          `json:"sanity_check_disabled"`
 
+	// Access is the access list: absent leaves it unchanged, null clears it.
+	Access json.RawMessage `json:"access"`
+
 	BackupEnabled          bool   `json:"backup_enabled"`
 	BackupIntervalHours    int    `json:"backup_interval_hours"`
 	BackupRetentionCount   int    `json:"backup_retention_count"`
@@ -2059,7 +2070,12 @@ func applyConfigUpdate(cfgPath string, upd configUpdate, ag *agent.Agent, engine
 	}
 	clusterChanged := clusterIdentityFieldsChanged(current, upd)
 
+	accessUpd, err := parseAccessUpdate(upd.Access)
+	if err != nil {
+		return http.StatusBadRequest, map[string]string{"error": err.Error()}
+	}
 	upd.applyTo(current)
+	accessUpd.applyTo(current)
 
 	result := current.ValidateExtended()
 	if !result.OK() {
@@ -2073,6 +2089,7 @@ func applyConfigUpdate(cfgPath string, upd configUpdate, ag *agent.Agent, engine
 	currentConfig.Store(current)
 
 	if !clusterChanged && ag != nil {
+		applyAccessToAgent(ag, current)
 		ag.HotReloadScopes(current.Scopes)
 		ag.RefreshTopoBeacon()
 		if engine != nil {

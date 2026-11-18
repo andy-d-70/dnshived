@@ -40,28 +40,34 @@ func activationMembers(selfName, selfRole, selfVersion string, peers []string, s
 	return members
 }
 
+// evaluateActivation asks every peer for its version and reports whether the
+// whole cluster runs at least required.
+func evaluateActivation(observer *cluster.Observer, required string) activation.Result {
+	fresh := currentConfig.Load()
+	scheme := "http"
+	if fresh.TLSEnabled() {
+		scheme = "https"
+	}
+	token := anyAPIToken(fresh.APITokens)
+	peers := fresh.Peers
+	snaps := make([]nodeSnapshot, len(peers))
+	var wg sync.WaitGroup
+	for i, addr := range peers {
+		wg.Add(1)
+		go func(i int, addr string) {
+			defer wg.Done()
+			snaps[i] = fetchPeerSnapshot(scheme, addr, token, observer)
+		}(i, addr)
+	}
+	wg.Wait()
+	members := activationMembers(fresh.NodeID, fresh.Role, version, peers, snaps)
+	return activation.Evaluate(required, members)
+}
+
 // clusterActivationHandler builds GET /api/v1/cluster/activation: whether
 // every configured core member runs at least activation.FeatureVersion.
 func clusterActivationHandler(observer *cluster.Observer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		fresh := currentConfig.Load()
-		scheme := "http"
-		if fresh.TLSEnabled() {
-			scheme = "https"
-		}
-		token := anyAPIToken(fresh.APITokens)
-		peers := fresh.Peers
-		snaps := make([]nodeSnapshot, len(peers))
-		var wg sync.WaitGroup
-		for i, addr := range peers {
-			wg.Add(1)
-			go func(i int, addr string) {
-				defer wg.Done()
-				snaps[i] = fetchPeerSnapshot(scheme, addr, token, observer)
-			}(i, addr)
-		}
-		wg.Wait()
-		members := activationMembers(fresh.NodeID, fresh.Role, version, peers, snaps)
-		writeJSON(w, http.StatusOK, activation.Evaluate(activation.FeatureVersion, members))
+		writeJSON(w, http.StatusOK, evaluateActivation(observer, activation.FeatureVersion))
 	}
 }

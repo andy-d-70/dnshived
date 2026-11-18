@@ -20,6 +20,7 @@ const (
 	dropGIAddr
 	dropUnknownTransaction
 	dropDownstreamWrite
+	dropAccess
 	dropCount
 )
 
@@ -36,6 +37,7 @@ var dropNames = [dropCount]string{
 	dropGIAddr:             "giaddr_mismatch",
 	dropUnknownTransaction: "unknown_transaction",
 	dropDownstreamWrite:    "downstream_write",
+	dropAccess:             "access_list",
 }
 
 // vlanStats are one client interface's counters, read by the gate socket's status.

@@ -95,6 +95,9 @@ func diffClusterFields(live, candidate config.Cluster) []clusterDiffEntry {
 	if !reflect.DeepEqual(live.ScopeDefaults, candidate.ScopeDefaults) {
 		out = append(out, clusterDiffEntry{"scope_defaults", "changed"})
 	}
+	if !reflect.DeepEqual(live.Access, candidate.Access) {
+		out = append(out, accessDiffEntries(live.Access, candidate.Access)...)
+	}
 	if !reflect.DeepEqual(live.DefaultDHCPOptions, candidate.DefaultDHCPOptions) {
 		added, removed := diffLines(live.DefaultDHCPOptions, candidate.DefaultDHCPOptions)
 		for _, d := range diffLineDetails(added, removed) {

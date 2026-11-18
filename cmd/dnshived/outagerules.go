@@ -146,10 +146,15 @@ func (o *outageRules) Active() bool { return o.active.Load() }
 // that changed anything, persists the latch. It returns whether the latch
 // was newly set.
 func (o *outageRules) refresh(selfVersion string, configured int, peers []peerView, persist func() error) bool {
+	return o.refreshAt(activation.OutageRulesVersion, selfVersion, configured, peers, persist)
+}
+
+// refreshAt is refresh for a latch that waits for the given version.
+func (o *outageRules) refreshAt(required, selfVersion string, configured int, peers []peerView, persist func() error) bool {
 	if o.active.Load() {
 		return false
 	}
-	if ok, _ := peersRunAtLeast(selfVersion, activation.OutageRulesVersion, configured, peers); !ok {
+	if ok, _ := peersRunAtLeast(selfVersion, required, configured, peers); !ok {
 		return false
 	}
 	o.mu.Lock()

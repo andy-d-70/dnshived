@@ -58,6 +58,9 @@ type configPushPayload struct {
 	DNSRelayCacheMaxBytes int                           `json:"dnsrelay_cache_max_bytes"`
 	SanityCheckDisabled   bool                          `json:"sanity_check_disabled"`
 
+	// Access is the access list; left out, the daemon keeps what it has.
+	Access json.RawMessage `json:"access,omitempty"`
+
 	BackupEnabled          bool   `json:"backup_enabled"`
 	BackupIntervalHours    int    `json:"backup_interval_hours"`
 	BackupRetentionCount   int    `json:"backup_retention_count"`
@@ -1164,8 +1167,10 @@ func parentChoices(c config.Cluster) []string {
 // clusterPushPayloadFrom carries every cluster-wide field of an
 // already-loaded config.Cluster into a configPushPayload UNEDITED.
 func clusterPushPayloadFrom(c config.Cluster) configPushPayload {
+	access, _ := marshalAccess(c.Access)
 	return configPushPayload{
-		PSK: c.PSK, TrustedHosts: c.TrustedHosts,
+		Access: access,
+		PSK:    c.PSK, TrustedHosts: c.TrustedHosts,
 		TLSCert: c.TLSCert, TLSKey: c.TLSKey, APITokens: c.APITokens,
 		LogLevel: c.LogLevel, HelperSocket: c.HelperSocket, Platform: c.Platform,
 		ProbeIntervalMS: c.ProbeIntervalMS, MgmtVIP: c.MgmtVIP,

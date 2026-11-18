@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"testing"
 
+	"dnshived/internal/access"
 	"dnshived/internal/config"
 	"dnshived/internal/dnscentralrender"
 )
@@ -282,5 +283,49 @@ func TestWriteRelayConfig_ConfiguredCacheOverwritesExistingFile(t *testing.T) {
 	}
 	if written["cache_max_bytes"] != float64(4194304) {
 		t.Errorf("cache_max_bytes = %v, want the freshly-configured 4194304", written["cache_max_bytes"])
+	}
+}
+
+func TestRenderRelayConfig_AccessList(t *testing.T) {
+	c := testCluster()
+	c.Peers = []string{"192.0.2.23:9443"}
+	c.Access = &access.Config{Mode: access.ModeEnforce}
+	cfg, err := RenderRelayConfig(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Access != nil {
+		t.Error("the list must not reach the relay before every core can enforce it")
+	}
+	c.AccessListActive = true
+	cfg, err = RenderRelayConfig(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Access == nil || !cfg.Access.Enforcing() || len(cfg.AccessAlways) == 0 {
+		t.Fatalf("the active list must be rendered with the always-allowed addresses: %+v %v", cfg.Access, cfg.AccessAlways)
+	}
+
+	path := filepath.Join(t.TempDir(), "dnsrelay.json")
+	if err := WriteRelayConfig(path, c); err != nil {
+		t.Skipf("write needs the dnshived group on this host: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["access"] == nil || got["access_always"] == nil {
+		t.Errorf("the written file lacks the list: %s", data)
+	}
+	c.Access = nil
+	if err := WriteRelayConfig(path, c); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(path)
+	got = nil
+	_ = json.Unmarshal(data, &got)
+	if _, ok := got["access"]; ok {
+		t.Errorf("removing the list must remove the key: %s", data)
 	}
 }
