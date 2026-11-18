@@ -115,7 +115,7 @@ func TestHostsTemplate_RendersRowsAndMenu(t *testing.T) {
 	if strings.Contains(out, "<b>x</b>") || !strings.Contains(out, "&lt;b&gt;x&lt;/b&gt;") {
 		t.Error("host names must be escaped")
 	}
-	if strings.Count(out, "Rename…") != 1 || strings.Count(out, "Client ID…") != 1 || strings.Count(out, "Block…") != 3 {
+	if strings.Count(out, "Rename…") != 1 || strings.Count(out, "Client ID…") != 1 || strings.Count(out, "Names…") != 1 || strings.Count(out, "Block…") != 3 {
 		t.Error("a reserved host offers Rename and Client ID, every host with a menu offers Block")
 	}
 	if !strings.Contains(out, "private (randomized) MAC") {
@@ -152,5 +152,13 @@ func TestFilterHostRows_UnknownStatic(t *testing.T) {
 	}
 	if got := filterHostRows(rows, "", "dynamic"); len(got) != 1 || got[0].IP != "1" {
 		t.Errorf("dynamic must not include unknown static: %+v", got)
+	}
+}
+
+func TestBuildHostRows_KeepsReservationNameApartFromLeaseName(t *testing.T) {
+	sc := config.ScopeConfig{Reservations: []config.Reservation{{MAC: "aa:bb:cc:00:00:02", IP: "10.0.0.6", Hostname: "nas", Names: []string{"files", "backup"}}}}
+	rows := buildHostRows("office", sc, []dnsmasqLease{{MAC: "AA:BB:CC:00:00:02", IP: "10.0.0.6", Hostname: "lease-name"}}, time.Unix(1_800_000_000, 0))
+	if len(rows) != 1 || rows[0].Name != "lease-name" || rows[0].ResName != "nas" || rows[0].Names != "files, backup" {
+		t.Fatalf("rows = %+v", rows)
 	}
 }

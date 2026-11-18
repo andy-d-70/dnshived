@@ -28,6 +28,8 @@ type hostRow struct {
 	IP        string
 	Name      string
 	ClientID  string
+	Names     string
+	ResName   string
 	Icon      string
 	IconTitle string
 	Private   bool
@@ -106,6 +108,8 @@ func privateMAC(mac string) bool {
 	return err == nil && b&0x02 != 0
 }
 
+const hostIconUnknown = "□"
+
 var hostIconRules = []struct {
 	words []string
 	icon  string
@@ -130,7 +134,17 @@ func hostIcon(name string) (string, string) {
 			}
 		}
 	}
-	return "□", "type not known"
+	return hostIconUnknown, "type not known"
+}
+
+func ouiFallback(icon, title, mac string) (string, string) {
+	if icon != hostIconUnknown {
+		return icon, title
+	}
+	if i, t, ok := ouiIcon(mac); ok {
+		return i, t
+	}
+	return icon, title
 }
 
 func buildHostRows(scope string, sc config.ScopeConfig, leases []dnsmasqLease, now time.Time) []hostRow {
@@ -148,9 +162,10 @@ func buildHostRows(scope string, sc config.ScopeConfig, leases []dnsmasqLease, n
 		if name == "" {
 			name = res.Hostname
 		}
-		row := hostRow{Scope: scope, MAC: mac, IP: l.IP, Name: name, ClientID: res.ClientID, Reserved: isRes, Seen: true,
+		row := hostRow{Scope: scope, MAC: mac, IP: l.IP, Name: name, ClientID: res.ClientID, Names: strings.Join(res.Names, ", "), ResName: res.Hostname, Reserved: isRes, Seen: true,
 			TTL: hostTTL(now, l.Expiry, l.NeverExpires), Renewed: hostRenewed(now, l.Expiry, l.NeverExpires, dur), Private: privateMAC(mac)}
 		row.Icon, row.IconTitle = hostIcon(name)
+		row.Icon, row.IconTitle = ouiFallback(row.Icon, row.IconTitle, mac)
 		row.addr, _ = netip.ParseAddr(l.IP)
 		seen[mac] = true
 		out = append(out, row)
@@ -160,8 +175,9 @@ func buildHostRows(scope string, sc config.ScopeConfig, leases []dnsmasqLease, n
 		if seen[mac] {
 			continue
 		}
-		row := hostRow{Scope: scope, MAC: mac, IP: r.IP, Name: r.Hostname, ClientID: r.ClientID, Reserved: true, TTL: "—", Renewed: "—", Private: privateMAC(mac)}
+		row := hostRow{Scope: scope, MAC: mac, IP: r.IP, Name: r.Hostname, ClientID: r.ClientID, Names: strings.Join(r.Names, ", "), ResName: r.Hostname, Reserved: true, TTL: "—", Renewed: "—", Private: privateMAC(mac)}
 		row.Icon, row.IconTitle = hostIcon(r.Hostname)
+		row.Icon, row.IconTitle = ouiFallback(row.Icon, row.IconTitle, mac)
 		row.addr, _ = netip.ParseAddr(r.IP)
 		out = append(out, row)
 	}
@@ -182,6 +198,7 @@ func addUnknownStatic(rows []hostRow, scope string, neigh []scopeNeighbor, skip 
 		}
 		row := hostRow{Scope: scope, MAC: mac, IP: n.IP, Unknown: true, Seen: true, TTL: "—", Renewed: "—", Private: privateMAC(mac)}
 		row.Icon, row.IconTitle = hostIcon("")
+		row.Icon, row.IconTitle = ouiFallback(row.Icon, row.IconTitle, mac)
 		row.addr, _ = netip.ParseAddr(n.IP)
 		rows = append(rows, row)
 	}
@@ -369,7 +386,7 @@ var hostsTmpl = template.Must(template.New("hosts").Parse(`<!doctype html>
 {{range .Rows}}
 <tr data-scope="{{.Scope}}" data-ip="{{.IP}}">
   <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><a href="/scopes/{{.Scope}}">{{.Scope}}</a></td>
-  <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{.Name}}">{{if .Name}}{{.Name}}{{else}}—{{end}}</td>
+  <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{.Name}}{{if .Names}} ({{.Names}}){{end}}">{{if .Name}}{{.Name}}{{else}}—{{end}}{{if .Names}} <span class="dim">+</span>{{end}}</td>
   <td style="font-variant-numeric:tabular-nums;white-space:nowrap">{{.IP}}<span data-alive style="display:inline-block;width:1.2em;text-align:center"></span></td>
   <td style="font-variant-numeric:tabular-nums;white-space:nowrap">{{.MAC}}{{if .Private}} <span class="dim" title="A private (randomized) MAC address: the device may use a different one on another network, so a reservation or block by this MAC can stop matching.">P</span>{{end}}</td>
   <td style="font-variant-numeric:tabular-nums;white-space:nowrap">{{.TTL}}</td>
@@ -382,8 +399,9 @@ var hostsTmpl = template.Must(template.New("hosts").Parse(`<!doctype html>
   <button type="button" role="menuitem" data-check title="Ask the serving node whether this address answers ARP right now">Check now</button>
   {{if and (not .Reserved) (not .Unknown)}}<form method="post" action="/scopes/{{.Scope}}/reservations"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.Name}}"><button type="submit" role="menuitem" title="Reserve this address for this MAC; staged as a pending change">Make static</button></form>
   <form method="post" action="/scopes/{{.Scope}}/leases/release" onsubmit="return confirm('Release lease {{.IP}} ({{.MAC}})? The client will need to request an address again.')"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><button type="submit" role="menuitem">Release</button></form>{{end}}
-  {{if .Reserved}}<form method="post" action="/scopes/{{.Scope}}/reservations" onsubmit="var n=prompt('Host name (letters, digits, dot, hyphen, underscore; empty clears it):',this.hostname.value);if(n===null)return false;this.hostname.value=n.trim();"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.Name}}"><button type="submit" role="menuitem" title="Change the host name of this reservation; staged as a pending change">Rename…</button></form>
-  <form method="post" action="/scopes/{{.Scope}}/reservations" onsubmit="var n=prompt('DHCP client identifier (option 61) as hex bytes like 01:aa:bb:cc:dd:ee:ff; empty = match by MAC only:',this.client_id.value);if(n===null)return false;this.client_id.value=n.trim();"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.Name}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><button type="submit" role="menuitem" title="The server then answers only when the MAC and this identifier both match">Client ID…</button></form>{{end}}
+  {{if .Reserved}}<form method="post" action="/scopes/{{.Scope}}/reservations" onsubmit="var n=prompt('Host name (letters, digits, dot, hyphen, underscore; empty clears it):',this.hostname.value);if(n===null)return false;this.hostname.value=n.trim();"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.ResName}}"><button type="submit" role="menuitem" title="Change the host name of this reservation; staged as a pending change">Rename…</button></form>
+  <form method="post" action="/scopes/{{.Scope}}/reservations" onsubmit="var n=prompt('DHCP client identifier (option 61) as hex bytes like 01:aa:bb:cc:dd:ee:ff; empty = match by MAC only:',this.client_id.value);if(n===null)return false;this.client_id.value=n.trim();"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.ResName}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><button type="submit" role="menuitem" title="The server then answers only when the MAC and this identifier both match">Client ID…</button></form>
+  <form method="post" action="/scopes/{{.Scope}}/reservations" onsubmit="var n=prompt('Extra DNS names for this address, comma separated (up to 8); empty removes them:',this.names.value);if(n===null)return false;this.names.value=n.trim();"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.ResName}}"><input type="hidden" name="names" value="{{.Names}}"><button type="submit" role="menuitem" title="More names that resolve to this address; staged as a pending change">Names…</button></form>{{end}}
   <form method="get" action="/config/access/blocked"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="addr" value="{{.IP}}"><button type="submit" role="menuitem" title="Open the blocked clients page with this client filled in; nothing is blocked until you stage and commit it">Block…</button></form>
   </div></details>{{end}}</td>
 </tr>

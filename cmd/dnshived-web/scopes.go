@@ -1145,11 +1145,19 @@ func promoteLeaseFormHandler(ref *configRef) http.HandlerFunc {
 		res := config.Reservation{MAC: mac, IP: ip, Hostname: hostname}
 		for _, old := range sc.Reservations {
 			if strings.EqualFold(old.MAC, mac) {
-				res.ClientID = old.ClientID
+				res.ClientID, res.Names = old.ClientID, old.Names
 			}
 		}
 		if _, set := r.Form["client_id"]; set {
 			res.ClientID = strings.ToLower(strings.TrimSpace(r.FormValue("client_id")))
+		}
+		if _, set := r.Form["names"]; set {
+			res.Names = nil
+			for _, n := range strings.Split(r.FormValue("names"), ",") {
+				if n = strings.ToLower(strings.TrimSpace(n)); n != "" {
+					res.Names = append(res.Names, n)
+				}
+			}
 		}
 		sc.Reservations = upsertReservation(append([]config.Reservation{}, sc.Reservations...), res)
 		newScopes[scope] = sc

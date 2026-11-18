@@ -2078,3 +2078,35 @@ func TestValidateReservations_ClientID(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateReservations_Names(t *testing.T) {
+	mk := func(names ...string) []Reservation {
+		return []Reservation{{MAC: "aa:bb:cc:00:00:02", IP: "10.0.0.6", Hostname: "nas", Names: names}}
+	}
+	if err := validateReservations(mk("files", "backup.lan"), "scope"); err != nil {
+		t.Fatalf("valid names: %v", err)
+	}
+	long := make([]string, MaxReservationNames+1)
+	for i := range long {
+		long[i] = "n" + string(rune('a'+i))
+	}
+	for name, res := range map[string][]Reservation{
+		"too many":      mk(long...),
+		"empty":         mk(""),
+		"bad character": mk("a b"),
+		"same as host":  mk("NAS"),
+		"twice":         mk("x", "X"),
+		"other owner":   append(mk("files"), Reservation{MAC: "aa:bb:cc:00:00:03", IP: "10.0.0.7", Hostname: "files"}),
+	} {
+		if err := validateReservations(res, "scope"); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+}
+
+func TestValidateReservations_DuplicateHostnamesStayValid(t *testing.T) {
+	old := []Reservation{{MAC: "aa:bb:cc:00:00:02", IP: "10.0.0.6", Hostname: "nas"}, {MAC: "aa:bb:cc:00:00:03", IP: "10.0.0.7", Hostname: "nas"}}
+	if err := validateReservations(old, "scope"); err != nil {
+		t.Fatalf("a config that was valid before extra names must stay valid: %v", err)
+	}
+}

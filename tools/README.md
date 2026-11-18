@@ -45,3 +45,5 @@ profile length in seconds, default 30), and the packages are named
 `*.LAB-PROFILE.*` and report `[LAB PROFILE BUILD]` in `--version`. Never install
 them outside a development host. `make release-guard` (`tools/release-guard.sh`)
 scans packages and binaries for the tool and must pass before every release.
+
+- `gen-oui.py`: regenerates the manufacturer table behind the Hosts page icons from the public IEEE MA-L list (`tools/gen-oui.py oui.csv > cmd/dnshived-web/oui_table.go`).

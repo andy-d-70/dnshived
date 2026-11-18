@@ -238,6 +238,20 @@ type Reservation struct {
 	Hostname string `json:"hostname,omitempty"`
 	// ClientID is the DHCP client identifier (option 61) as hex bytes; the reservation then matches MAC and identifier.
 	ClientID string `json:"client_id,omitempty"`
+	// Names are extra DNS names for the reservation's address.
+	Names []string `json:"names,omitempty"`
+}
+
+// MaxReservationNames bounds the extra names of one reservation.
+const MaxReservationNames = 8
+
+// DNSNames lists every name that resolves to the reservation's address.
+func (r Reservation) DNSNames() []string {
+	out := make([]string, 0, 1+len(r.Names))
+	if r.Hostname != "" {
+		out = append(out, r.Hostname)
+	}
+	return append(out, r.Names...)
 }
 
 // DNSRecord is one custom static DNS record for a scope.
@@ -565,6 +579,13 @@ var reservationHostnameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]*$`)
 // ValidateDHCPOptions above.
 func validateReservations(reservations []Reservation, errPrefix string) error {
 	seen := make(map[string]bool, len(reservations))
+	owner := make(map[string]int, len(reservations))
+	hostOwner := make(map[string]int, len(reservations))
+	for i, res := range reservations {
+		if res.Hostname != "" {
+			hostOwner[strings.ToLower(res.Hostname)] = i
+		}
+	}
 	for i, res := range reservations {
 		if _, err := net.ParseMAC(res.MAC); err != nil {
 			return fmt.Errorf("%s: reservations[%d]: mac %q is not a valid MAC address", errPrefix, i, res.MAC)
@@ -577,6 +598,29 @@ func validateReservations(reservations []Reservation, errPrefix string) error {
 		}
 		if res.ClientID != "" && !reservationClientIDRe.MatchString(res.ClientID) {
 			return fmt.Errorf("%s: reservations[%d]: client_id %q must be up to 32 lowercase hex bytes like 01:aa:bb", errPrefix, i, res.ClientID)
+		}
+		if len(res.Names) > MaxReservationNames {
+			return fmt.Errorf("%s: reservations[%d]: %d extra names, at most %d", errPrefix, i, len(res.Names), MaxReservationNames)
+		}
+		for _, n := range res.Names {
+			if n == "" || len(n) > 253 || !reservationHostnameRe.MatchString(n) {
+				return fmt.Errorf("%s: reservations[%d]: extra name %q must be 1 to 253 letters, digits, dot, hyphen or underscore", errPrefix, i, n)
+			}
+		}
+		for _, n := range res.Names {
+			key := strings.ToLower(n)
+			if strings.EqualFold(n, res.Hostname) {
+				return fmt.Errorf("%s: reservations[%d]: the extra name %q is the host name already", errPrefix, i, n)
+			}
+			if j, dup := owner[key]; dup && j != i {
+				return fmt.Errorf("%s: reservations[%d]: the extra name %q is already used by reservations[%d]", errPrefix, i, n, j)
+			} else if dup {
+				return fmt.Errorf("%s: reservations[%d]: the extra name %q is listed twice", errPrefix, i, n)
+			}
+			if j, ok := hostOwner[key]; ok && j != i {
+				return fmt.Errorf("%s: reservations[%d]: the extra name %q is the host name of reservations[%d]", errPrefix, i, n, j)
+			}
+			owner[key] = i
 		}
 		if seen[res.MAC] {
 			return fmt.Errorf("%s: reservations[%d]: mac %q already reserved earlier in this scope", errPrefix, i, res.MAC)

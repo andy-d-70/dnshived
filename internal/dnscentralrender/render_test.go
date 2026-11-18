@@ -303,3 +303,15 @@ func TestRender_IncludesLocalDomainRecords(t *testing.T) {
 		t.Errorf("rendered output missing the expanded local-domain host record, got:\n%s", out)
 	}
 }
+
+func TestRenderScopePreview_ExtraNames(t *testing.T) {
+	got, err := RenderScopePreview(config.ScopeConfig{Reservations: []config.Reservation{{MAC: "aa:bb:cc:00:00:02", IP: "10.0.0.6", Hostname: "nas", Names: []string{"files"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"host-record=nas,10.0.0.6", "host-record=files,10.0.0.6"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
+	}
+}

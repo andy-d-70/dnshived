@@ -61,10 +61,9 @@ func Render(cluster config.Cluster, address string, dataDir string) (string, err
 		sc := cluster.Scopes[name]
 		records = append(records, sc.DNSRecords...)
 		for _, r := range sc.Reservations {
-			if r.Hostname == "" {
-				continue
+			for _, n := range r.DNSNames() {
+				records = append(records, config.DNSRecord{Name: n, Type: "A", Value: r.IP})
 			}
-			records = append(records, config.DNSRecord{Name: r.Hostname, Type: "A", Value: r.IP})
 		}
 	}
 	records = append(records, cluster.GlobalDNSRecords...)
@@ -112,10 +111,9 @@ func RenderScopePreview(sc config.ScopeConfig) (string, error) {
 	var records []config.DNSRecord
 	records = append(records, sc.DNSRecords...)
 	for _, r := range sc.Reservations {
-		if r.Hostname == "" {
-			continue
+		for _, n := range r.DNSNames() {
+			records = append(records, config.DNSRecord{Name: n, Type: "A", Value: r.IP})
 		}
-		records = append(records, config.DNSRecord{Name: r.Hostname, Type: "A", Value: r.IP})
 	}
 	return dnsmasqrender.RenderDNSRecords(records)
 }
