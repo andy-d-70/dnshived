@@ -691,7 +691,15 @@ func TestHandleDHCPDNSConfigGet_RendersDNSAndDHCPSectionsTogether(t *testing.T) 
 	defer srv.Close()
 
 	cfg := &WebConfig{Nodes: []NodeConfig{{Name: "core-1", Addr: strings.TrimPrefix(srv.URL, "http://")}}}
-	req := httptest.NewRequest(http.MethodGet, "/config/dns", nil)
+	dnsRec := httptest.NewRecorder()
+	handleDHCPDNSConfigGet(newConfigRef(cfg), &TemplateStore{})(dnsRec, httptest.NewRequest(http.MethodGet, "/config/dns", nil))
+	if dnsRec.Code != http.StatusOK || !strings.Contains(dnsRec.Body.String(), "fileserver.lan") {
+		t.Errorf("DNS view missing expected content, got:\n%s", dnsRec.Body.String())
+	}
+	if strings.Contains(dnsRec.Body.String(), "corp.local") {
+		t.Error("the DNS view must not carry the DHCP defaults")
+	}
+	req := httptest.NewRequest(http.MethodGet, "/config/dhcp", nil)
 	rec := httptest.NewRecorder()
 
 	handleDHCPDNSConfigGet(newConfigRef(cfg), &TemplateStore{})(rec, req)
@@ -700,8 +708,8 @@ func TestHandleDHCPDNSConfigGet_RendersDNSAndDHCPSectionsTogether(t *testing.T) 
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, "fileserver.lan") {
-		t.Errorf("DNS section missing expected content, got:\n%s", body)
+	if strings.Contains(body, "fileserver.lan") {
+		t.Error("the DHCP view must not carry the DNS records")
 	}
 	if !strings.Contains(body, "corp.local") || !strings.Contains(body, "office") || !strings.Contains(body, "10.0.0.1") {
 		t.Errorf("DHCP section missing expected content, got:\n%s", body)
@@ -722,17 +730,20 @@ func TestHandleDHCPDNSConfigGet_RendersTemplateLibrary(t *testing.T) {
 	store.Upsert("", "ddm", "#654321", TemplateKindDNS, "A|test.local|10.0.0.1")
 
 	cfg := &WebConfig{Nodes: []NodeConfig{{Name: "core-1", Addr: strings.TrimPrefix(srv.URL, "http://")}}}
-	req := httptest.NewRequest(http.MethodGet, "/config/dns", nil)
-	rec := httptest.NewRecorder()
-
-	handleDHCPDNSConfigGet(newConfigRef(cfg), store)(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
+	render := func(path string) string {
+		rec := httptest.NewRecorder()
+		handleDHCPDNSConfigGet(newConfigRef(cfg), store)(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200", path, rec.Code)
+		}
+		return rec.Body.String()
 	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "dante") || !strings.Contains(body, "ddm") {
-		t.Errorf("template library section missing expected rows, got:\n%s", body)
+	dhcpBody, body := render("/config/dhcp"), render("/config/dns")
+	if !strings.Contains(dhcpBody, "dante") || strings.Contains(dhcpBody, "ddm") {
+		t.Errorf("the DHCP view must list the DHCP option sets only, got:\n%s", dhcpBody)
+	}
+	if !strings.Contains(body, "ddm") || strings.Contains(body, "dante") {
+		t.Errorf("the DNS view must list the DNS record sets only, got:\n%s", body)
 	}
 	if !strings.Contains(body, "/templates/new") {
 		t.Error("expected a link to /templates/new")

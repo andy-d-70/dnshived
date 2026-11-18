@@ -120,8 +120,10 @@ func returnPageLabel(p string) string {
 		return "scopes"
 	case strings.HasPrefix(path, "/config/scopes"):
 		return "scope table"
+	case strings.HasPrefix(path, "/config/dhcp"):
+		return "DHCP"
 	case strings.HasPrefix(path, "/config/dns"):
-		return "DHCP & DNS"
+		return "DNS"
 	case path == "/config/mail" || strings.HasPrefix(path, "/security") || strings.HasPrefix(path, "/users"):
 		return "security"
 	case strings.HasPrefix(path, "/config"):

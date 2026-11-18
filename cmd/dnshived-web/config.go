@@ -405,7 +405,11 @@ func handleDHCPDNSConfigGet(ref *configRef, store *TemplateStore) http.HandlerFu
 			return
 		}
 		existing := collectExistingDNSRecords(c)
+		dhcpView := strings.HasPrefix(r.URL.Path, "/config/dhcp")
 		data := dhcpDNSConfigFormData{
+			Title:              map[bool]string{true: "DHCP", false: "DNS"}[dhcpView],
+			ShowDHCP:           dhcpView,
+			ShowDNS:            !dhcpView,
 			SourceNode:         node.Name,
 			Pending:            isPending,
 			DNS:                buildDNSConfigFormData(c, node),
@@ -450,7 +454,7 @@ func handleDNSConfigPost(ref *configRef) http.HandlerFunc {
 		payload.GlobalDNSRecords = globalRecords
 
 		user, _ := userFromContext(r)
-		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#dns", "back to DHCP & DNS")
+		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#dns", "back to DNS")
 	}
 }
 
@@ -474,7 +478,7 @@ func handleDHCPConfigPost(ref *configRef) http.HandlerFunc {
 		payload.DefaultDHCPOptions = splitLines(r.PostForm.Get("default_dhcp_options"))
 
 		user, _ := userFromContext(r)
-		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#dhcp", "back to DHCP & DNS")
+		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dhcp#dhcp", "back to DHCP")
 	}
 }
 
@@ -1646,6 +1650,10 @@ type dhcpDNSConfigFormData struct {
 	SourceNode string
 	// Pending: see clusterFormData.Pending.
 	Pending bool
+
+	Title    string
+	ShowDHCP bool
+	ShowDNS  bool
 
 	DNS  dnsConfigFormData
 	DHCP dhcpConfigFormData

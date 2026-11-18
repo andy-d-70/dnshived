@@ -529,7 +529,7 @@ nothing runs until you confirm it here either way.</p>
 <tr><th>Field</th><th>Change</th></tr>
 {{range .ClusterDiffs}}<tr><td>{{.Label}}</td><td>{{.Detail}}</td></tr>{{end}}
 </table>
-<p class="dim">Edit on <a href="/config">cluster settings</a> or <a href="/config/dns">DHCP &amp; DNS</a>.</p>
+<p class="dim">Edit on <a href="/config">cluster settings</a> or <a href="/config/dhcp">DHCP</a> or <a href="/config/dns">DNS</a>.</p>
 {{end}}
 
 {{if .ScopeDiffs}}

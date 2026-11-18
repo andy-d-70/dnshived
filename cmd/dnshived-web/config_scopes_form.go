@@ -145,8 +145,8 @@ applied until you commit it from <a href="/pending">pending changes</a>
 (a NEW or REMOVED scope needs a daemon restart either way once committed —
 see docs/SCOPE_LIFECYCLE.md). Cluster-wide settings (tokens, platform,
 etc.) live on their own page: <a href="/config">edit cluster &rarr;</a>. DNS/
-DHCP defaults live on another: <a href="/config/dns">edit DHCP &amp; DNS
-&rarr;</a>. Each row's "edit &#8599;" link
+DHCP defaults live on another: <a href="/config/dhcp">edit DHCP
+&rarr;</a>, DNS on <a href="/config/dns">edit DNS &rarr;</a>. Each row's "edit &#8599;" link
 opens that scope's own full detail page (live leases, VRRP/serving state,
 dnsmasq log) in a new tab — this table stays for fast bulk edits across many
 scopes at once.</p>

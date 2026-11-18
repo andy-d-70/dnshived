@@ -6,10 +6,10 @@ package main
 import "html/template"
 
 var dhcpDNSConfigFormTmpl = template.Must(template.New("config-dhcp-dns").Parse(`<!doctype html>
-<title>dnshived-web — DHCP &amp; DNS</title>
+<title>dnshived-web — {{.Title}}</title>
 ` + styleHTML + templateBuilderStyleHTML + `
 ` + navHTML + pendingBannerHTML + `
-<h1>DHCP &amp; DNS</h1>
+<h1>{{.Title}}</h1>
 
 <p>Snapshot from node: <strong>{{.SourceNode}}</strong>. Any save below
 stages a <a href="/pending">pending change</a> — nothing applies until
@@ -18,8 +18,9 @@ you commit it. Elsewhere: <a href="/config">cluster settings</a>,
 <a href="/config/scopes">scopes</a>, <a href="/scopes/options">scope
 options</a>, <a href="/probes#tab-behavior">DNS probe checks</a>.</p>
 
+{{if .ShowDNS}}<script>if(/^#(tab-)?(dhcp|dhcp-templates)$/.test(location.hash))location.replace("/config/dhcp"+location.hash);</script>{{end}}
 <div class="tab-host">
-<section class="tab-pane" id="tab-domains" data-tab="Local domains" data-tab-order="4">
+{{if .ShowDNS}}<section class="tab-pane" id="tab-domains" data-tab="Local domains" data-tab-order="4">
 <h2 id="domains">Local domains &amp; hostnames</h2>
 <p class="dim">Named DNS zones (e.g. <code>foo.lan</code>) — resolve
 cluster-wide, same as Global DNS records below. TTL: per-domain default,
@@ -62,7 +63,7 @@ until unlinked. Click a domain's own summary line below to edit it.</p>
 </form>
 
 </section>
-<section class="tab-pane" id="tab-dns" data-tab="DNS records &amp; checks" data-tab-order="2">
+<section class="tab-pane" id="tab-dns" data-tab="DNS records &amp; checks" data-tab-order="2"{{if not .ShowDHCP}} data-tab-default{{end}}>
 <h2 id="dns">DNS defaults</h2>
 <form method="post" action="/config/dns" onsubmit="return confirm('This will stage these DNS defaults as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">
 
@@ -91,7 +92,7 @@ better. Named boilerplate lives under <a href="#templates">Templates</a>
 probing now live next to the probing RESULTS.</p>
 
 </section>
-<section class="tab-pane" id="tab-dhcp" data-tab="Default DHCP options" data-tab-order="1" data-tab-default>
+{{end}}{{if .ShowDHCP}}<section class="tab-pane" id="tab-dhcp" data-tab="Default DHCP options" data-tab-order="1" data-tab-default>
 <h2 id="dhcp">DHCP defaults</h2>
 <form method="post" action="/config/dhcp" onsubmit="return confirm('This will stage this DHCP default as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">
 
@@ -124,7 +125,7 @@ name in dnsmasq).</p>
 {{end}}
 </table></div>
 
-</section>
+</section>{{end}}
 <section class="tab-pane" id="tab-templates" data-tab="Templates" data-tab-order="3">
 <h2 id="templates">Templates</h2>
 <p class="dim">Reusable, named sets of DHCP options or DNS records —
@@ -136,7 +137,7 @@ keep — them across many scopes at once, see <a href="/optionsets">Option
 sets</a>, <a href="/rollout">mass-rollout</a>, and <a href="/groups">scope
 groups</a>.</p>
 
-<h3>DHCP option sets</h3>
+{{if .ShowDHCP}}<h3>DHCP option sets</h3>
 <div class="table-wrap"><table data-stack><tr><th>name</th><th>preview</th><th></th></tr>
 {{range .DHCPTemplates}}
 <tr><td><span class="name-dot" style="background:{{.Color}}"></span>{{.Name}}</td>
@@ -149,7 +150,7 @@ groups</a>.</p>
 {{else}}<tr><td colspan="3" class="dim">none yet</td></tr>{{end}}
 </table></div>
 
-<h3>DNS record sets</h3>
+{{end}}{{if .ShowDNS}}<h3>DNS record sets</h3>
 <div class="table-wrap"><table data-stack><tr><th>name</th><th>preview</th><th></th></tr>
 {{range .DNSTemplates}}
 <tr><td><span class="name-dot" style="background:{{.Color}}"></span>{{.Name}}</td>
@@ -162,7 +163,7 @@ groups</a>.</p>
 {{else}}<tr><td colspan="3" class="dim">none yet</td></tr>{{end}}
 </table></div>
 
-<h3>DNS server for clients</h3>
+{{end}}{{if .ShowDHCP}}<h3>DNS server for clients</h3>
 <p class="dim"><span class="info-ico" title="DHCP option 6 — the DNS server(s) clients are told to use. A single IP, or a comma-separated list.">&#9432;</span>
 Named "dnshived vs. other" overrides — a single value, picking one
 REPLACES a scope's own choice rather than adding to it (unlike the
@@ -179,7 +180,7 @@ sets above).</p>
 {{else}}<tr><td colspan="3" class="dim">none yet</td></tr>{{end}}
 </table></div>
 
-<p><a href="/templates/new">+ New template</a></p>
+{{end}}<p><a href="/templates/new">+ New template</a></p>
 </section>
 </div>
 ` + rowMenuScriptHTML + ``))

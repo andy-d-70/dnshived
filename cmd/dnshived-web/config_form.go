@@ -18,7 +18,7 @@ PENDING change on every configured node — nothing is applied until you
 commit it from <a href="/pending">pending changes</a>. Scope definitions live on their
 own page: <a href="/config/scopes">edit scopes &rarr;</a>. DNS/DHCP
 defaults and the template library live on another:
-<a href="/config/dns">edit DHCP &amp; DNS &rarr;</a>. To change your own
+<a href="/config/dhcp">edit DHCP &rarr;</a>, <a href="/config/dns">edit DNS &rarr;</a>. To change your own
 login password: <a href="/password">change password &rarr;</a>. Export/
 import/backup moved to their own page:
 <a href="/backup">maintenance &rarr;</a>. API tokens moved

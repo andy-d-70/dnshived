@@ -9,7 +9,7 @@ and monitoring. Connection flags can be stored in `~/.dnshived/rc`
 
 Reachable at `https://<mgmt-vip>:8443/` or on any core node's own
 address; ports 80/443 redirect there. Menu: the dnshived logo (Overview),
-Scopes (list, topology view, defaults for new scopes), Probes, DHCP & DNS,
+Scopes (list, topology view, defaults for new scopes), Probes, DHCP, DNS,
 Security (API tokens, users, mail), Maintenance (backup, restore, export),
 Cluster settings (nodes, interfaces, addresses, access list) and Logs (with the daemon
 list), plus the Pending changes button. Long pages are split into tabs.

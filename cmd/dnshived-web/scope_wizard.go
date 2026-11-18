@@ -92,7 +92,11 @@ function autoVIPFromSubnet(input){
 
 func wizardTemplateButtonsHTML(kind TemplateKind, textareaID string, rows []templateRow) template.HTML {
 	if len(rows) == 0 {
-		return template.HTML(`<p class="dim">no templates yet — create one under <a href="/config/dns#templates">DHCP &amp; DNS &rarr; Templates</a>, or type directly below.</p>`)
+		home, name := "/config/dhcp", "DHCP"
+		if kind == TemplateKindDNS {
+			home, name = "/config/dns", "DNS"
+		}
+		return template.HTML(`<p class="dim">no templates yet — create one under <a href="` + home + `#templates">` + name + ` &rarr; Templates</a>, or type directly below.</p>`)
 	}
 	var b strings.Builder
 	keyFn := wizardCollisionKeyJS(kind)
@@ -135,7 +139,7 @@ func wizardCollisionKeyJS(kind TemplateKind) string {
 
 func wizardTemplateReplaceButtonsHTML(inputID string, rows []templateRow) template.HTML {
 	if len(rows) == 0 {
-		return template.HTML(`<p class="dim">no templates yet — create one under <a href="/config/dns#templates">DHCP &amp; DNS &rarr; Templates</a>, or type directly below.</p>`)
+		return template.HTML(`<p class="dim">no templates yet — create one under <a href="/config/dhcp#templates">DHCP &rarr; Templates</a>, or type directly below.</p>`)
 	}
 	var b strings.Builder
 	b.WriteString(`<script>function wizReplace_` + inputID + `(body){var el=document.getElementById('` + inputID + `');if(!el)return;` +
@@ -258,7 +262,7 @@ dhcp_options, replacing (not adding to) the default.</p>
 <button type="submit" name="action" value="add_client_dns_template">+ save as template</button></p>
 {{if .GlobalDNSRecordsText}}
 <p class="dim">Already applied to EVERY scope cluster-wide (global_dns_records —
-edit under <a href="/config/dns">DHCP &amp; DNS</a>, not here):</p>
+edit under <a href="/config/dns">DNS</a>, not here):</p>
 <pre style="margin:0 0 .8rem;white-space:pre-wrap">{{.GlobalDNSRecordsText}}</pre>
 {{end}}
 <p class="dim">Records below are ADDITIONAL, just for this scope.</p>

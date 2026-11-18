@@ -158,7 +158,7 @@ func handleLocalDomainAddPost(ref *configRef) http.HandlerFunc {
 			config.LocalDomain{Name: name, TTL: ttl})
 
 		user, _ := userFromContext(r)
-		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DHCP & DNS")
+		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DNS")
 	}
 }
 
@@ -208,7 +208,7 @@ func handleLocalDomainForkPost(ref *configRef) http.HandlerFunc {
 		payload.LocalDomains = append(append([]config.LocalDomain(nil), current.LocalDomains...), fork)
 
 		user, _ := userFromContext(r)
-		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DHCP & DNS")
+		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DNS")
 	}
 }
 
@@ -242,7 +242,7 @@ func handleLocalDomainUnlinkPost(ref *configRef) http.HandlerFunc {
 		payload.LocalDomains = domains
 
 		user, _ := userFromContext(r)
-		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DHCP & DNS")
+		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DNS")
 	}
 }
 
@@ -286,7 +286,7 @@ func handleLocalDomainSavePost(ref *configRef) http.HandlerFunc {
 		payload.LocalDomains = domains
 
 		user, _ := userFromContext(r)
-		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DHCP & DNS")
+		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DNS")
 	}
 }
 
@@ -313,6 +313,6 @@ func handleLocalDomainDeletePost(ref *configRef) http.HandlerFunc {
 		payload.LocalDomains = domains
 
 		user, _ := userFromContext(r)
-		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DHCP & DNS")
+		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DNS")
 	}
 }
