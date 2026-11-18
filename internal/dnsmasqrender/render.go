@@ -127,7 +127,7 @@ func EffectiveDHCPBool(override *bool, bundleDefault bool) bool {
 // ReservationsTemplate renders sc.Reservations into the exact dnsmasq
 // dhcp-host= lines that make up reservations-<scope>.conf.
 var ReservationsTemplate = template.Must(template.New("reservations").Parse(`{{- range .}}
-dhcp-host={{.MAC}},{{.IP}}{{if .Hostname}},{{.Hostname}}{{end}}
+dhcp-host={{.MAC}}{{if .ClientID}},id:{{.ClientID}}{{end}},{{.IP}}{{if .Hostname}},{{.Hostname}}{{end}}
 {{- end}}
 `))
 

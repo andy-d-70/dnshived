@@ -108,7 +108,17 @@ func TestHostsTemplate_RendersRowsAndMenu(t *testing.T) {
 	if strings.Contains(out, "<b>x</b>") || !strings.Contains(out, "&lt;b&gt;x&lt;/b&gt;") {
 		t.Error("host names must be escaped")
 	}
+	if strings.Count(out, "Rename…") != 1 || strings.Count(out, "Client ID…") != 1 || strings.Count(out, "Block…") != 2 {
+		t.Error("a reserved host offers Rename and Client ID, every host with a menu offers Block")
+	}
 	if !strings.Contains(out, "private (randomized) MAC") {
 		t.Error("a private MAC carries its explanation")
+	}
+}
+
+func TestUpsertReservation_MatchesMACIgnoringCase(t *testing.T) {
+	got := upsertReservation([]config.Reservation{{MAC: "AA:BB:CC:00:00:02", IP: "10.0.0.6", ClientID: "01:aa"}}, config.Reservation{MAC: "aa:bb:cc:00:00:02", IP: "10.0.0.6", Hostname: "nas", ClientID: "01:aa"})
+	if len(got) != 1 || got[0].Hostname != "nas" {
+		t.Fatalf("a rename must replace the reservation, not add a second one: %+v", got)
 	}
 }

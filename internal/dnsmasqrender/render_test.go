@@ -252,3 +252,18 @@ func TestRenderDNSRecords_ZeroTTLOmitsTrailingField(t *testing.T) {
 		t.Errorf("got %q, want no trailing TTL field", text)
 	}
 }
+
+func TestRenderReservations_ClientID(t *testing.T) {
+	got, err := RenderReservations([]config.Reservation{
+		{MAC: "aa:bb:cc:00:00:02", IP: "10.0.0.6", Hostname: "nas", ClientID: "01:aa:bb:cc:00:00:02"},
+		{MAC: "aa:bb:cc:00:00:03", IP: "10.0.0.7"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"dhcp-host=aa:bb:cc:00:00:02,id:01:aa:bb:cc:00:00:02,10.0.0.6,nas\n", "dhcp-host=aa:bb:cc:00:00:03,10.0.0.7\n"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in %q", want, got)
+		}
+	}
+}

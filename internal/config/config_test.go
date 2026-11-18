@@ -2065,3 +2065,16 @@ func TestAccess_RoundTripAndOldConfigsStayValid(t *testing.T) {
 		t.Fatal("an invalid access list must be refused when the configuration is validated")
 	}
 }
+
+func TestValidateReservations_ClientID(t *testing.T) {
+	ok := []Reservation{{MAC: "aa:bb:cc:00:00:02", IP: "10.0.0.6", ClientID: "01:aa:bb:cc:00:00:02"}}
+	if err := validateReservations(ok, "scope"); err != nil {
+		t.Fatalf("a valid client id: %v", err)
+	}
+	for _, id := range []string{"01:AA", "zz", "01:aa:", "0x01", "01 aa"} {
+		bad := []Reservation{{MAC: "aa:bb:cc:00:00:02", IP: "10.0.0.6", ClientID: id}}
+		if err := validateReservations(bad, "scope"); err == nil {
+			t.Errorf("client id %q must be refused", id)
+		}
+	}
+}

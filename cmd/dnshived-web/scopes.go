@@ -1105,7 +1105,7 @@ func handleScopeDetail(ref *configRef, store *TemplateStore) http.HandlerFunc {
 // (matched by MAC).
 func upsertReservation(reservations []config.Reservation, res config.Reservation) []config.Reservation {
 	for i, r := range reservations {
-		if r.MAC == res.MAC {
+		if strings.EqualFold(r.MAC, res.MAC) {
 			reservations[i] = res
 			return reservations
 		}
@@ -1142,8 +1142,16 @@ func promoteLeaseFormHandler(ref *configRef) http.HandlerFunc {
 		for name, s := range c.Scopes {
 			newScopes[name] = s
 		}
-		sc.Reservations = upsertReservation(append([]config.Reservation{}, sc.Reservations...),
-			config.Reservation{MAC: mac, IP: ip, Hostname: hostname})
+		res := config.Reservation{MAC: mac, IP: ip, Hostname: hostname}
+		for _, old := range sc.Reservations {
+			if strings.EqualFold(old.MAC, mac) {
+				res.ClientID = old.ClientID
+			}
+		}
+		if _, set := r.Form["client_id"]; set {
+			res.ClientID = strings.ToLower(strings.TrimSpace(r.FormValue("client_id")))
+		}
+		sc.Reservations = upsertReservation(append([]config.Reservation{}, sc.Reservations...), res)
 		newScopes[scope] = sc
 
 		payload := clusterPushPayloadFrom(c)

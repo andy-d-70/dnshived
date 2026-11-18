@@ -25,6 +25,7 @@ type hostRow struct {
 	MAC       string
 	IP        string
 	Name      string
+	ClientID  string
 	Icon      string
 	IconTitle string
 	Private   bool
@@ -144,7 +145,7 @@ func buildHostRows(scope string, sc config.ScopeConfig, leases []dnsmasqLease, n
 		if name == "" {
 			name = res.Hostname
 		}
-		row := hostRow{Scope: scope, MAC: mac, IP: l.IP, Name: name, Reserved: isRes, Seen: true,
+		row := hostRow{Scope: scope, MAC: mac, IP: l.IP, Name: name, ClientID: res.ClientID, Reserved: isRes, Seen: true,
 			TTL: hostTTL(now, l.Expiry, l.NeverExpires), Renewed: hostRenewed(now, l.Expiry, l.NeverExpires, dur), Private: privateMAC(mac)}
 		row.Icon, row.IconTitle = hostIcon(name)
 		row.addr, _ = netip.ParseAddr(l.IP)
@@ -156,7 +157,7 @@ func buildHostRows(scope string, sc config.ScopeConfig, leases []dnsmasqLease, n
 		if seen[mac] {
 			continue
 		}
-		row := hostRow{Scope: scope, MAC: mac, IP: r.IP, Name: r.Hostname, Reserved: true, TTL: "—", Renewed: "—", Private: privateMAC(mac)}
+		row := hostRow{Scope: scope, MAC: mac, IP: r.IP, Name: r.Hostname, ClientID: r.ClientID, Reserved: true, TTL: "—", Renewed: "—", Private: privateMAC(mac)}
 		row.Icon, row.IconTitle = hostIcon(r.Hostname)
 		row.addr, _ = netip.ParseAddr(r.IP)
 		out = append(out, row)
@@ -322,10 +323,12 @@ var hostsTmpl = template.Must(template.New("hosts").Parse(`<!doctype html>
   <td style="font-variant-numeric:tabular-nums;white-space:nowrap">{{.Renewed}}</td>
   <td style="text-align:center" title="{{.IconTitle}}">{{.Icon}}</td>
   <td>{{if .Reserved}}reserved{{else}}dynamic{{end}}{{if and .Reserved (not .Seen)}}<span class="dim" title="reserved, not seen on the network right now"> ·</span>{{end}}</td>
-  <td style="width:3rem;text-align:center">{{if .Seen}}<details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.MAC}}">&#9776;</summary>
+  <td style="width:3rem;text-align:center">{{if or .Seen .Reserved}}<details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.MAC}}">&#9776;</summary>
   <div class="row-menu-list" role="menu">
   {{if not .Reserved}}<form method="post" action="/scopes/{{.Scope}}/reservations"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.Name}}"><button type="submit" role="menuitem" title="Reserve this address for this MAC; staged as a pending change">Make static</button></form>
   <form method="post" action="/scopes/{{.Scope}}/leases/release" onsubmit="return confirm('Release lease {{.IP}} ({{.MAC}})? The client will need to request an address again.')"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><button type="submit" role="menuitem">Release</button></form>{{end}}
+  {{if .Reserved}}<form method="post" action="/scopes/{{.Scope}}/reservations" onsubmit="var n=prompt('Host name (letters, digits, dot, hyphen, underscore; empty clears it):',this.hostname.value);if(n===null)return false;this.hostname.value=n.trim();"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.Name}}"><button type="submit" role="menuitem" title="Change the host name of this reservation; staged as a pending change">Rename…</button></form>
+  <form method="post" action="/scopes/{{.Scope}}/reservations" onsubmit="var n=prompt('DHCP client identifier (option 61) as hex bytes like 01:aa:bb:cc:dd:ee:ff; empty = match by MAC only:',this.client_id.value);if(n===null)return false;this.client_id.value=n.trim();"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.Name}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><button type="submit" role="menuitem" title="The server then answers only when the MAC and this identifier both match">Client ID…</button></form>{{end}}
   <form method="get" action="/config/access/blocked"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="addr" value="{{.IP}}"><button type="submit" role="menuitem" title="Open the blocked clients page with this client filled in; nothing is blocked until you stage and commit it">Block…</button></form>
   </div></details>{{end}}</td>
 </tr>

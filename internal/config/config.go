@@ -236,6 +236,8 @@ type Reservation struct {
 	MAC      string `json:"mac"`
 	IP       string `json:"ip"`
 	Hostname string `json:"hostname,omitempty"`
+	// ClientID is the DHCP client identifier (option 61) as hex bytes; the reservation then matches MAC and identifier.
+	ClientID string `json:"client_id,omitempty"`
 }
 
 // DNSRecord is one custom static DNS record for a scope.
@@ -554,6 +556,8 @@ func validateLocalDomains(domains []LocalDomain) error {
 	return nil
 }
 
+var reservationClientIDRe = regexp.MustCompile(`^[0-9a-f]{2}(:[0-9a-f]{2}){0,31}$`)
+
 var reservationHostnameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]*$`)
 
 // validateReservations checks one scope's static DHCP reservations —
@@ -570,6 +574,9 @@ func validateReservations(reservations []Reservation, errPrefix string) error {
 		}
 		if !reservationHostnameRe.MatchString(res.Hostname) {
 			return fmt.Errorf("%s: reservations[%d]: hostname %q must contain only letters, digits, dot, hyphen, underscore", errPrefix, i, res.Hostname)
+		}
+		if res.ClientID != "" && !reservationClientIDRe.MatchString(res.ClientID) {
+			return fmt.Errorf("%s: reservations[%d]: client_id %q must be up to 32 lowercase hex bytes like 01:aa:bb", errPrefix, i, res.ClientID)
 		}
 		if seen[res.MAC] {
 			return fmt.Errorf("%s: reservations[%d]: mac %q already reserved earlier in this scope", errPrefix, i, res.MAC)
