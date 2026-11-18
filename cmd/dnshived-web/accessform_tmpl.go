@@ -119,6 +119,37 @@ var accessPageTmpl = template.Must(template.New("access").Parse(`<!doctype html>
 </form>
 {{end}}
 
+{{if eq .Section "blocked"}}
+<h2>Blocked clients</h2>
+<p class="acnote">A blocked client gets no answer, even from an allowed network, and a block applies at once, also in Report only mode. DNS matches the address; DHCP matches the MAC address. Whitelisting does not lift a block; loopback, the nodes and the VIPs are never blocked.</p>
+{{template "pagerbar" .PagerTop}}
+<div class="achead"><span class="net">Address · MAC</span><span>Note · DNS · DHCP</span></div>
+{{range .Blocked}}
+<form method="post" action="/config/access/save" class="acrow">
+  <input type="hidden" name="op" value="block-set"><input type="hidden" name="back" value="blocked"><input type="hidden" name="key" value="{{.Key}}">
+  <span class="net" title="{{.Addr}} {{.MAC}}">{{if .Addr}}{{.Addr}}{{else}}–{{end}} · {{if .MAC}}{{.MAC}}{{else}}–{{end}}</span>
+  <input type="text" name="note" value="{{.Note}}" aria-label="Note">
+  <label><input type="checkbox" name="bdns" value="1" {{if .DNS}}checked{{end}}> DNS</label>
+  <label><input type="checkbox" name="bdhcp" value="1" {{if .DHCP}}checked{{end}}> DHCP</label>
+  <button type="submit" class="btn quiet sm">Stage</button>
+  <button type="submit" class="btn quiet sm" name="op" value="block-del">Unblock</button>
+</form>
+{{else}}<p class="acnote">No blocked client.</p>{{end}}
+{{template "pagerbar" .PagerBot}}
+<form method="post" action="/config/access/save" class="acadd">
+  <input type="hidden" name="op" value="block-add"><input type="hidden" name="back" value="blocked">
+  <strong>Block a client</strong>
+  <div class="acrow">
+    <input type="text" name="addr" placeholder="address (for DNS)" aria-label="Address" value="{{.PreAddr}}">
+    <input type="text" name="mac" placeholder="MAC (for DHCP)" aria-label="MAC" value="{{.PreMAC}}">
+    <input type="text" name="note" placeholder="note (optional)" aria-label="Note">
+    <label><input type="checkbox" name="bdns" value="1" {{if .PreAddr}}checked{{end}}> DNS</label>
+    <label><input type="checkbox" name="bdhcp" value="1" {{if .PreMAC}}checked{{end}}> DHCP</label>
+    <button type="submit" class="btn">Block</button>
+  </div>
+</form>
+{{end}}
+
 {{if eq .Section "report"}}
 <h2>Would this be served?</h2>
 <form method="get" action="/config/access/report" class="acrow">

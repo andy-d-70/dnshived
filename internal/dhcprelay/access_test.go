@@ -107,6 +107,25 @@ func TestAccessAllows(t *testing.T) {
 			t.Fatal("a config from an older renderer has no network; that interface must keep working")
 		}
 	})
+	t.Run("a blocked MAC is dropped in report mode, on an allowed network", func(t *testing.T) {
+		r, _ := accessTestRelay(t, &access.Config{Mode: access.ModeReport, Blocked: []access.Block{{MAC: "de:ad:be:ef:00:01", DHCP: true}}})
+		lan := r.clientIfaces[0]
+		if r.accessAllows(lan, discoverFrom(stranger), now) {
+			t.Fatal("a blocked MAC must be dropped")
+		}
+		if !r.accessAllows(lan, discoverFrom(known), now) {
+			t.Fatal("another client on the same network must pass")
+		}
+		if r.metrics.accessDropped.Load() != 1 {
+			t.Errorf("accessDropped = %d, want 1", r.metrics.accessDropped.Load())
+		}
+	})
+	t.Run("a whitelisted MAC that is also blocked stays blocked", func(t *testing.T) {
+		r, pub := accessTestRelay(t, &access.Config{Mode: access.ModeEnforce, Hosts: []access.Host{{MAC: "de:ad:be:ef:00:01", DHCP: true}}, Blocked: []access.Block{{MAC: "de:ad:be:ef:00:01", DHCP: true}}})
+		if r.accessAllows(pub, discoverFrom(stranger), now) {
+			t.Fatal("the block beats the whitelist")
+		}
+	})
 	t.Run("reconfigure swaps the list", func(t *testing.T) {
 		r, pub := accessTestRelay(t, &access.Config{Mode: access.ModeReport})
 		r.applyAccess(Config{ClientInterfaces: []ClientInterfaceConfig{{Name: "pub0", Network: "203.0.113.0/24"}}, Access: &access.Config{Mode: access.ModeEnforce}})

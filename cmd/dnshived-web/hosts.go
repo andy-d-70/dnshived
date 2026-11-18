@@ -322,10 +322,11 @@ var hostsTmpl = template.Must(template.New("hosts").Parse(`<!doctype html>
   <td style="font-variant-numeric:tabular-nums;white-space:nowrap">{{.Renewed}}</td>
   <td style="text-align:center" title="{{.IconTitle}}">{{.Icon}}</td>
   <td>{{if .Reserved}}reserved{{else}}dynamic{{end}}{{if and .Reserved (not .Seen)}}<span class="dim" title="reserved, not seen on the network right now"> ·</span>{{end}}</td>
-  <td style="width:3rem;text-align:center">{{if and .Seen (not .Reserved)}}<details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.MAC}}">&#9776;</summary>
+  <td style="width:3rem;text-align:center">{{if .Seen}}<details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.MAC}}">&#9776;</summary>
   <div class="row-menu-list" role="menu">
-  <form method="post" action="/scopes/{{.Scope}}/reservations"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.Name}}"><button type="submit" role="menuitem" title="Reserve this address for this MAC; staged as a pending change">Make static</button></form>
-  <form method="post" action="/scopes/{{.Scope}}/leases/release" onsubmit="return confirm('Release lease {{.IP}} ({{.MAC}})? The client will need to request an address again.')"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><button type="submit" role="menuitem">Release</button></form>
+  {{if not .Reserved}}<form method="post" action="/scopes/{{.Scope}}/reservations"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.Name}}"><button type="submit" role="menuitem" title="Reserve this address for this MAC; staged as a pending change">Make static</button></form>
+  <form method="post" action="/scopes/{{.Scope}}/leases/release" onsubmit="return confirm('Release lease {{.IP}} ({{.MAC}})? The client will need to request an address again.')"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><button type="submit" role="menuitem">Release</button></form>{{end}}
+  <form method="get" action="/config/access/blocked"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="addr" value="{{.IP}}"><button type="submit" role="menuitem" title="Open the blocked clients page with this client filled in; nothing is blocked until you stage and commit it">Block…</button></form>
   </div></details>{{end}}</td>
 </tr>
 {{end}}

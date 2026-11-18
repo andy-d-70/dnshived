@@ -5,6 +5,7 @@ package dhcprelay
 
 import (
 	"log"
+	"net"
 	"net/netip"
 	"time"
 
@@ -56,6 +57,13 @@ func (r *Relay) accessAllows(ci *clientInterface, packet []byte, now time.Time) 
 	if st == nil || st.m == nil {
 		return true
 	}
+	var mac [6]byte
+	copy(mac[:], packet[bootpCHAddrOffset:bootpCHAddrOffset+6])
+	if st.m.BlockedMAC(mac) {
+		r.metrics.accessDropped.Add(1)
+		r.logThrottled(throttleKey{"access_blocked", ci.name}, "dropping DHCP requests on %s: the client %s is blocked", ci.name, net.HardwareAddr(mac[:]))
+		return false
+	}
 	netAddr, ok := st.nets[ci.name]
 	if !ok {
 		return true
@@ -63,8 +71,6 @@ func (r *Relay) accessAllows(ci *clientInterface, packet []byte, now time.Time) 
 	if st.m.Check(access.DHCP, netAddr).Allowed {
 		return true
 	}
-	var mac [6]byte
-	copy(mac[:], packet[bootpCHAddrOffset:bootpCHAddrOffset+6])
 	if st.m.CheckMAC(mac) {
 		return true
 	}

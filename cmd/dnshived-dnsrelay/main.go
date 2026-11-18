@@ -754,11 +754,12 @@ func accessPermits(ip net.IP, ifName string) bool {
 	if !ok {
 		return true
 	}
-	if m.Check(access.DNS, addr).Allowed {
+	dec := m.Check(access.DNS, addr)
+	if dec.Allowed {
 		return true
 	}
 	accessRep.Add(access.DNS, addr, time.Now())
-	if !m.Enforcing() {
+	if !dec.Blocked && !m.Enforcing() {
 		accessWouldDrop.Add(1)
 		return true
 	}

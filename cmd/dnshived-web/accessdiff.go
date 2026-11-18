@@ -123,5 +123,53 @@ func accessDiffEntries(live, cand *access.Config) []clusterDiffEntry {
 			add("whitelisted host changed: " + hostLine(a) + " → " + hostLine(b))
 		}
 	}
+	byBlock := func(bs []access.Block) map[string]access.Block {
+		m := map[string]access.Block{}
+		for _, b := range bs {
+			m[blockKey(b)] = b
+		}
+		return m
+	}
+	lb, cb := byBlock(l.Blocked), byBlock(c.Blocked)
+	var bk []string
+	for k := range lb {
+		bk = append(bk, k)
+	}
+	for k := range cb {
+		if _, ok := lb[k]; !ok {
+			bk = append(bk, k)
+		}
+	}
+	sort.Strings(bk)
+	for _, k := range bk {
+		a, aok := lb[k]
+		b, bok := cb[k]
+		switch {
+		case !aok:
+			add("client blocked: " + blockLine(b))
+		case !bok:
+			add("client unblocked: " + blockLine(a))
+		case a != b:
+			add("blocked client changed: " + blockLine(a) + " → " + blockLine(b))
+		}
+	}
 	return out
+}
+
+func blockLine(b access.Block) string {
+	var svc []string
+	if b.DNS {
+		svc = append(svc, "dns")
+	}
+	if b.DHCP {
+		svc = append(svc, "dhcp")
+	}
+	id := b.Addr
+	if b.MAC != "" {
+		if id != "" {
+			id += " / "
+		}
+		id += b.MAC
+	}
+	return fmt.Sprintf("%s (%s)", id, strings.Join(svc, ", "))
 }

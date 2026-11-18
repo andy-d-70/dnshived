@@ -63,3 +63,19 @@ func TestAccessPermits(t *testing.T) {
 		t.Fatal("an ignored list serves everyone")
 	}
 }
+
+func TestAccessPermitsBlockedClient(t *testing.T) {
+	t.Cleanup(func() { accessM.Store(nil) })
+	private := net.ParseIP("192.168.1.5")
+	before := accessDropped.Load()
+	applyAccess(Config{Access: &access.Config{Mode: access.ModeReport, Blocked: []access.Block{{Addr: "192.168.1.5", DNS: true}}}})
+	if accessPermits(private, "t0") {
+		t.Fatal("a blocked client is dropped even in report mode")
+	}
+	if accessDropped.Load() != before+1 {
+		t.Errorf("accessDropped = %d, want %d", accessDropped.Load(), before+1)
+	}
+	if !accessPermits(net.ParseIP("192.168.1.6"), "t0") {
+		t.Fatal("another private client is still served")
+	}
+}

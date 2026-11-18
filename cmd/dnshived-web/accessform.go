@@ -21,6 +21,7 @@ import (
 const (
 	accessPathNetworks = "/config/access"
 	accessPathHosts    = "/config/access/hosts"
+	accessPathBlocked  = "/config/access/blocked"
 	accessPathReport   = "/config/access/report"
 )
 
@@ -35,7 +36,7 @@ func accessTabs(string) template.HTML {
 
 func accessSubTabs(active string) template.HTML {
 	return template.HTML(tabLinksHTML([][2]string{
-		{accessPathNetworks, "Networks"}, {accessPathHosts, "Whitelisted hosts"}, {accessPathReport, "Report and test"},
+		{accessPathNetworks, "Networks"}, {accessPathHosts, "Whitelisted hosts"}, {accessPathBlocked, "Blocked clients"}, {accessPathReport, "Report and test"},
 	}, active))
 }
 
@@ -52,6 +53,7 @@ func cloneAccess(c *access.Config) *access.Config {
 	}
 	out.Entries = append([]access.Entry(nil), c.Entries...)
 	out.Hosts = append([]access.Host(nil), c.Hosts...)
+	out.Blocked = append([]access.Block(nil), c.Blocked...)
 	return out
 }
 
@@ -79,6 +81,8 @@ func normMAC(s string) (string, error) {
 }
 
 func hostKey(h access.Host) string { return h.Addr + "|" + h.MAC }
+
+func blockKey(b access.Block) string { return b.Addr + "|" + b.MAC }
 
 // wideNetwork reports a network that allows everyone or a very wide public range.
 func wideNetwork(netStr string) bool {
@@ -190,6 +194,54 @@ func applyAccessOp(cur *access.Config, f url.Values) (*access.Config, error) {
 			return nil, fmt.Errorf("that host is no longer in the list")
 		}
 		c.Hosts = out
+	case "block-add":
+		b := access.Block{Note: strings.TrimSpace(f.Get("note")), DNS: checked("bdns"), DHCP: checked("bdhcp")}
+		if a := strings.TrimSpace(f.Get("addr")); a != "" {
+			ip, err := netip.ParseAddr(a)
+			if err != nil {
+				return nil, fmt.Errorf("%q is not an address", a)
+			}
+			b.Addr = ip.Unmap().String()
+		}
+		if m := strings.TrimSpace(f.Get("mac")); m != "" {
+			nm, err := normMAC(m)
+			if err != nil {
+				return nil, err
+			}
+			b.MAC = nm
+		}
+		for _, e := range c.Blocked {
+			if blockKey(e) == blockKey(b) {
+				return nil, fmt.Errorf("that client is already blocked")
+			}
+		}
+		c.Blocked = append(c.Blocked, b)
+	case "block-set":
+		i := -1
+		for k, b := range c.Blocked {
+			if blockKey(b) == f.Get("key") {
+				i = k
+			}
+		}
+		if i < 0 {
+			return nil, fmt.Errorf("that blocked client is no longer in the list")
+		}
+		c.Blocked[i].Note = strings.TrimSpace(f.Get("note"))
+		c.Blocked[i].DNS, c.Blocked[i].DHCP = checked("bdns"), checked("bdhcp")
+	case "block-del":
+		out := c.Blocked[:0:0]
+		found := false
+		for _, b := range c.Blocked {
+			if blockKey(b) == f.Get("key") {
+				found = true
+				continue
+			}
+			out = append(out, b)
+		}
+		if !found {
+			return nil, fmt.Errorf("that blocked client is no longer in the list")
+		}
+		c.Blocked = out
 	default:
 		return nil, fmt.Errorf("unknown operation %q", op)
 	}
@@ -244,6 +296,11 @@ type accessHostLine struct {
 	DNS, DHCP, Web       bool
 }
 
+type accessBlockLine struct {
+	Key, Addr, MAC, Note string
+	DNS, DHCP            bool
+}
+
 type accessTestRow struct{ Service, Verdict, Why string }
 
 type accessReportRow struct {
@@ -268,6 +325,9 @@ type accessPageData struct {
 	Private    accessLine
 	Lines      []accessLine
 	Hosts      []accessHostLine
+	Blocked    []accessBlockLine
+	PreAddr    string
+	PreMAC     string
 	TestAddr   string
 	Test       []accessTestRow
 	Report     []accessReportRow
@@ -362,6 +422,17 @@ func handleAccessPage(ref *configRef, section string) http.HandlerFunc {
 				d.Hosts = append(d.Hosts, accessHostLine{Key: hostKey(h), Addr: h.Addr, MAC: h.MAC, Note: h.Note, DNS: h.DNS, DHCP: h.DHCP, Web: h.Web})
 			}
 			total = len(d.Hosts)
+		case "blocked":
+			if a, err := netip.ParseAddr(strings.TrimSpace(q.Get("addr"))); err == nil {
+				d.PreAddr = a.Unmap().String()
+			}
+			if m, err := normMAC(q.Get("mac")); err == nil {
+				d.PreMAC = m
+			}
+			for _, b := range cloneAccess(list).Blocked {
+				d.Blocked = append(d.Blocked, accessBlockLine{Key: blockKey(b), Addr: b.Addr, MAC: b.MAC, Note: b.Note, DNS: b.DNS, DHCP: b.DHCP})
+			}
+			total = len(d.Blocked)
 		case "report":
 			sort.SliceStable(d.Report, func(i, j int) bool { return d.Report[i].Count > d.Report[j].Count })
 			total = len(d.Report)
@@ -385,13 +456,15 @@ func handleAccessPage(ref *configRef, section string) http.HandlerFunc {
 		if end > total {
 			end = total
 		}
-		path := map[string]string{"networks": accessPathNetworks, "hosts": accessPathHosts, "report": accessPathReport}[section]
+		path := map[string]string{"networks": accessPathNetworks, "hosts": accessPathHosts, "blocked": accessPathBlocked, "report": accessPathReport}[section]
 		d.PagerTop, d.PagerBot = newPagerBars(path, keep, per, total, page, pages, start, end)
 		switch section {
 		case "networks":
 			d.Lines = d.Lines[start:end]
 		case "hosts":
 			d.Hosts = d.Hosts[start:end]
+		case "blocked":
+			d.Blocked = d.Blocked[start:end]
 		case "report":
 			d.Report = d.Report[start:end]
 		}
@@ -424,7 +497,9 @@ func accessTest(list *access.Config, always []string, in string) []accessTestRow
 	if mac, err := access.ParseMAC(in); err == nil {
 		v := "dropped"
 		why := "not whitelisted for DHCP (a DHCP client is judged by its network)"
-		if m.CheckMAC(mac) {
+		if m.BlockedMAC(mac) {
+			why = "blocked client"
+		} else if m.CheckMAC(mac) {
 			v, why = "served", "whitelisted host"
 		}
 		return []accessTestRow{{Service: "DHCP", Verdict: v, Why: why}}
@@ -444,7 +519,7 @@ func accessTest(list *access.Config, always []string, in string) []accessTestRow
 			v = "served"
 		}
 		why := d.Rule
-		if !d.Allowed && !m.Enforcing() {
+		if !d.Allowed && !d.Blocked && !m.Enforcing() {
 			why += " (report mode: still answered today)"
 		}
 		rows = append(rows, accessTestRow{Service: s.name, Verdict: v, Why: why})
@@ -463,6 +538,8 @@ func handleAccessSave(ref *configRef) http.HandlerFunc {
 		switch r.PostForm.Get("back") {
 		case "hosts":
 			back = accessPathHosts
+		case "blocked":
+			back = accessPathBlocked
 		case "report":
 			back = accessPathReport
 		}

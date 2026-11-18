@@ -234,6 +234,11 @@ func TestAccessPageTemplateRenders(t *testing.T) {
 	h.Section = "hosts"
 	h.Hosts = []accessHostLine{{Key: "172.32.0.5|", Addr: "172.32.0.5", Note: "\"quoted\"", DNS: true}}
 	pages["hosts"] = h
+	b := common
+	b.Section = "blocked"
+	b.PreAddr = "10.0.0.9"
+	b.Blocked = []accessBlockLine{{Key: "10.0.0.9|", Addr: "10.0.0.9", Note: "<b>x</b>", DNS: true}}
+	pages["blocked"] = b
 	r := common
 	r.Section = "report"
 	r.TestAddr = "203.0.113.9"
@@ -260,5 +265,39 @@ func TestPushPayloadCarriesAccess(t *testing.T) {
 	}
 	if p := clusterPushPayloadFrom(config.Cluster{}); len(p.Access) != 0 {
 		t.Errorf("a cluster without a list must leave the key out, got %q", p.Access)
+	}
+}
+
+func TestApplyAccessOp_Blocked(t *testing.T) {
+	c, err := applyAccessOp(nil, form("op", "block-add", "addr", "10.0.0.9", "mac", "00-11-22-33-44-55", "bdns", "1", "bdhcp", "1", "note", " loud "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Blocked) != 1 || c.Blocked[0].MAC != "00:11:22:33:44:55" || c.Blocked[0].Note != "loud" {
+		t.Fatalf("blocked = %+v", c.Blocked)
+	}
+	if _, err := applyAccessOp(c, form("op", "block-add", "addr", "10.0.0.9", "mac", "00:11:22:33:44:55", "bdns", "1")); err == nil {
+		t.Error("the same client twice must be refused")
+	}
+	if _, err := applyAccessOp(nil, form("op", "block-add", "addr", "10.0.0.9")); err == nil {
+		t.Error("a block for no service must be refused")
+	}
+	key := blockKey(c.Blocked[0])
+	c2, err := applyAccessOp(c, form("op", "block-set", "key", key, "bdns", "1"))
+	if err != nil || c2.Blocked[0].DHCP {
+		t.Fatalf("block-set: %v %+v", err, c2)
+	}
+	if len(c.Blocked) != 1 || !c.Blocked[0].DHCP {
+		t.Error("an edit must not touch the list it started from")
+	}
+	if d := accessDiffEntries(c, c2); len(d) != 1 || !strings.Contains(d[0].Detail, "blocked client changed") {
+		t.Errorf("diff = %+v", d)
+	}
+	c3, err := applyAccessOp(c2, form("op", "block-del", "key", key))
+	if err != nil || len(c3.Blocked) != 0 {
+		t.Fatalf("block-del: %v %+v", err, c3)
+	}
+	if d := accessDiffEntries(c2, c3); len(d) != 1 || !strings.Contains(d[0].Detail, "client unblocked") {
+		t.Errorf("diff = %+v", d)
 	}
 }

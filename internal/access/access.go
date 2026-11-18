@@ -52,6 +52,7 @@ func (s Service) String() string {
 const (
 	MaxEntries = 1000
 	MaxHosts   = 5000
+	MaxBlocked = 5000
 	MaxNote    = 200
 )
 
@@ -75,6 +76,15 @@ type Host struct {
 	Web  bool   `json:"web,omitempty"`
 }
 
+// Block is one blocked client. Addr blocks DNS, MAC blocks DHCP.
+type Block struct {
+	Addr string `json:"addr,omitempty"`
+	MAC  string `json:"mac,omitempty"`
+	Note string `json:"note,omitempty"`
+	DNS  bool   `json:"dns,omitempty"`
+	DHCP bool   `json:"dhcp,omitempty"`
+}
+
 type Config struct {
 	Mode string `json:"mode,omitempty"`
 	// Private is the built-in entry for the private networks. Nil means on and
@@ -82,6 +92,7 @@ type Config struct {
 	Private *Entry  `json:"private,omitempty"`
 	Entries []Entry `json:"entries,omitempty"`
 	Hosts   []Host  `json:"hosts,omitempty"`
+	Blocked []Block `json:"blocked,omitempty"`
 }
 
 func (c *Config) Enforcing() bool { return c != nil && c.Mode == ModeEnforce }
@@ -113,6 +124,12 @@ func (c *Config) Validate() error {
 		if len(c.Private.Note) > MaxNote {
 			return fmt.Errorf("access: the note of the private networks is longer than %d characters", MaxNote)
 		}
+	}
+	if len(c.Blocked) > MaxBlocked {
+		return fmt.Errorf("access: %d blocked clients, at most %d", len(c.Blocked), MaxBlocked)
+	}
+	if err := c.validateBlocked(); err != nil {
+		return err
 	}
 	seen := make(map[netip.Prefix]bool, len(c.Entries))
 	for i, e := range c.Entries {
@@ -175,6 +192,41 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+func (c *Config) validateBlocked() error {
+	addrs := map[netip.Addr]bool{}
+	macs := map[[6]byte]bool{}
+	for i, b := range c.Blocked {
+		if len(b.Note) > MaxNote {
+			return fmt.Errorf("access: the note of blocked client %d is longer than %d characters", i+1, MaxNote)
+		}
+		if !b.DNS && !b.DHCP {
+			return fmt.Errorf("access: blocked client %d is blocked for no service", i+1)
+		}
+		if b.DNS {
+			a, err := netip.ParseAddr(strings.TrimSpace(b.Addr))
+			if err != nil {
+				return fmt.Errorf("access: blocked client %d is blocked for DNS but has no valid address", i+1)
+			}
+			a = a.Unmap()
+			if addrs[a] {
+				return fmt.Errorf("access: address %s is blocked twice", a)
+			}
+			addrs[a] = true
+		}
+		if b.DHCP {
+			m, err := ParseMAC(b.MAC)
+			if err != nil {
+				return fmt.Errorf("access: blocked client %d is blocked for DHCP: %w", i+1, err)
+			}
+			if macs[m] {
+				return fmt.Errorf("access: MAC %s is blocked twice", b.MAC)
+			}
+			macs[m] = true
+		}
+	}
+	return nil
+}
+
 func checkVerdicts(e Entry, what string) error {
 	for _, v := range []string{e.DNS, e.DHCP, e.Web} {
 		if v != "" && v != Allow && v != Deny {
@@ -197,6 +249,8 @@ func ParseMAC(s string) ([6]byte, error) {
 type Decision struct {
 	Allowed bool
 	Rule    string
+	// Blocked marks a drop by a blocked client, which applies in every mode.
+	Blocked bool
 }
 
 type rule struct {
@@ -209,11 +263,13 @@ type rule struct {
 // Matcher is a compiled list. It is safe for concurrent use. A nil Matcher
 // allows everything.
 type Matcher struct {
-	enforce bool
-	rules   [numServices][]rule
-	hosts   [numServices]map[netip.Addr]struct{}
-	macs    map[[6]byte]struct{}
-	always  map[netip.Addr]struct{}
+	enforce   bool
+	rules     [numServices][]rule
+	hosts     [numServices]map[netip.Addr]struct{}
+	macs      map[[6]byte]struct{}
+	blocked   [numServices]map[netip.Addr]struct{}
+	blockMACs map[[6]byte]struct{}
+	always    map[netip.Addr]struct{}
 }
 
 // New compiles c. always lists addresses that are served no matter what
@@ -225,9 +281,19 @@ func New(c *Config, always []netip.Addr) (*Matcher, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
-	m := &Matcher{enforce: c.Enforcing(), macs: map[[6]byte]struct{}{}, always: map[netip.Addr]struct{}{}}
+	m := &Matcher{enforce: c.Enforcing(), macs: map[[6]byte]struct{}{}, blockMACs: map[[6]byte]struct{}{}, always: map[netip.Addr]struct{}{}}
 	for s := range m.hosts {
 		m.hosts[s] = map[netip.Addr]struct{}{}
+		m.blocked[s] = map[netip.Addr]struct{}{}
+	}
+	for _, b := range c.Blocked {
+		if b.DNS {
+			m.blocked[DNS][netip.MustParseAddr(strings.TrimSpace(b.Addr)).Unmap()] = struct{}{}
+		}
+		if b.DHCP {
+			mac, _ := ParseMAC(b.MAC)
+			m.blockMACs[mac] = struct{}{}
+		}
 	}
 	for _, a := range always {
 		m.always[a.Unmap()] = struct{}{}
@@ -303,6 +369,9 @@ func (m *Matcher) Check(svc Service, addr netip.Addr) Decision {
 	if svc < 0 || svc >= numServices {
 		return Decision{Allowed: false, Rule: "none"}
 	}
+	if _, ok := m.blocked[svc][addr]; ok {
+		return Decision{Allowed: false, Rule: "blocked client", Blocked: true}
+	}
 	if _, ok := m.hosts[svc][addr]; ok {
 		return Decision{Allowed: true, Rule: "host"}
 	}
@@ -322,5 +391,14 @@ func (m *Matcher) CheckMAC(mac [6]byte) bool {
 		return false
 	}
 	_, ok := m.macs[mac]
+	return ok
+}
+
+// BlockedMAC reports whether the DHCP client with this MAC is blocked.
+func (m *Matcher) BlockedMAC(mac [6]byte) bool {
+	if m == nil {
+		return false
+	}
+	_, ok := m.blockMACs[mac]
 	return ok
 }

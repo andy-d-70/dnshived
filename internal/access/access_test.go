@@ -194,3 +194,51 @@ func TestCopyInDNSRelayIsIdentical(t *testing.T) {
 		}
 	}
 }
+
+func TestMatcher_BlockedClients(t *testing.T) {
+	c := &Config{
+		Mode:    ModeReport,
+		Hosts:   []Host{{Addr: "10.0.0.7", DNS: true}},
+		Blocked: []Block{{Addr: "10.0.0.7", DNS: true}, {Addr: "10.0.0.8", DNS: true}, {MAC: "00:11:22:33:44:55", DHCP: true}},
+	}
+	m, err := New(c, []netip.Addr{netip.MustParseAddr("10.0.0.8")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := m.Check(DNS, netip.MustParseAddr("10.0.0.7")); d.Allowed || !d.Blocked {
+		t.Errorf("blocked host beats the whitelist: %+v", d)
+	}
+	if d := m.Check(DNS, netip.MustParseAddr("10.0.0.8")); !d.Allowed {
+		t.Errorf("a node address is never blocked: %+v", d)
+	}
+	if d := m.Check(Web, netip.MustParseAddr("10.0.0.7")); !d.Allowed {
+		t.Errorf("a DNS block does not touch the web interface: %+v", d)
+	}
+	if !m.BlockedMAC([6]byte{0, 0x11, 0x22, 0x33, 0x44, 0x55}) || m.BlockedMAC([6]byte{1}) {
+		t.Error("BlockedMAC mismatch")
+	}
+	var nilM *Matcher
+	if nilM.BlockedMAC([6]byte{}) {
+		t.Error("a nil matcher blocks nothing")
+	}
+}
+
+func TestConfig_ValidateBlocked(t *testing.T) {
+	for name, b := range map[string][]Block{
+		"no service":       {{Addr: "10.0.0.1"}},
+		"dns without addr": {{MAC: "00:11:22:33:44:55", DNS: true}},
+		"dhcp without mac": {{Addr: "10.0.0.1", DHCP: true}},
+		"bad mac":          {{MAC: "zz", DHCP: true}},
+		"duplicate addr":   {{Addr: "10.0.0.1", DNS: true}, {Addr: "10.0.0.1", DNS: true}},
+		"duplicate mac":    {{MAC: "00:11:22:33:44:55", DHCP: true}, {MAC: "00:11:22:33:44:55", DHCP: true}},
+		"long note":        {{Addr: "10.0.0.1", DNS: true, Note: strings.Repeat("x", MaxNote+1)}},
+	} {
+		if err := (&Config{Blocked: b}).Validate(); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+	ok := &Config{Blocked: []Block{{Addr: "10.0.0.1", MAC: "00:11:22:33:44:55", DNS: true, DHCP: true}}}
+	if err := ok.Validate(); err != nil {
+		t.Errorf("valid block: %v", err)
+	}
+}
