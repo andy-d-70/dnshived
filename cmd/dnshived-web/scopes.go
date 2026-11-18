@@ -1214,7 +1214,7 @@ func deleteReservationFormHandler(ref *configRef) http.HandlerFunc {
 		}
 		kept := make([]config.Reservation, 0, len(sc.Reservations))
 		for _, res := range sc.Reservations {
-			if res.MAC != mac {
+			if !strings.EqualFold(res.MAC, mac) {
 				kept = append(kept, res)
 			}
 		}
