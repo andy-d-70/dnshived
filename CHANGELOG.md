@@ -9,6 +9,7 @@
 
 **Added**
 
+- Web UI, DHCP, Hosts: one list of every host across all scopes, the active leases and the reservations, with search over name, MAC, address and scope, Dynamic and Reserved chips, the time left on the lease, when it was last renewed, a client type icon and a mark for private (randomized) MAC addresses. A dynamic host can be made static or released from its row menu.
 - Web UI: the "DHCP & DNS" menu item is two items. DHCP holds the default DHCP options, the DHCP option sets and the DNS server for clients; DNS holds the DNS records and checks, the local domains and the DNS record sets. Old links to the DHCP part of the former page (`/config/dns#dhcp`) are forwarded.
 
 - Access list (Cluster settings, Access): one cluster-wide list of who is served. The private networks (RFC 1918 and fc00::/7) are allowed by default; other networks are added with allow or deny for DNS, DHCP and the web interface separately, the most specific entry decides, and whitelisted hosts are served before any rule. Everything not allowed is dropped by the DNS relay, the DHCP relay and the web interface listeners. A cluster that is upgraded starts in Report only (nothing is dropped, would-be drops are counted and listed); a scope network outside the private ranges has to be added before Enforce is switched on, and the Report page shows which sources that would affect. Loopback, the nodes and the VIPs are always allowed, and a change that would cut the operator off from the web interface is refused. The feature switches on only when every core runs a version that has it.

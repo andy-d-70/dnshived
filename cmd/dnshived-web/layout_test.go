@@ -124,7 +124,7 @@ func TestNavHTML_EveryItemHasANameAndATooltip(t *testing.T) {
 }
 
 func TestNavHTML_ItemsAreInTheAgreedOrder(t *testing.T) {
-	order := []string{`href="/"`, `href="/scopes"`, `href="/probes"`, `nav-sep`, `href="/config/dhcp"`, `href="/config/dns"`, `href="/security"`, `href="/backup"`, `href="/config"`, `href="/logs"`}
+	order := []string{`href="/"`, `href="/scopes"`, `href="/probes"`, `nav-sep`, `href="/hosts"`, `href="/config/dns"`, `href="/security"`, `href="/backup"`, `href="/config"`, `href="/logs"`}
 	last := -1
 	for _, want := range order {
 		idx := strings.Index(navHTML, want)
@@ -162,7 +162,7 @@ func TestNavHTML_CurrentPageIsHighlightedByLongestPrefix(t *testing.T) {
 	if !strings.Contains(styleHTML, ".nav-outer .nav-item[aria-current=page]{") {
 		t.Error("expected a style for the current item")
 	}
-	for path, want := range map[string]string{"/config/dns": `data-match="/config/dns,`, "/config/dhcp": `data-match="/config/dhcp,`, "/config": `data-match="/config"`, "/config/mail": "/config/mail", "/config/scopes": "/config/scopes"} {
+	for path, want := range map[string]string{"/config/dns": `data-match="/config/dns,`, "/hosts": `data-match="/hosts,`, "/config": `data-match="/config"`, "/config/mail": "/config/mail", "/config/scopes": "/config/scopes"} {
 		if !strings.Contains(navHTML, want) {
 			t.Errorf("no nav item claims %s (%s)", path, want)
 		}

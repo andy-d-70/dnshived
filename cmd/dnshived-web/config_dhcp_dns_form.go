@@ -13,7 +13,7 @@ var dhcpDNSConfigFormTmpl = template.Must(template.New("config-dhcp-dns").Parse(
 
 <p>Snapshot from node: <strong>{{.SourceNode}}</strong>. Any save below
 stages a <a href="/pending">pending change</a> — nothing applies until
-you commit it. Elsewhere: <a href="/config">cluster settings</a>,
+you commit it. Elsewhere: <a href="/hosts">hosts</a>, <a href="/config">cluster settings</a>,
 <a href="/security">security</a>, <a href="/backup">maintenance</a>,
 <a href="/config/scopes">scopes</a>, <a href="/scopes/options">scope
 options</a>, <a href="/probes#tab-behavior">DNS probe checks</a>.</p>
