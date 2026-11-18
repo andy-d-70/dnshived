@@ -92,23 +92,30 @@ func TestBuildHostRows_MergesLeasesAndReservations(t *testing.T) {
 func TestHostsTemplate_RendersRowsAndMenu(t *testing.T) {
 	var b strings.Builder
 	err := hostsTmpl.Execute(&b, hostsPageData{
-		Total: 2,
+		Total: 3,
 		Rows: []hostRow{
 			{Scope: "office", MAC: "da:a1:19:00:00:01", IP: "10.0.0.50", Name: "iPhone", Icon: "i", Private: true, Seen: true, TTL: "1h 00m", Renewed: "5m 00s ago"},
 			{Scope: "office", MAC: "aa:bb:cc:00:00:02", IP: "10.0.0.6", Name: "<b>x</b>", Reserved: true, TTL: "—", Renewed: "—"},
+			{Scope: "office", MAC: "aa:bb:cc:00:00:03", IP: "10.0.0.77", Unknown: true, Seen: true, TTL: "—", Renewed: "—"},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := b.String()
+	if strings.Count(out, ">Reserve<") != 1 || !strings.Contains(out, "static?") {
+		t.Error("an unknown static host offers Reserve and shows static?")
+	}
+	if strings.Count(out, "data-check") < 3 {
+		t.Error("every row with a menu offers Check now")
+	}
 	if strings.Count(out, "Make static") != 1 {
 		t.Error("only the dynamic, seen host offers Make static")
 	}
 	if strings.Contains(out, "<b>x</b>") || !strings.Contains(out, "&lt;b&gt;x&lt;/b&gt;") {
 		t.Error("host names must be escaped")
 	}
-	if strings.Count(out, "Rename…") != 1 || strings.Count(out, "Client ID…") != 1 || strings.Count(out, "Block…") != 2 {
+	if strings.Count(out, "Rename…") != 1 || strings.Count(out, "Client ID…") != 1 || strings.Count(out, "Block…") != 3 {
 		t.Error("a reserved host offers Rename and Client ID, every host with a menu offers Block")
 	}
 	if !strings.Contains(out, "private (randomized) MAC") {
@@ -120,5 +127,30 @@ func TestUpsertReservation_MatchesMACIgnoringCase(t *testing.T) {
 	got := upsertReservation([]config.Reservation{{MAC: "AA:BB:CC:00:00:02", IP: "10.0.0.6", ClientID: "01:aa"}}, config.Reservation{MAC: "aa:bb:cc:00:00:02", IP: "10.0.0.6", Hostname: "nas", ClientID: "01:aa"})
 	if len(got) != 1 || got[0].Hostname != "nas" {
 		t.Fatalf("a rename must replace the reservation, not add a second one: %+v", got)
+	}
+}
+
+func TestAddUnknownStatic(t *testing.T) {
+	rows := []hostRow{{MAC: "aa:aa:aa:00:00:01", IP: "10.0.0.50"}, {MAC: "aa:aa:aa:00:00:02", IP: "10.0.0.6", Reserved: true}}
+	neigh := []scopeNeighbor{
+		{IP: "10.0.0.50", MAC: "aa:aa:aa:00:00:01", Complete: true},
+		{IP: "10.0.0.77", MAC: "AA:AA:AA:00:00:77", Complete: true},
+		{IP: "10.0.0.78", Complete: false},
+		{IP: "10.0.0.51", MAC: "aa:aa:aa:00:00:51", Complete: true},
+		{IP: "10.0.0.99", MAC: "aa:aa:aa:00:00:02", Complete: true},
+	}
+	got := addUnknownStatic(rows, "office", neigh, map[string]bool{"10.0.0.51": true})
+	if len(got) != 3 || got[2].IP != "10.0.0.77" || !got[2].Unknown || got[2].MAC != "aa:aa:aa:00:00:77" {
+		t.Fatalf("rows = %+v", got)
+	}
+}
+
+func TestFilterHostRows_UnknownStatic(t *testing.T) {
+	rows := []hostRow{{IP: "1"}, {IP: "2", Reserved: true}, {IP: "3", Unknown: true}}
+	if got := filterHostRows(rows, "", "static"); len(got) != 1 || got[0].IP != "3" {
+		t.Errorf("static = %+v", got)
+	}
+	if got := filterHostRows(rows, "", "dynamic"); len(got) != 1 || got[0].IP != "1" {
+		t.Errorf("dynamic must not include unknown static: %+v", got)
 	}
 }

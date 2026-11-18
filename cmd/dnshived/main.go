@@ -1065,6 +1065,8 @@ func main() {
 		writeJSON(w, http.StatusOK, map[string]interface{}{"leases": leases})
 	})
 
+	registerNeighborRoutes(mux, authMw)
+
 	mux.HandleFunc("POST /api/v1/leases/{scope}/release", authMw.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
 		mac := r.FormValue("mac")
 		ip := r.FormValue("ip")

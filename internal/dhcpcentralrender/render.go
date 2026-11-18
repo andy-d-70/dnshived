@@ -272,3 +272,12 @@ func effectiveDNSServers(cluster config.Cluster, sc config.ScopeConfig) string {
 	sort.Strings(out)
 	return strings.Join(out, ",")
 }
+
+// ScopeNodeAddresses lists the addresses of the cluster's nodes on the scope's VLAN.
+func ScopeNodeAddresses(cluster config.Cluster, sc config.ScopeConfig) []string {
+	s := effectiveDNSServers(cluster, sc)
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ",")
+}

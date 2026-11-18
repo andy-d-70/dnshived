@@ -591,6 +591,58 @@ func releaseLease(node NodeConfig, scope, mac, ip string) error {
 	return nil
 }
 
+type scopeNeighbor struct {
+	IP       string `json:"ip"`
+	MAC      string `json:"mac"`
+	Complete bool   `json:"complete"`
+}
+
+// fetchNeighbors reads the neighbor table of a scope's VLAN on node.
+func fetchNeighbors(node NodeConfig, scope string) ([]scopeNeighbor, error) {
+	var out struct {
+		Neighbors []scopeNeighbor `json:"neighbors"`
+	}
+	status, err := doGet(httpClient, node, "/api/v1/neighbors/"+url.PathEscape(scope), &out)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("status %d", status)
+	}
+	return out.Neighbors, nil
+}
+
+// probeNeighbors asks node to resolve the addresses on the scope's VLAN and returns what answered.
+func probeNeighbors(node NodeConfig, scope string, ips []string) ([]scopeNeighbor, int, error) {
+	body, err := json.Marshal(map[string][]string{"ips": ips})
+	if err != nil {
+		return nil, 0, err
+	}
+	req, err := http.NewRequest(http.MethodPost, node.baseURL()+"/api/v1/neighbors/"+url.PathEscape(scope)+"/probe", bytes.NewReader(body))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if node.AdminToken != "" {
+		req.Header.Set("Authorization", "Bearer "+node.AdminToken)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, resp.StatusCode, fmt.Errorf("node returned status %d", resp.StatusCode)
+	}
+	var out struct {
+		Neighbors []scopeNeighbor `json:"neighbors"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
+		return nil, resp.StatusCode, err
+	}
+	return out.Neighbors, resp.StatusCode, nil
+}
+
 // refreshProbeClient is a dedicated, longer-timeout client for
 // triggerProbeNow only.
 var refreshProbeClient = &http.Client{Timeout: 30 * time.Second, Transport: clusterTransport}
