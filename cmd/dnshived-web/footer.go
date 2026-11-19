@@ -56,6 +56,15 @@ type footerData struct {
 	AgeSec   int          `json:"age_sec"`
 	Event    string       `json:"event,omitempty"`
 	Update   updateInfo   `json:"update"`
+	DHCP     *footerDHCP  `json:"dhcp,omitempty"`
+}
+
+// footerDHCP is the DHCP client readout: leases in the scopes the cores
+// serve, summed over the cores (a scope is served by one core), and the
+// reservations the configuration holds.
+type footerDHCP struct {
+	Active   int `json:"active"`
+	Reserved int `json:"reserved"`
 }
 
 // buildFooter turns the cached cluster status rows into the footer's content.
@@ -78,6 +87,15 @@ func buildFooter(rows []statusRow, att *footerAttn, now time.Time) footerData {
 		}
 		if r := row.Status.ConfigRevision; r != nil && *r > d.Revision {
 			d.Revision = *r
+		}
+		if row.Status.DHCPActive != nil && isCoreRole(row.Status.Role) {
+			if d.DHCP == nil {
+				d.DHCP = &footerDHCP{}
+			}
+			d.DHCP.Active += *row.Status.DHCPActive
+			if row.Status.DHCPReserved != nil && *row.Status.DHCPReserved > d.DHCP.Reserved {
+				d.DHCP.Reserved = *row.Status.DHCPReserved
+			}
 		}
 		if !isCoreRole(row.Status.Role) {
 			continue
@@ -202,7 +220,7 @@ const footerHTML = `
   <span class="ft-upd" id="ft-upd" role="button" tabindex="0" title="update check"></span>
   <span class="ft-state" id="ft-state" title="waiting for the first cluster reading"><span class="ft-hb" aria-hidden="true"><i class="hb"></i></span><span class="ft-st" id="ft-st">…</span></span>
   <span class="ft-nodes" id="ft-nodes"></span>
-  <span class="ft-tele"><span class="w-rev" id="ft-rev"></span><span class="w-ev" id="ft-ev"></span></span>
+  <span class="ft-tele"><span class="w-dhcp" id="ft-dhcp"></span><span class="w-rev" id="ft-rev"></span><span class="w-ev" id="ft-ev"></span></span>
 </footer>
 <dialog id="upd-dialog" class="upd-dialog">
   <p id="upd-text"></p>
@@ -267,6 +285,7 @@ const footerHTML = `
       if(n.up&&n.load){var l=document.createElement('span');l.className='ld';l.textContent=' · ld '+n.load;s.appendChild(l)}
       s.title=n.name+(n.up?(': up '+(n.uptime||'-')+', load '+(n.load||'-')):': not reachable');
       box.appendChild(s)});
+    var dh=d.dhcp;el('ft-dhcp').textContent=dh?('DHCP '+dh.active+' · '+dh.reserved+' res'):'';el('ft-dhcp').title=dh?(dh.active+' active DHCP clients in the scopes the cores serve, '+dh.reserved+' reservations'):'';
     el('ft-rev').textContent=d.revision?('config r'+d.revision):'';el('ft-rev').title=d.revision?('config revision '+d.revision):'';
     el('ft-ev').textContent=d.event||'';el('ft-ev').title=d.event?('newest event: '+d.event):'';
     lastOK=Date.now();setCS(d.age_sec*1000>STALE?'stale':d.level);
@@ -303,7 +322,7 @@ font-size:clamp(11px,.42vw + 7.2px,15px);line-height:1.3;white-space:nowrap;font
 .appfoot .ft-node b{color:var(--text);font-weight:600;display:inline-block;width:4.6em;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
 .appfoot .ft-tele{display:flex;gap:1.1em;justify-content:flex-end}
 .appfoot .ft-tele span{display:inline-block;overflow:hidden;text-overflow:ellipsis}
-.appfoot .w-rev{width:6.2em}.appfoot .w-ev{width:16em}
+.appfoot .w-dhcp{width:11.5em}.appfoot .w-rev{width:6.2em}.appfoot .w-ev{width:16em}
 .appfoot[data-cs="ok"]{--hb:var(--ok)}.appfoot[data-cs="warn"]{--hb:var(--warn)}.appfoot[data-cs="crit"]{--hb:var(--crit)}
 .appfoot[data-cs="ok"] .ft-state{color:var(--ok)}.appfoot[data-cs="warn"] .ft-state{color:var(--warn)}.appfoot[data-cs="crit"] .ft-state{color:var(--crit)}
 .hb{position:relative;display:inline-block;width:.7em;height:.7em}
@@ -318,5 +337,5 @@ font-size:clamp(11px,.42vw + 7.2px,15px);line-height:1.3;white-space:nowrap;font
 @keyframes hbfade{0%{opacity:1}50%{opacity:.35}100%{opacity:1}}
 @media (prefers-reduced-motion:reduce){.hb::before{animation:hbfade 2s ease-in-out infinite}.hb::after{animation:none;opacity:0}.appfoot[data-cs="stale"] .hb::before{animation:none}}
 @media (max-width:1500px){.appfoot .ld{display:none}.appfoot .ft-node{width:9.6em}}
-@media (max-width:1280px){.appfoot .w-ev{display:none}}
+@media (max-width:1280px){.appfoot .w-ev,.appfoot .w-dhcp{display:none}}
 `

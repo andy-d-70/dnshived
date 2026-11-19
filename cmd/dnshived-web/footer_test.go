@@ -108,3 +108,28 @@ func TestFooterInvalidate(t *testing.T) {
 		t.Error("the cached answer must be gone")
 	}
 }
+
+func TestBuildFooter_DHCPClients(t *testing.T) {
+	now := time.Unix(1005, 0)
+	mk := func(role string, active, reserved int) statusRow {
+		r := footerRow(role, "STABLE", true)
+		r.Status.Role = role
+		r.Status.DHCPActive, r.Status.DHCPReserved = &active, &reserved
+		return r
+	}
+	d := buildFooter([]statusRow{mk("core-1", 40, 12), mk("core-2", 30, 12), mk("core-3", 5, 12)}, nil, now)
+	if d.DHCP == nil || d.DHCP.Active != 75 || d.DHCP.Reserved != 12 {
+		t.Errorf("active leases are summed over the cores, the reservations are the configuration's: %+v", d.DHCP)
+	}
+	old := buildFooter([]statusRow{footerRow("core-1", "STABLE", true)}, nil, now)
+	if old.DHCP != nil {
+		t.Errorf("a daemon without the fields shows no readout: %+v", old.DHCP)
+	}
+	probe := mk("probe", 9, 9)
+	if d := buildFooter([]statusRow{probe}, nil, now); d.DHCP != nil {
+		t.Error("only cores count")
+	}
+	if !strings.Contains(footerHTML, `id="ft-dhcp"`) || !strings.Contains(footerHTML, "dh.active") {
+		t.Error("the footer shows the readout")
+	}
+}

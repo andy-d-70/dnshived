@@ -820,8 +820,11 @@ func main() {
 		disabledScopes := fresh.DisabledScopeNames()
 
 		hostname, _ := os.Hostname()
+		dhcpActive, dhcpReserved := dhcpClientCounts(fresh, ag.Serving(), filepath.Join(dataDir(fresh), dhcpcentralrender.CoreDHCPLeaseFileName), time.Now())
 
 		return map[string]interface{}{
+			"dhcp_active":       dhcpActive,
+			"dhcp_reserved":     dhcpReserved,
 			"node_id":           self.NodeID,
 			"hostname":          hostname,
 			"role":              self.Role,
