@@ -151,9 +151,13 @@ connection.
 **DHCP, Hosts** lists every client of every scope in one table: active leases,
 reservations and hosts that answer ARP but have neither (shown as *Unknown
 static*). Search covers name, MAC, address and scope; chips filter Dynamic,
-Reserved and Unknown static. The row menu offers Reserve or Make static,
-Release, Rename, Client ID, Names, Block and Simulate.
+Reserved and Unknown static. The row menu offers Reserve…, Make static… or Edit…
+(one small window with the address, the name, the client identifier and the
+extra names), Remove reservation…, Release, Block and Simulate.
 
+- The reservation window refuses an address outside the scope's network, the
+  network and broadcast address, the scope's own address and an address another
+  reservation holds. A client keeps its current lease until it renews.
 - **Reservations** carry the MAC, the address and the host name, optionally a
   DHCP client identifier (option 61, for clients that ask by identifier rather
   than by MAC) and up to eight extra DNS names. Extra names are served as A

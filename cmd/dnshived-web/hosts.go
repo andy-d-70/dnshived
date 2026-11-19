@@ -43,6 +43,17 @@ type hostRow struct {
 	ttlSec    int64
 }
 
+// NoLeaseWhy explains an empty Time left and Last renewed: the host has no lease to read them from.
+func (r hostRow) NoLeaseWhy() string {
+	switch {
+	case r.Unknown:
+		return "No DHCP lease: this host answers on the network with a fixed address of its own."
+	case r.Reserved && !r.Seen:
+		return "No lease: no client has asked for this reserved address since the server started."
+	}
+	return ""
+}
+
 func leaseDuration(s string) time.Duration {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -526,19 +537,18 @@ var hostsTmpl = template.Must(template.New("hosts").Parse(`<!doctype html>
   <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{.Name}}{{if .Names}} ({{.Names}}){{end}}">{{if .Name}}{{.Name}}{{else}}—{{end}}{{if .Names}} <span class="dim">+</span>{{end}}</td>
   <td style="font-variant-numeric:tabular-nums;white-space:nowrap">{{.IP}}<span data-alive style="display:inline-block;width:1.2em;text-align:center"></span></td>
   <td style="font-variant-numeric:tabular-nums;white-space:nowrap">{{.MAC}}{{if .Private}} <span class="dim" title="A private (randomized) MAC address: the device may use a different one on another network, so a reservation or block by this MAC can stop matching.">P</span>{{end}}</td>
-  <td style="font-variant-numeric:tabular-nums;white-space:nowrap">{{.TTL}}</td>
-  <td style="font-variant-numeric:tabular-nums;white-space:nowrap">{{.Renewed}}</td>
+  <td style="font-variant-numeric:tabular-nums;white-space:nowrap"{{with .NoLeaseWhy}} title="{{.}}"{{end}}>{{.TTL}}</td>
+  <td style="font-variant-numeric:tabular-nums;white-space:nowrap"{{with .NoLeaseWhy}} title="{{.}}"{{end}}>{{.Renewed}}</td>
   <td style="text-align:center" title="{{.IconTitle}}">{{.Icon}}</td>
   <td>{{if .Unknown}}static?{{else if .Reserved}}reserved{{else}}dynamic{{end}}{{if and .Reserved (not .Seen)}}<span class="dim" title="reserved, not seen on the network right now"> ·</span>{{end}}</td>
   <td style="width:3rem;text-align:center">{{if or .Seen .Reserved}}<details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.MAC}}">&#9776;</summary>
   <div class="row-menu-list" role="menu">
-  {{if .Unknown}}<form method="post" action="/scopes/{{.Scope}}/reservations"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value=""><button type="submit" role="menuitem" title="Reserve this address for this MAC; staged as a pending change">Reserve</button></form>{{end}}
+  {{if .Unknown}}<button type="button" role="menuitem" data-res data-mode="reserve" data-scope="{{.Scope}}" data-mac="{{.MAC}}" data-ip="{{.IP}}" data-name="" title="Reserve this address for this MAC; staged as a pending change">Reserve…</button>{{end}}
   <button type="button" role="menuitem" data-check title="Ask the serving node whether this address answers ARP right now">Check now</button>
-  {{if and (not .Reserved) (not .Unknown)}}<form method="post" action="/scopes/{{.Scope}}/reservations"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.Name}}"><button type="submit" role="menuitem" title="Reserve this address for this MAC; staged as a pending change">Make static</button></form>
+  {{if and (not .Reserved) (not .Unknown)}}<button type="button" role="menuitem" data-res data-mode="static" data-scope="{{.Scope}}" data-mac="{{.MAC}}" data-ip="{{.IP}}" data-name="{{.Name}}" title="Open the reservation editor with this lease: address, name, client ID and extra names">Make static…</button>
   <form method="post" action="/scopes/{{.Scope}}/leases/release" onsubmit="return confirm('Release lease {{.IP}} ({{.MAC}})? The client will need to request an address again.')"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><button type="submit" role="menuitem">Release</button></form>{{end}}
-  {{if .Reserved}}<form method="post" action="/scopes/{{.Scope}}/reservations" onsubmit="var n=prompt('Host name (letters, digits, dot, hyphen, underscore; empty clears it):',this.hostname.value);if(n===null)return false;this.hostname.value=n.trim();"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.ResName}}"><button type="submit" role="menuitem" title="Change the host name of this reservation; staged as a pending change">Rename…</button></form>
-  <form method="post" action="/scopes/{{.Scope}}/reservations" onsubmit="var n=prompt('DHCP client identifier (option 61) as hex bytes like 01:aa:bb:cc:dd:ee:ff; empty = match by MAC only:',this.client_id.value);if(n===null)return false;this.client_id.value=n.trim();"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.ResName}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><button type="submit" role="menuitem" title="The server then answers only when the MAC and this identifier both match">Client ID…</button></form>
-  <form method="post" action="/scopes/{{.Scope}}/reservations" onsubmit="var n=prompt('Extra DNS names for this address, comma separated (up to 8); empty removes them:',this.names.value);if(n===null)return false;this.names.value=n.trim();"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.ResName}}"><input type="hidden" name="names" value="{{.Names}}"><button type="submit" role="menuitem" title="More names that resolve to this address; staged as a pending change">Names…</button></form>{{end}}
+  {{if .Reserved}}<button type="button" role="menuitem" data-res data-mode="edit" data-scope="{{.Scope}}" data-mac="{{.MAC}}" data-ip="{{.IP}}" data-name="{{.ResName}}" data-cid="{{.ClientID}}" data-names="{{.Names}}" title="Edit this reservation: address, name, client ID and extra names; staged as a pending change">Edit…</button>{{end}}
+  {{if .Reserved}}<form method="post" action="/scopes/{{.Scope}}/reservations/delete" onsubmit="return confirm('Remove the reservation of {{.MAC}} ({{.IP}})? The host then gets an address from the pool like any other client.')"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="back" value="hosts"><button type="submit" role="menuitem" class="danger" title="Delete this reservation; staged as a pending change">Remove reservation…</button></form>{{end}}
   <a role="menuitem" href="/simulator?c1={{.MAC}}&amp;s1={{.Scope}}" title="What this client would get in its scope">Simulate…</a>
   <form method="get" action="/config/access/blocked"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="addr" value="{{.IP}}"><button type="submit" role="menuitem" title="Open the blocked clients page with this client filled in; nothing is blocked until you stage and commit it">Block…</button></form>
   </div></details>{{end}}</td>
@@ -548,7 +558,47 @@ var hostsTmpl = template.Must(template.New("hosts").Parse(`<!doctype html>
 </div>
 {{template "pagerbar" .PagerBottom}}
 {{if eq .Total 0}}<p class="dim">{{if .Q}}(no host matches the search){{else}}(no hosts yet){{end}}</p>{{end}}
-<p class="dim">Dynamic hosts are the active leases of every scope; reserved hosts are the reservations in the scopes' configuration. Last renewed is derived from the lease expiry and the scope's lease time.</p>
+<p class="dim"><b>Dynamic</b>: a client with an active lease. <b>Reserved</b>: a fixed address from the scope's configuration, listed even when the client is not on the network. <b>Static?</b>: answers on the network with neither lease nor reservation. <b>Time left</b> and <b>Last renewed</b> come from the lease, so they are empty (&mdash;) for hosts without one.</p>
+<style>
+dialog#res-dialog{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:1rem 1.2rem;width:min(34rem,92vw)}
+dialog#res-dialog::backdrop{background:rgba(0,0,0,.45)}
+dialog#res-dialog h3{margin:0 0 .6rem}
+dialog#res-dialog label{display:block;margin:0 0 .6rem}
+dialog#res-dialog label input{display:block;width:100%;box-sizing:border-box;margin-top:.15rem}
+dialog#res-dialog input[readonly]{opacity:.7}
+</style>
+<dialog id="res-dialog"><form method="post" id="res-form" action="">
+<h3 id="res-title">Reservation</h3>
+<label>Scope<input id="res-scope" readonly></label>
+<label>MAC address<input id="res-macshow" readonly><input type="hidden" name="mac" id="res-mac"></label>
+<label>IP address<input name="ip" id="res-ip" required maxlength="15" inputmode="decimal" pattern="[0-9]{1,3}[.][0-9]{1,3}[.][0-9]{1,3}[.][0-9]{1,3}" title="An IPv4 address inside the scope's network"></label>
+<label>Name (nickname, published as the host name)<input name="hostname" id="res-name" maxlength="63" pattern="[A-Za-z0-9._-]*" title="Letters, digits, dot, hyphen and underscore; empty for no name"></label>
+<label>DHCP client identifier (option 61, hex bytes like 01:aa:bb:cc:dd:ee:ff; empty = match by MAC only)<input name="client_id" id="res-cid" pattern="[0-9A-Fa-f:]*"></label>
+<label>Extra DNS names (comma separated, up to 8)<input name="names" id="res-names"></label>
+<p class="dim" id="res-note"></p>
+<p style="margin-bottom:0"><button type="submit" class="btn-primary">Stage reservation</button> <button type="button" id="res-cancel">Cancel</button></p>
+</form></dialog>
+<script>
+(function(){
+var d=document.getElementById('res-dialog');
+if(!d||!d.showModal)return;
+var T={reserve:'Reserve this address',static:'Make static',edit:'Edit reservation'};
+var N={reserve:'Reserves the address for this MAC. Nothing changes on the network until the change is committed.',static:'The client keeps its current lease until it renews; after the commit it is given this address. Change the address to move it.',edit:'Saved as a pending change. A new address takes effect when the client renews.'};
+function v(id,x){document.getElementById(id).value=x||''}
+document.addEventListener('click',function(e){
+ var b=e.target.closest&&e.target.closest('[data-res]');
+ if(!b)return;
+ var m=b.getAttribute('data-mode');
+ document.getElementById('res-form').action='/scopes/'+encodeURIComponent(b.getAttribute('data-scope'))+'/reservations';
+ document.getElementById('res-title').textContent=T[m]||'Reservation';
+ document.getElementById('res-note').textContent=N[m]||'';
+ v('res-scope',b.getAttribute('data-scope'));v('res-mac',b.getAttribute('data-mac'));v('res-macshow',b.getAttribute('data-mac'));
+ v('res-ip',b.getAttribute('data-ip'));v('res-name',b.getAttribute('data-name'));v('res-cid',b.getAttribute('data-cid'));v('res-names',b.getAttribute('data-names'));
+ d.showModal();document.getElementById('res-ip').focus();
+});
+document.getElementById('res-cancel').addEventListener('click',function(){d.close()});
+})();
+</script>
 ` + hostsCheckScript + rowMenuScriptHTML + comboboxScriptHTML))
 
 const hostsCheckScript = `<script>

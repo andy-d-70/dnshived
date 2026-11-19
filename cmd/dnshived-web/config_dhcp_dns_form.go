@@ -9,17 +9,15 @@ var dhcpDNSConfigFormTmpl = template.Must(template.New("config-dhcp-dns").Parse(
 <title>dnshived-web — {{.Title}}</title>
 ` + styleHTML + templateBuilderStyleHTML + `
 ` + navHTML + pendingBannerHTML + `
-<h1>{{.Title}}</h1>
-
+<div class="pagehead"><h1>{{.Title}}</h1></div>
+{{if .ShowDNS}}<script>if(/^#(tab-)?(dhcp|dhcp-templates)$/.test(location.hash))location.replace("/config/dhcp"+location.hash);if(/^#(tab-)?domains$/.test(location.hash))location.replace("/config/domains");</script>{{end}}
+<div class="tab-host"{{if .ShowDNS}} data-extra-tabs='[["Domains","/config/domains","DNS records &amp; checks"]]'{{end}}>
 <p>Snapshot from node: <strong>{{.SourceNode}}</strong>. Any save below
 stages a <a href="/pending">pending change</a> — nothing applies until
 you commit it. Elsewhere: <a href="/hosts">hosts</a>, <a href="/config">cluster settings</a>,
 <a href="/security">security</a>, <a href="/backup">maintenance</a>,
 <a href="/config/scopes">scopes</a>, <a href="/scopes/options">scope
 options</a>, <a href="/probes#tab-behavior">DNS probe checks</a>.</p>
-
-{{if .ShowDNS}}<script>if(/^#(tab-)?(dhcp|dhcp-templates)$/.test(location.hash))location.replace("/config/dhcp"+location.hash);if(/^#(tab-)?domains$/.test(location.hash))location.replace("/config/domains");</script>{{end}}
-<div class="tab-host"{{if .ShowDNS}} data-extra-tabs='[["Domains","/config/domains","DNS records &amp; checks"]]'{{end}}>
 {{if .ShowDNS}}<section class="tab-pane" id="tab-dns" data-tab="DNS records &amp; checks" data-tab-order="2"{{if not .ShowDHCP}} data-tab-default{{end}}>
 <h2 id="dns">DNS defaults</h2>
 <form method="post" action="/config/dns" onsubmit="return confirm('This will stage these DNS defaults as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">

@@ -526,3 +526,13 @@ func TestLogsTabs_TheDaemonsPageShowsTheLogsStrip(t *testing.T) {
 		t.Errorf("tab order is General, Audit, Daemons, Daemon logs: %s", out)
 	}
 }
+
+func TestDHCPDNSConfigForm_SharesThePageHeadWithTheDomainsEditor(t *testing.T) {
+	src := dhcpDNSConfigFormTmpl.Tree.Root.String()
+	head := strings.Index(src, `class="pagehead"`)
+	host := strings.Index(src, `<div class="tab-host"`)
+	intro := strings.Index(src, "Snapshot from node")
+	if head < 0 || host < head || intro < host {
+		t.Errorf("order: page head %d, tab host %d, intro %d; want head, then tab host, then the intro so the tab strip sits where it does on the Domains page", head, host, intro)
+	}
+}

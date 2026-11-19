@@ -336,6 +336,7 @@ font-size:clamp(11px,.42vw + 7.2px,15px);line-height:1.3;white-space:nowrap;font
 @keyframes hbring{0%{transform:scale(1);opacity:.7}100%{transform:scale(3);opacity:0}}
 @keyframes hbfade{0%{opacity:1}50%{opacity:.35}100%{opacity:1}}
 @media (prefers-reduced-motion:reduce){.hb::before{animation:hbfade 2s ease-in-out infinite}.hb::after{animation:none;opacity:0}.appfoot[data-cs="stale"] .hb::before{animation:none}}
+@media (min-width:2000px){.appfoot .w-ev{width:26em}}
 @media (max-width:1500px){.appfoot .ld{display:none}.appfoot .ft-node{width:9.6em}}
 @media (max-width:1280px){.appfoot .w-ev,.appfoot .w-dhcp{display:none}}
 `

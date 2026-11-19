@@ -6,6 +6,8 @@ package main
 import (
 	"fmt"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"strings"
@@ -107,20 +109,20 @@ func TestHostsTemplate_RendersRowsAndMenu(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := b.String()
-	if strings.Count(out, ">Reserve<") != 1 || !strings.Contains(out, "static?") {
+	if strings.Count(out, ">Reserve…<") != 1 || !strings.Contains(out, "static?") {
 		t.Error("an unknown static host offers Reserve and shows static?")
 	}
 	if strings.Count(out, "data-check") < 3 {
 		t.Error("every row with a menu offers Check now")
 	}
-	if strings.Count(out, "Make static") != 1 {
+	if strings.Count(out, ">Make static…<") != 1 {
 		t.Error("only the dynamic, seen host offers Make static")
 	}
 	if strings.Contains(out, "<b>x</b>") || !strings.Contains(out, "&lt;b&gt;x&lt;/b&gt;") {
 		t.Error("host names must be escaped")
 	}
-	if strings.Count(out, "Rename…") != 1 || strings.Count(out, "Client ID…") != 1 || strings.Count(out, "Names…") != 1 || strings.Count(out, "Block…") != 3 {
-		t.Error("a reserved host offers Rename and Client ID, every host with a menu offers Block")
+	if strings.Count(out, ">Edit…<") != 1 || strings.Count(out, ">Remove reservation…<") != 1 || strings.Count(out, "Block…") != 3 {
+		t.Error("a reserved host offers Edit, every host with a menu offers Block")
 	}
 	if !strings.Contains(out, "private (randomized) MAC") {
 		t.Error("a private MAC carries its explanation")
@@ -232,5 +234,86 @@ func TestFilterHostScopeAndHeaders(t *testing.T) {
 	}
 	if h := hostSortHeaders(url.Values{}, "", false); h[0].Arrow != "▲" {
 		t.Errorf("the default sort is by scope: %+v", h[0])
+	}
+}
+
+func TestCheckReservationAddress(t *testing.T) {
+	sc := config.ScopeConfig{VIP: "192.168.100.1/24", Reservations: []config.Reservation{{MAC: "aa:bb:cc:00:00:01", IP: "192.168.100.50"}}}
+	tests := []struct {
+		name string
+		mac  string
+		ip   string
+		ok   bool
+	}{
+		{"free address", "aa:bb:cc:00:00:02", "192.168.100.60", true},
+		{"own address kept", "AA:BB:CC:00:00:01", "192.168.100.50", true},
+		{"held by another", "aa:bb:cc:00:00:02", "192.168.100.50", false},
+		{"outside the network", "aa:bb:cc:00:00:02", "192.168.101.60", false},
+		{"network address", "aa:bb:cc:00:00:02", "192.168.100.0", false},
+		{"broadcast address", "aa:bb:cc:00:00:02", "192.168.100.255", false},
+		{"scope address", "aa:bb:cc:00:00:02", "192.168.100.1", false},
+		{"not an address", "aa:bb:cc:00:00:02", "nas", false},
+		{"ipv6", "aa:bb:cc:00:00:02", "fd00::5", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkReservationAddress(sc, tt.mac, tt.ip)
+			if (err == nil) != tt.ok {
+				t.Errorf("checkReservationAddress(%q) = %v, want ok=%v", tt.ip, err, tt.ok)
+			}
+		})
+	}
+}
+
+func TestHostsTemplate_ReservationDialog(t *testing.T) {
+	src := hostsTmpl.Tree.Root.String()
+	for _, want := range []string{`id="res-dialog"`, `data-mode="static"`, `data-mode="edit"`, `data-mode="reserve"`, `name="client_id"`, `name="names"`, `name="hostname"`, `name="ip"`} {
+		if !strings.Contains(src, want) {
+			t.Errorf("hosts page lacks %s", want)
+		}
+	}
+	for _, gone := range []string{"Rename…", "Client ID…", "Names…"} {
+		if strings.Contains(src, gone) {
+			t.Errorf("old prompt item %q is still there", gone)
+		}
+	}
+}
+
+func TestDeleteReservationFormHandler_RemovesOnlyThatReservation(t *testing.T) {
+	live := testClusterWithScopes()
+	for name, sc := range live.Scopes {
+		sc.Reservations = []config.Reservation{{MAC: "aa:bb:cc:00:00:01", IP: "10.0.0.50", Hostname: "a"}, {MAC: "aa:bb:cc:00:00:02", IP: "10.0.0.51", Hostname: "b"}}
+		live.Scopes[name] = sc
+	}
+	var scope string
+	for name := range live.Scopes {
+		scope = name
+	}
+	srv, pushed := fakeCandidateNode(t, live)
+	defer srv.Close()
+	cfg := &WebConfig{Nodes: []NodeConfig{nodeConfigFor(t, srv)}}
+	r := httptest.NewRequest(http.MethodPost, "/scopes/"+scope+"/reservations/delete", strings.NewReader(url.Values{"mac": {"AA:BB:CC:00:00:01"}, "back": {"hosts"}}.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	r.SetPathValue("name", scope)
+	w := httptest.NewRecorder()
+	deleteReservationFormHandler(newConfigRef(cfg))(w, r)
+	if w.Code >= 400 {
+		t.Fatalf("HTTP %d: %s", w.Code, w.Body.String())
+	}
+	got := pushed.Scopes[scope].Reservations
+	if len(got) != 1 || got[0].MAC != "aa:bb:cc:00:00:02" {
+		t.Errorf("reservations = %v, want only the second", got)
+	}
+	if !strings.Contains(w.Body.String(), `href="/hosts"`) {
+		t.Error("the result page must lead back to the Hosts page")
+	}
+}
+
+func TestHostRow_NoLeaseWhy(t *testing.T) {
+	if (hostRow{Unknown: true, Seen: true}).NoLeaseWhy() == "" || (hostRow{Reserved: true}).NoLeaseWhy() == "" {
+		t.Error("a host without a lease explains the empty cells")
+	}
+	if (hostRow{Reserved: true, Seen: true}).NoLeaseWhy() != "" || (hostRow{Seen: true}).NoLeaseWhy() != "" {
+		t.Error("a host with a lease has nothing to explain")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"sort"
@@ -1146,6 +1147,46 @@ func upsertReservation(reservations []config.Reservation, res config.Reservation
 	return append(reservations, res)
 }
 
+// checkReservationAddress refuses an address outside the scope's network, the
+// network and broadcast address, the scope's own VIP and an address another
+// reservation of the scope already holds.
+func checkReservationAddress(sc config.ScopeConfig, mac, ip string) error {
+	addr, err := netip.ParseAddr(strings.TrimSpace(ip))
+	if err != nil || !addr.Is4() {
+		return fmt.Errorf("%q is not an IPv4 address", ip)
+	}
+	if vip, perr := netip.ParsePrefix(sc.VIP); perr == nil {
+		net4 := vip.Masked()
+		if !net4.Contains(addr) {
+			return fmt.Errorf("%s is outside the scope network %s", addr, net4)
+		}
+		if vip.Bits() < 31 {
+			if addr == net4.Addr() {
+				return fmt.Errorf("%s is the network address", addr)
+			}
+			if addr == lastAddr4(net4) {
+				return fmt.Errorf("%s is the broadcast address", addr)
+			}
+		}
+		if addr == vip.Addr() {
+			return fmt.Errorf("%s is the scope's own address", addr)
+		}
+	}
+	for _, r := range sc.Reservations {
+		if !strings.EqualFold(r.MAC, mac) && r.IP == addr.String() {
+			return fmt.Errorf("%s is already reserved for %s", addr, r.MAC)
+		}
+	}
+	return nil
+}
+
+func lastAddr4(p netip.Prefix) netip.Addr {
+	b := p.Addr().As4()
+	v := uint32(b[0])<<24 | uint32(b[1])<<16 | uint32(b[2])<<8 | uint32(b[3])
+	v |= ^uint32(0) >> p.Bits()
+	return netip.AddrFrom4([4]byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)})
+}
+
 // promoteLeaseFormHandler (POST /scopes/{name}/reservations) is the "make
 // static" action from the scope detail page's lease table.
 func promoteLeaseFormHandler(ref *configRef) http.HandlerFunc {
@@ -1174,6 +1215,10 @@ func promoteLeaseFormHandler(ref *configRef) http.HandlerFunc {
 		newScopes := make(map[string]config.ScopeConfig, len(c.Scopes))
 		for name, s := range c.Scopes {
 			newScopes[name] = s
+		}
+		if err := checkReservationAddress(sc, mac, ip); err != nil {
+			http.Error(w, "reservation not staged: "+err.Error(), http.StatusBadRequest)
+			return
 		}
 		res := config.Reservation{MAC: mac, IP: ip, Hostname: hostname}
 		for _, old := range sc.Reservations {
@@ -1266,6 +1311,10 @@ func deleteReservationFormHandler(ref *configRef) http.HandlerFunc {
 		payload.Scopes = newScopes
 
 		user, _ := userFromContext(r)
+		if r.FormValue("back") == "hosts" {
+			pushCandidateAndRenderResult(w, cfg, payload, user, "/hosts", "back to hosts")
+			return
+		}
 		pushCandidateAndRenderResult(w, cfg, payload, user, "/scopes/"+scope, "back to scope")
 	}
 }
