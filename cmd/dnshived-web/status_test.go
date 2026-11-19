@@ -43,7 +43,7 @@ func TestStatusTmpl_RendersProbeHostRows(t *testing.T) {
 	if !strings.Contains(out, "load 0.05  mem 24%") {
 		t.Error("expected probe-a's row and load/mem to render")
 	}
-	if !strings.Contains(out, `class="node-probe" title="probe · `) || !strings.Contains(out, `>probe-a</td>`) {
+	if !strings.Contains(out, `class="node-probe nodecell" title="probe · `) || !strings.Contains(out, `<span class="nodename">probe-a</span>`) {
 		t.Error("expected probe host row's Name cell to show its own nickname (probe-a), with the fixed \"probe\" role in its tooltip")
 	}
 	if !strings.Contains(out, "0.9.7-dev") || !strings.Contains(out, "1155c7e") {
@@ -1213,13 +1213,16 @@ func TestStatusTmpl_ClusterTableRowsCarryInfoIcons(t *testing.T) {
 		t.Fatalf("statusTmpl.Execute failed: %v", err)
 	}
 	out := buf.String()
-	if n := strings.Count(out, "info-ico"); n < 9 {
-		t.Errorf("found %d info-ico occurrences in the Cluster table, want at least 9 (State, Configuration sane, Interfaces, Witness, Arbiter quorum, Serving, Daemons, Probes, Cluster paths)", n)
+	if n := strings.Count(out, "info-ico"); n < 3 {
+		t.Errorf("found %d info-ico occurrences, want at least 3 (Scopes, Probes, Cluster paths)", n)
 	}
-	for _, label := range []string{">State ", ">Witness ", ">Scopes ", ">Daemons ", ">Probes "} {
+	for _, label := range []string{">Scopes ", ">Probes ", "<b>State</b>", "<b>Witness</b>", "<b>Daemons</b>"} {
 		if !strings.Contains(out, label) {
-			t.Errorf("expected label %q to be followed by an info-ico span, not just plain text", label)
+			t.Errorf("expected label %q", label)
 		}
+	}
+	if n := strings.Count(out, `<li class="`); n < 7 || !strings.Contains(out, `class="card-list checks"`) {
+		t.Errorf("the health checks are a list of lines, each with its explanation as a tooltip (found %d items)", n)
 	}
 }
 
@@ -1565,7 +1568,7 @@ func TestStatusTmpl_OverviewCardsCarryTheirFigures(t *testing.T) {
 		ClusterState: "STABLE", ClusterClass: "ok", ServingText: "9 of 10 scope(s)", ServingClass: "warn", ServingMeter: "warn", ServingPct: 90,
 		UnservedCount: 1, DisabledCount: 2, ServingNodes: []nodeServingRow{{Name: "core-1", Class: "node-core-1", Count: 5, Pct: 100}},
 		ProbeSummary: "x", ProbeFig: probeFigures{Total: 10, Probed: 8, Pending: 2, Issues: 1, Rogue: 1, Pct: 80, Class: "crit"},
-		PathsSummaryText: "3 path(s)", PathDigest: []pathDigestRow{{From: "core-1", To: "core-2", Trunk: "eth1", Class: "ok", Text: "reachable", Score: 97}}, PathDigestMore: 2, VLANPaths: 4,
+		PathsSummaryText: "3 path(s)", VLANPaths: 4,
 		PathRows: []clusterPathRow{{From: "core-1", To: "core-2"}},
 	}
 	var buf strings.Builder
@@ -1573,7 +1576,7 @@ func TestStatusTmpl_OverviewCardsCarryTheirFigures(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := buf.String()
-	for _, want := range []string{"Not served", "Paused (disabled)", "5 serving", "8 of 10", "1 (1 rogue DHCP)", "Pending first sweep", "core-1 → core-2", "97 %", "+ 2 more trunk path(s)", "4 VLAN path(s)", `class="meter warn"`} {
+	for _, want := range []string{"Not served", "Paused (disabled)", "5 serving", "8 of 10", "1 (1 rogue DHCP)", "Pending first sweep", "4 VLAN path(s)", `class="meter warn"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("overview lacks %q", want)
 		}
@@ -1590,7 +1593,7 @@ func TestStatusTmpl_NodeStateStaysOnOneLine(t *testing.T) {
 	if err := statusTmpl.Execute(&buf, data); err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(buf.String(), `class="ok st"`); n != 2 {
+	if n := strings.Count(buf.String(), `<td class="st">`); n != 2 {
 		t.Errorf("the state cells of a node and of the probe host must carry the one-line class, found %d", n)
 	}
 	if !strings.Contains(styleHTML, "td.st{white-space:nowrap}") {
@@ -1608,11 +1611,11 @@ func TestStatusTmpl_HealthChecksCarryTheFormerDetails(t *testing.T) {
 	}
 	out := render(overviewData{ClusterState: "STABLE", StableSince: "12:00:01", StableFor: "2d 04:03:12", Witness: "healthy", ActiveTokens: 12})
 	for _, want := range []string{
-		"<tr><td>Stable for</td>", ">2d 04:03:12</td>", `title="stable since 12:00:01`,
-		"<tr><td>Witness ", ">healthy · 12 active</td>",
+		`class="banner-right"`, "stable for 2d 04:03:12", `title="stable since 12:00:01`,
+		"<b>Witness</b> healthy · 12 active</li>",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("Health checks lack %q", want)
+			t.Errorf("the overview lacks %q", want)
 		}
 	}
 	for _, gone := range []string{"More cluster details", "card-details", "<td>Node IDs</td>", "<td>Tokens</td>"} {
@@ -1620,10 +1623,10 @@ func TestStatusTmpl_HealthChecksCarryTheFormerDetails(t *testing.T) {
 			t.Errorf("the old details block must be gone, found %q", gone)
 		}
 	}
-	if !strings.Contains(render(overviewData{ClusterState: "DEGRADED"}), "<tr><td>Stable for</td><td class=\"dim st\">–</td></tr>") {
-		t.Error("Stable for keeps its row (a dash) while the cluster is not stable, so the card does not change height")
+	if strings.Contains(render(overviewData{ClusterState: "DEGRADED"}), "stable for") {
+		t.Error("the banner shows no stable-for text while the cluster is not stable")
 	}
-	if !strings.Contains(render(overviewData{Witness: "2 expired", ActiveTokens: 10}), ">2 expired · 10 active</td>") {
+	if !strings.Contains(render(overviewData{Witness: "2 expired", ActiveTokens: 10}), "2 expired · 10 active</li>") {
 		t.Error("expired tokens must show in the Witness value")
 	}
 }
@@ -1716,8 +1719,8 @@ func TestStatusTmpl_CardTablesHaveFixedColumns(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := b.String()
-	if got := strings.Count(out, `class="small kv-table fixed-table"><colgroup>`); got != 4 {
-		t.Errorf("the four card tables need explicit column widths, found %d", got)
+	if got := strings.Count(out, `class="small kv-table fixed-table"><colgroup>`); got != 2 {
+		t.Errorf("the two card tables (scopes, probes) need explicit column widths, found %d", got)
 	}
 	for _, want := range []string{
 		"@media (min-width:701px){.card-grid{grid-template-rows:17rem 24rem}}",

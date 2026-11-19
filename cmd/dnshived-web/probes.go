@@ -701,20 +701,7 @@ dlg.addEventListener('click',function(e){if(e.target===dlg){dlg.close()}});
 })();
 </script>`
 
-const probeManagementHTML = `<style>
-.probe-card{margin:.9rem 0}
-.probe-card h3{margin:0 0 .5rem;font-size:1.05rem}
-.fieldset{display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end}
-.fieldset>.fl,.probe-card .fieldset>label{display:flex;flex-direction:column;gap:.15rem;color:var(--muted)}
-.rseg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--panel)}
-.rseg label{display:inline-flex;margin:0;color:var(--text)}
-.rseg input{position:absolute;opacity:0;pointer-events:none}
-.rseg span{padding:.3rem .8rem;border-right:1px solid var(--border);cursor:pointer}
-.rseg label:last-child span{border-right:0}
-.rseg input:checked+span{background:var(--accent);color:var(--on-accent);font-weight:600}
-.rseg input:focus-visible+span{outline:2px solid var(--accent);outline-offset:-2px}
-</style>
-<section class="tab-pane" id="tab-hosts" data-tab="Probe hosts &amp; TLS" data-tab-order="3" data-tab-default>
+const probeManagementHTML = `<section class="tab-pane" id="tab-hosts" data-tab="Probe hosts &amp; TLS" data-tab-order="3" data-tab-default>
 <h2 id="settings">Probe hosts &amp; settings</h2>
 <p class="dim">A probe host runs one DHCP check and one DNS check per physical
 interface at a time, each interface on its own, and moves to the next scope as

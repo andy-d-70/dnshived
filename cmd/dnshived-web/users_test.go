@@ -138,3 +138,12 @@ func TestRoles_ScopeAdminRights(t *testing.T) {
 		t.Error("admin lacks a permission")
 	}
 }
+
+func TestHandleUsersGet_SendsANonAdminToTheTokensTab(t *testing.T) {
+	store, _, _ := usersFixture(t, webauth.User{Name: "viewer", Role: webauth.RoleReadonly})
+	rec := httptest.NewRecorder()
+	handleUsersGet(store)(rec, withAuthedUser(httptest.NewRequest(http.MethodGet, "/users", nil), webauth.User{Name: "viewer", Role: webauth.RoleReadonly}))
+	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/security" {
+		t.Errorf("a user who cannot manage users goes to /security: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+}

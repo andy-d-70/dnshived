@@ -162,10 +162,21 @@ func TestPasswordPages_CarryTheStrengthBar(t *testing.T) {
 
 	users := httptest.NewRecorder()
 	handleUsersGet(store)(users, withAuthedUser(httptest.NewRequest(http.MethodGet, "/users", nil), webauth.User{Name: "admin", Role: webauth.RoleAdmin}))
-	for _, want := range []string{`data-pwbar`, `/password-strength`, `name="min_length"`, `value="12"`} {
+	for _, want := range []string{`data-pwbar`, `/password-strength`} {
 		if !strings.Contains(users.Body.String(), want) {
 			t.Errorf("users page lacks %q", want)
 		}
+	}
+
+	policy := httptest.NewRecorder()
+	handleUsersPolicyGet(store)(policy, withAuthedUser(httptest.NewRequest(http.MethodGet, "/users/policy", nil), webauth.User{Name: "admin", Role: webauth.RoleAdmin}))
+	for _, want := range []string{`name="min_length"`, `value="12"`} {
+		if !strings.Contains(policy.Body.String(), want) {
+			t.Errorf("policy page lacks %q", want)
+		}
+	}
+	if strings.Contains(users.Body.String(), `name="min_length"`) || strings.Contains(policy.Body.String(), `action="/users/new"`) {
+		t.Error("the policy form lives on its own tab, the add-user form on the users tab")
 	}
 
 	change := httptest.NewRecorder()

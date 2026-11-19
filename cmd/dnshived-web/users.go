@@ -30,6 +30,7 @@ type usersPageData struct {
 	Error     string
 	Notice    string
 	Edit      *userRow
+	Policy    bool
 	New       struct{ Name, Email, Role string }
 }
 
@@ -38,11 +39,11 @@ var usersTmpl = template.Must(template.New("users").Parse(`<!doctype html>
 ` + styleHTML + `
 ` + navHTML + `
 <h1>Security</h1>
-` + securityTabs("/users") + `
+{{if .Policy}}` + securityTabs("/users/policy") + `{{else}}` + securityTabs("/users") + `{{end}}
 <p class="dim">Web-UI logins. Changes apply at once on every core (no commit needed).
 <strong>admin</strong>: everything. <strong>scopeadmin</strong>: everything served to clients — scopes, DHCP/DNS settings,
 templates, local domains — but no cluster settings, nodes, users, tokens, backups or daemon restarts.
-<strong>readonly</strong>: view only. <a href="/security">&larr; security</a></p>
+<strong>readonly</strong>: view only.</p>
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
 {{if .Error}}<p class="crit">{{.Error}}</p>{{end}}
 
@@ -63,31 +64,45 @@ templates, local domains — but no cluster settings, nodes, users, tokens, back
 <form method="post" action="/users/{{.Edit.Name}}/delete" style="display:inline;margin-left:1.5rem" onsubmit="return confirm('Delete user {{.Edit.Name}} on every core? This cannot be undone.')"><button type="submit" class="btn-danger">Delete user</button></form>
 {{end}}
 {{else}}
-<table border="1" cellpadding="4" data-stack>
-<tr><th>User</th><th>Role</th><th>Email</th><th>Status</th><th></th></tr>
-{{range .Users}}<tr><td style="white-space:nowrap">{{.Name}}{{if .Self}} <span class="dim">(you)</span>{{end}}</td><td>{{.Role}}</td><td>{{if .Email}}{{.Email}}{{else}}<span class="dim" title="No email address: this user cannot reset a forgotten password by email.">—</span>{{end}}</td><td>{{if .Disabled}}<span class="warn">disabled</span>{{else}}<span class="ok">active</span>{{end}}</td><td><a href="/users/{{.Name}}">edit</a></td></tr>
-{{end}}
-</table>
-
-<h2>Add user</h2>
-<form method="post" action="/users/new">
-<table border="1" cellpadding="4">
-<tr><td>User name</td><td><input name="name" value="{{.New.Name}}" required pattern="[A-Za-z0-9._@\-]{1,64}" title="letters, digits, . _ @ -"></td></tr>
-<tr><td>Role</td><td><select name="role" class="js-combo">{{$r := .New.Role}}{{range .Roles}}<option value="{{.}}" {{if eq . $r}}selected{{end}}>{{.}}</option>{{end}}</select></td></tr>
-<tr><td>Email</td><td><input name="email" value="{{.New.Email}}" size="30" placeholder="optional, for password reset"></td></tr>
-<tr><td>Password</td><td><input type="password" name="new_password" autocomplete="new-password" required size="24" data-pwbar data-pwbar-name="name" data-pwbar-email="email"> confirm <input type="password" name="confirm_password" autocomplete="new-password" required size="24"></td></tr>
-</table>
-<p><button type="submit" class="btn-success">Add user</button></p>
-</form>
-
-<h2>Password policy</h2>
+{{if .Policy}}
+<div class="card probe-card">
+<h3>Password policy</h3>
 <form method="post" action="/users/policy">
 <p>Minimum length <input type="number" name="min_length" min="8" max="64" value="{{.MinLength}}" style="width:5rem"> characters (8 to 64).
 Also required: an uppercase letter, a digit, a special character, five different characters, no simple sequence or repeated block, and not the user name, mail address or host name.
 Existing passwords keep working until they are changed. <button type="submit">Save</button></p>
 </form>
+</div>
+{{else}}
+<div class="table-wrap"><table class="list-table" border="1" cellpadding="4" data-stack>
+<colgroup><col style="width:22%"><col style="width:14%"><col style="width:34%"><col style="width:16%"><col style="width:3.5rem"></colgroup>
+<tr><th>User</th><th>Role</th><th>Mail</th><th>Status</th><th></th></tr>
+{{range .Users}}{{$n := .Name}}<tr><td style="white-space:nowrap">{{.Name}}{{if .Self}} <span class="dim">(you)</span>{{end}}</td><td><span class="chip">{{.Role}}</span></td><td>{{if .Email}}{{.Email}}{{else}}<span class="dim" title="No email address: this user cannot reset a forgotten password by email.">—</span>{{end}}</td><td>{{if .Disabled}}<span class="chip warn">○ disabled</span>{{else}}<span class="chip ok">✔ active</span>{{end}}</td>
+<td style="width:3rem;text-align:center"><details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.Name}}">&#9776;</summary>
+<div class="row-menu-list" role="menu">
+<a role="menuitem" href="/users/{{.Name}}">Edit</a>
+{{if not .Self}}<form method="post" action="/users/{{$n}}/signout" onsubmit="return confirm('End every session of {{$n}} on every core?')"><button type="submit" role="menuitem">Sign out everywhere</button></form>
+<form method="post" action="/users/{{$n}}/delete" onsubmit="return confirm('Delete user {{$n}} on every core? This cannot be undone.')"><button type="submit" role="menuitem" class="danger">Delete&hellip;</button></form>{{end}}
+</div></details></td></tr>
 {{end}}
-` + passwordBarScriptHTML + `
+</table></div>
+
+<div class="card probe-card">
+<h3>Add user</h3>
+<form method="post" action="/users/new">
+<div class="fieldset">
+<label>User name<input name="name" value="{{.New.Name}}" required pattern="[A-Za-z0-9._@\-]{1,64}" title="letters, digits, . _ @ -"></label>
+<span class="fl">Role<span class="rseg">{{$r := .New.Role}}{{range .Roles}}<label><input type="radio" name="role" value="{{.}}" {{if eq . $r}}checked{{end}}><span>{{.}}</span></label>{{end}}</span></span>
+<label>Email<input name="email" value="{{.New.Email}}" size="26" placeholder="optional, for password reset"></label>
+<label>Password<input type="password" name="new_password" autocomplete="new-password" required size="22" data-pwbar data-pwbar-name="name" data-pwbar-email="email"></label>
+<label>Confirm<input type="password" name="confirm_password" autocomplete="new-password" required size="22"></label>
+<button type="submit" class="btn-success">Add user</button>
+</div>
+</form>
+</div>
+{{end}}
+{{end}}
+` + passwordBarScriptHTML + rowMenuScriptHTML + `
 `))
 
 func usersData(store *webauth.Store, self string) usersPageData {
@@ -109,7 +124,21 @@ func renderUsers(w http.ResponseWriter, status int, data usersPageData) {
 func handleUsersGet(store *webauth.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		actor, _ := userFromContext(r)
+		if !actor.HasPermission(webauth.PermEditConfig) {
+			http.Redirect(w, r, "/security", http.StatusSeeOther)
+			return
+		}
 		data := usersData(store, actor.Name)
+		data.Notice = r.URL.Query().Get("done")
+		renderUsers(w, http.StatusOK, data)
+	}
+}
+
+func handleUsersPolicyGet(store *webauth.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		actor, _ := userFromContext(r)
+		data := usersData(store, actor.Name)
+		data.Policy = true
 		data.Notice = r.URL.Query().Get("done")
 		renderUsers(w, http.StatusOK, data)
 	}

@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -65,7 +66,7 @@ func handleUsersPolicyPost(store *webauth.Store, repl *authSync, ref *configRef)
 			return
 		}
 		auditAll(ref.Load(), actor.Name, "password.policy", fmt.Sprintf("minimum web-UI password length set to %d", n))
-		doneRedirect(w, r, fmt.Sprintf("Minimum password length set to %d.", n))
+		http.Redirect(w, r, "/users/policy?done="+url.QueryEscape(fmt.Sprintf("Minimum password length set to %d.", n)), http.StatusSeeOther)
 	}
 }
 

@@ -237,7 +237,7 @@ const navHTML = `<script>document.documentElement.classList.add('js')</script>
 <span class="nav-sep" aria-hidden="true"></span>
 <a href="/hosts" class="nav-item" title="hosts, default DHCP options, option sets, DNS server for clients" data-match="/hosts,/config/dhcp,/optionsets,/groups,/rollout"><span class="nav-name">DHCP</span></a>
 <a href="/config/dns" class="nav-item" title="DNS records and checks, local domains, record sets" data-match="/config/dns,/config/domains,/templates"><span class="nav-name">DNS</span></a>
-<a href="/security" class="nav-item" title="users, tokens, mail, password policy" data-match="/security,/users,/config/mail,/password"><span class="nav-name">Security</span></a>
+<a href="/users" class="nav-item" title="users, tokens, mail, password policy" data-match="/security,/users,/config/mail,/password"><span class="nav-name">Security</span></a>
 <a href="/backup" class="nav-item" title="export, import, backup and restore" data-match="/backup,/config/export"><span class="nav-name">Maintenance</span></a>
 <a href="/config" class="nav-item" title="nodes, interfaces, cluster-wide settings" data-match="/config"><span class="nav-name">Cluster settings</span></a>
 <a href="/logs" class="nav-item" title="system log, audit log, daemons" data-match="/logs,/audit,/daemons"><span class="nav-name">Logs</span></a>
@@ -651,8 +651,21 @@ button.btn-sm,.row-menu>summary{min-height:36px}
 .card-list{list-style:none;margin:0;padding:0}
 .card-list li{padding:.35rem 0;border-bottom:1px solid var(--border)}
 .card-list li:last-child{border-bottom:0}
-.banner{background:var(--panel);border:1px solid var(--border);border-left-width:4px;border-radius:8px;padding:.55rem .9rem;margin:0 0 1rem}
+.banner{background:var(--panel);border:1px solid var(--border);border-left-width:4px;border-radius:8px;padding:.55rem .9rem;margin:0 0 1rem;display:flex;align-items:baseline;gap:.9rem}
+.banner .grow{flex:1}
+.banner-detail,.banner-right{color:var(--muted);font-size:var(--fs-sm)}
+.banner.ok strong{color:var(--ok)}
 .banner.ok{border-left-color:var(--ok)}
+.nodes-table td.nodecell{border-left:4px solid currentColor}
+.nodes-table .nodename{color:var(--text)}
+.checks li{display:flex;gap:.45rem;align-items:baseline}
+.checks li::before{flex:none;width:1.1em;text-align:center}
+.checks li.ok::before{content:"✔";color:var(--ok)}
+.checks li.warn::before{content:"⚠";color:var(--warn)}
+.checks li.crit::before{content:"✖";color:var(--crit)}
+.checks li.dim::before{content:"·";color:var(--muted)}
+.checks li{color:var(--text);font-weight:400}
+.checks li b{font-weight:600;flex:none}
 .banner.warn{border-left-color:var(--warn)}
 .banner.crit{border-left-color:var(--crit)}
 table.small th,table.small td{padding:.3rem .5rem;font-size:var(--fs-md)}
@@ -832,6 +845,17 @@ overflow:hidden;vertical-align:middle;margin-right:.4rem}
 .pool-fill.ok{background:var(--ok)}
 .pool-fill.warn{background:var(--warn)}
 .pool-fill.crit{background:var(--crit)}
+.probe-card{margin:.9rem 0}
+.probe-card h3{margin:0 0 .5rem;font-size:1.05rem}
+.fieldset{display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end}
+.fieldset>.fl,.probe-card .fieldset>label{display:flex;flex-direction:column;gap:.15rem;color:var(--muted)}
+.rseg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--panel)}
+.rseg label{display:inline-flex;margin:0;color:var(--text)}
+.rseg input{position:absolute;opacity:0;pointer-events:none}
+.rseg span{padding:.3rem .8rem;border-right:1px solid var(--border);cursor:pointer}
+.rseg label:last-child span{border-right:0}
+.rseg input:checked+span{background:var(--accent);color:var(--on-accent);font-weight:600}
+.rseg input:focus-visible+span{outline:2px solid var(--accent);outline-offset:-2px}
 .dot{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:.35rem;background:currentColor;vertical-align:baseline}
 .chip{display:inline-flex;align-items:center;gap:.25rem;padding:.05rem .55rem;border-radius:999px;border:1px solid var(--border);font-size:.86em;white-space:nowrap;background:var(--panel);font-weight:600}
 .chip.ok{background:color-mix(in srgb,var(--ok) 13%,transparent);border-color:transparent;color:var(--ok)}
@@ -864,9 +888,10 @@ func tabLinksHTML(items [][2]string, active string) string {
 // menu item leads to /security, so that page is the first tab.
 func securityTabs(active string) string {
 	return tabLinksHTML([][2]string{
+		{"/users", "Users"},
 		{"/security", "API tokens"},
-		{"/users", "Users &amp; password policy"},
 		{"/config/mail", "Mail &amp; reset"},
+		{"/users/policy", "Password policy"},
 	}, active)
 }
 

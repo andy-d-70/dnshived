@@ -124,7 +124,7 @@ func TestNavHTML_EveryItemHasANameAndATooltip(t *testing.T) {
 }
 
 func TestNavHTML_ItemsAreInTheAgreedOrder(t *testing.T) {
-	order := []string{`href="/"`, `href="/scopes"`, `href="/probes"`, `nav-sep`, `href="/hosts"`, `href="/config/dns"`, `href="/security"`, `href="/backup"`, `href="/config"`, `href="/logs"`}
+	order := []string{`href="/"`, `href="/scopes"`, `href="/probes"`, `nav-sep`, `href="/hosts"`, `href="/config/dns"`, `href="/users"`, `href="/backup"`, `href="/config"`, `href="/logs"`}
 	last := -1
 	for _, want := range order {
 		idx := strings.Index(navHTML, want)
@@ -443,7 +443,7 @@ func TestTabLinksHTML_MarksOnlyTheActivePage(t *testing.T) {
 	if strings.Count(out, `aria-current="page"`) != 1 || !strings.Contains(out, `href="/security" aria-current="page"`) {
 		t.Errorf("exactly the active tab must carry aria-current: %s", out)
 	}
-	for _, href := range []string{"/users", "/security", "/config/mail"} {
+	for _, href := range []string{"/users", "/security", "/config/mail", "/users/policy"} {
 		if !strings.Contains(out, `href="`+href+`"`) {
 			t.Errorf("security tabs lack %s", href)
 		}
@@ -474,14 +474,14 @@ func TestPageTemplates_UseTheTabLayout(t *testing.T) {
 }
 
 func TestSecurityTabs_TheMenuLandsOnTheFirstTab(t *testing.T) {
-	out := securityTabs("/security")
+	out := securityTabs("/users")
 	first := strings.Index(out, `href="`)
-	if first == -1 || !strings.HasPrefix(out[first:], `href="/security"`) {
-		t.Errorf("the first tab must be the page the Security menu item opens (/security): %s", out)
+	if first == -1 || !strings.HasPrefix(out[first:], `href="/users"`) {
+		t.Errorf("the first tab must be the page the Security menu item opens (/users): %s", out)
 	}
 	menuHref := regexp.MustCompile(`<a href="([^"]+)"[^>]*data-match="/security,`).FindStringSubmatch(navHTML)
-	if menuHref == nil || menuHref[1] != "/security" {
-		t.Errorf("the Security menu item must open /security, got %v", menuHref)
+	if menuHref == nil || menuHref[1] != "/users" {
+		t.Errorf("the Security menu item must open /users, got %v", menuHref)
 	}
 }
 

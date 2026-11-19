@@ -244,7 +244,8 @@ func main() {
 	mux.HandleFunc("POST /internal/password/change", applyPasswordChangeHandler(ref, repl))
 
 	// Users and mail settings (users.go, mail.go), replicated by authsync.go.
-	mux.HandleFunc("GET /users", requirePermission(store, webauth.PermEditConfig, handleUsersGet(store)))
+	mux.HandleFunc("GET /users", requirePermission(store, webauth.PermViewStatus, handleUsersGet(store)))
+	mux.HandleFunc("GET /users/policy", requirePermission(store, webauth.PermEditConfig, handleUsersPolicyGet(store)))
 	mux.HandleFunc("POST /users/policy", requirePermission(store, webauth.PermEditConfig, handleUsersPolicyPost(store, repl, ref)))
 	mux.HandleFunc("POST /users/new", requirePermission(store, webauth.PermEditConfig, handleUserCreate(store, repl, ref)))
 	mux.HandleFunc("GET /users/{name}", requirePermission(store, webauth.PermEditConfig, handleUserEditGet(store)))

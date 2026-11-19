@@ -252,6 +252,41 @@ var (
 	settlingSince time.Time
 )
 
+// shortVersion drops the build metadata after "+".
+func shortVersion(v string) string {
+	if i := strings.IndexByte(v, '+'); i > 0 {
+		return v[:i]
+	}
+	return v
+}
+
+func (r statusRow) ShortVersion() string            { return shortVersion(r.Status.Version) }
+func (r probeHostOverviewRow) ShortVersion() string { return shortVersion(r.Version) }
+
+// bannerDetail is the line beside the banner state: how many core nodes
+// answer, how many probe hosts there are and the version they run.
+func bannerDetail(reachable, total, probeHosts int, rows []statusRow) string {
+	parts := []string{fmt.Sprintf("%d of %d core nodes", reachable, total)}
+	if probeHosts > 0 {
+		parts = append(parts, fmt.Sprintf("%d probe host(s)", probeHosts))
+	}
+	versions := map[string]bool{}
+	last := ""
+	for _, r := range rows {
+		if r.FetchError == "" && r.Status.Version != "" {
+			last = shortVersion(r.Status.Version)
+			versions[last] = true
+		}
+	}
+	switch {
+	case len(versions) == 1:
+		parts = append(parts, "version "+last)
+	case len(versions) > 1:
+		parts = append(parts, "mixed versions")
+	}
+	return strings.Join(parts, " · ")
+}
+
 // bannerText picks the top banner's text and CSS class — ported from
 // dnshived-top's identical function (ANSI colors replaced with CSS
 // classes).
@@ -1151,22 +1186,22 @@ setting once every node is reachable.</strong></p>
 <p class="{{.ResetMessageClass}}"><strong>{{.ResetMessage}}</strong></p>
 {{end}}
 
-<p class="banner {{.BannerClass}}"><strong>{{.BannerText}}</strong></p>
+<p class="banner {{.BannerClass}}"><strong>{{.BannerText}}</strong>{{with .BannerDetail}}<span class="banner-detail">{{.}}</span>{{end}}<span class="grow"></span>{{if .StableSince}}<span class="banner-right" title="stable since {{.StableSince}} (this web host's time)">stable for {{.StableFor}}</span>{{end}}</p>
 
 <div class="card-grid">
 <section class="card">
 <h2>Cluster nodes</h2>
 <table class="small fixed-table nodes-table" data-stack>
-<colgroup><col style="width:22%"><col style="width:22%"><col style="width:30%"><col style="width:26%"></colgroup>
+<colgroup><col style="width:21%"><col style="width:29%"><col style="width:24%"><col style="width:26%"></colgroup>
 <tr><th>Name</th><th>State</th><th>Version</th><th>Info</th></tr>
 {{range .Rows}}
 <tr>
-  <td class="{{.RoleClass}}"{{if not .FetchError}} title="{{.Status.Role}} · {{.Status.Hostname}} · {{.Node.Addr}} · {{.SysStr}}"{{end}}><span class="vip-slot">{{if .HoldsMgmtVIP}}<span class="vip-badge" title="currently answering as the management-VIP's VRRP MASTER">VIP</span>{{end}}</span>{{.Nickname}}</td>
+  <td class="{{.RoleClass}} nodecell"{{if not .FetchError}} title="{{.Status.Role}} · {{.Status.Hostname}} · {{.Node.Addr}} · {{.SysStr}}"{{end}}><span class="vip-slot">{{if .HoldsMgmtVIP}}<span class="vip-badge" title="currently answering as the management-VIP's VRRP MASTER">VIP</span>{{end}}</span><span class="nodename">{{.Nickname}}</span></td>
   {{if .FetchError}}
   <td colspan="3" class="crit" title="UNREACHABLE: {{.FetchError}}">UNREACHABLE: {{.FetchError}}</td>
   {{else}}
-  <td class="{{.Class}} st">{{.Icon}} {{.Status.State}}</td>
-  <td class="ver" title="{{.Status.Version}}">{{.Status.Version}}</td>
+  <td class="st"><span class="chip {{.Class}}">{{.Icon}} {{.Status.State}}</span></td>
+  <td class="ver" title="{{.Status.Version}}">{{.ShortVersion}}</td>
   <td title="{{.Info}}">{{.Info}}</td>
   {{end}}
 </tr>
@@ -1179,9 +1214,9 @@ setting once every node is reachable.</strong></p>
 {{end}}
 {{range .ProbeHostRows}}
 <tr>
-  <td class="node-probe" title="probe · {{.Hostname}} · {{.Addr}} · {{.SysStr}}">{{.Name}}</td>
-  <td class="{{.Class}} st">{{.Icon}} {{.State}}</td>
-  <td class="ver">{{.Version}}</td>
+  <td class="node-probe nodecell" title="probe · {{.Hostname}} · {{.Addr}} · {{.SysStr}}"><span class="vip-slot"></span><span class="nodename">{{.Name}}</span></td>
+  <td class="st"><span class="chip {{.Class}}">{{.Icon}} {{.State}}</span></td>
+  <td class="ver" title="{{.Version}}">{{.ShortVersion}}</td>
   <td{{if .InfoTitle}} title="{{.InfoTitle}}"{{end}}>{{.Info}}</td>
 </tr>
 {{end}}
@@ -1236,26 +1271,21 @@ setting once every node is reachable.</strong></p>
 <section class="card">
 <h2>Cluster paths <span class="info-ico" title="each worker trunk's own alternate path to every other core role — continuously monitored, not actively used until a peer's primary (mgmt) path goes down">ⓘ</span></h2>
 <p class="{{.PathsSummaryClass}} card-big">{{.PathsSummaryText}}</p>
-{{if .PathDigest}}<table class="small kv-table fixed-table"><colgroup><col style="width:56%"><col style="width:44%"></colgroup>
-{{range .PathDigest}}<tr><td>{{.From}} → {{.To}} <span class="dim">{{.Trunk}}</span></td><td class="{{.Class}}">{{.Text}} · {{.Score}} %</td></tr>
-{{end}}</table>
-{{if .PathDigestMore}}<p class="dim">+ {{.PathDigestMore}} more trunk path(s)</p>{{end}}
-{{if .VLANPaths}}<p class="dim">{{.VLANPaths}} VLAN path(s) run over these trunks.</p>{{end}}{{end}}
+{{if .VLANPaths}}<p class="dim">{{.VLANPaths}} VLAN path(s) run over the trunks.</p>{{end}}
 {{if .PathRows}}<p><a href="#" onclick="document.getElementById('paths-modal').showModal();return false;">Details →</a></p>{{end}}
 </section>
 
 <section class="card">
 <h2>Health checks</h2>
-<table class="small kv-table fixed-table"><colgroup><col style="width:38%"><col style="width:62%"></colgroup>
-<tr><td>State <span class="info-ico" title="the cluster's own quorum/failover state machine: STABLE means every serving decision has settled and held for the required settling window; DEGRADED/GETTING THERE/NOT CONVERGING mean scopes are still starting, rebalancing, or stuck — not necessarily an outage, but worth watching">ⓘ</span></td><td class="{{.ClusterClass}}">{{.ClusterState}}</td></tr>
-<tr><td>Stable for</td><td class="dim st"{{if .StableSince}} title="stable since {{.StableSince}} (this web host's time)"{{end}}>{{if .StableSince}}{{.StableFor}}{{else}}–{{end}}</td></tr>
-<tr><td title="Configuration sane">Config sane <span class="info-ico" title="every node's own real, live-observed state (interfaces, sockets, ...) checked against what's actually configured/intended — separate from State above, which is FSM/quorum health only">ⓘ</span></td><td class="{{.ConfigSaneClass}}"{{if .ConfigSaneTitle}} title="{{.ConfigSaneTitle}}"{{end}}>{{.ConfigSaneText}}</td></tr>
-<tr><td>Interfaces <span class="info-ico" title="physical trunk carrier state (link up/down) per node — a link-down trunk force-closes DHCP for every scope on it">ⓘ</span></td><td class="{{.InterfaceHealthClass}}">{{.InterfaceHealthText}}</td></tr>
-<tr><td>Trunks <span class="info-ico" title="every configured trunk on every stable core: verified once that node has heard a topology beacon from another core on it, assumed while nothing has been heard (the configured interface name is then unconfirmed)">ⓘ</span></td><td class="{{.TrunksClass}}"{{if .TrunksTitle}} title="{{.TrunksTitle}}"{{end}}>{{.TrunksText}}</td></tr>
-<tr><td>Arbiter quorum <span class="info-ico" title="every core node also runs its own arbiter instance since 0.9.8 — a witness grant needs 2 of these 3 to agree, so this is 'who is arbiter now', not a single node">ⓘ</span></td><td class="{{.ArbiterQuorumClass}}">{{.ArbiterQuorumText}}</td></tr>
-<tr><td>Witness <span class="info-ico" title="the time-limited token that authorizes a node to keep a scope's DHCP gate open — renewed continuously while healthy; a node that stops renewing (crash, network loss) has its gate close automatically once its current token expires, which is what actually prevents two nodes serving the same scope at once. Shown: witness state, then how many tokens are active">ⓘ</span></td><td class="st">{{.Witness}} · {{.ActiveTokens}} active</td></tr>
-<tr><td>Daemons <span class="info-ico" title="systemd unit health (dnshived itself, dnsmasq, keepalived, relays, ...) on every node — a daemon issue here is independent of State above: a unit can be unhealthy while the cluster's own quorum/serving logic stays fine, and vice versa">ⓘ</span></td><td class="{{.DaemonSummaryClass}}">{{.DaemonSummary}} <a href="/daemons">details →</a></td></tr>
-</table>
+<ul class="card-list checks">
+<li class="{{.ClusterClass}}" title="the cluster's own quorum/failover state machine: STABLE means every serving decision has settled and held for the required settling window; DEGRADED/GETTING THERE/NOT CONVERGING mean scopes are still starting, rebalancing, or stuck — not necessarily an outage, but worth watching"><b>State</b> {{.ClusterState}}</li>
+<li class="{{.ConfigSaneClass}}" title="{{if .ConfigSaneTitle}}{{.ConfigSaneTitle}}{{else}}every node's own live-observed state (interfaces, sockets, ...) checked against what is configured; separate from State, which is FSM/quorum health only{{end}}"><b>Config sane</b> {{.ConfigSaneText}}</li>
+<li class="{{.InterfaceHealthClass}}" title="physical trunk carrier state (link up/down) per node; a link-down trunk force-closes DHCP for every scope on it"><b>Interfaces</b> {{.InterfaceHealthText}}</li>
+<li class="{{.TrunksClass}}" title="{{if .TrunksTitle}}{{.TrunksTitle}}{{else}}every configured trunk on every stable core: verified once that node has heard a topology beacon from another core on it, assumed while nothing has been heard{{end}}"><b>Trunks</b> {{.TrunksText}}</li>
+<li class="{{.ArbiterQuorumClass}}" title="every core node also runs its own arbiter instance; a witness grant needs 2 of these 3 to agree, so this is who is arbiter now, not a single node"><b>Arbiter quorum</b> {{.ArbiterQuorumText}}</li>
+<li class="{{if eq .Witness "healthy"}}ok{{else}}warn{{end}}" title="the time-limited token that authorizes a node to keep a scope's DHCP gate open — renewed continuously while healthy; a node that stops renewing (crash, network loss) has its gate close automatically once its current token expires, which is what actually prevents two nodes serving the same scope at once. Shown: witness state, then how many tokens are active"><b>Witness</b> {{.Witness}} · {{.ActiveTokens}} active</li>
+<li class="{{.DaemonSummaryClass}}" title="systemd unit health (dnshived itself, dnsmasq, keepalived, relays, ...) on every node; independent of State: a unit can be unhealthy while the cluster's own quorum logic stays fine, and vice versa"><b>Daemons</b> {{.DaemonSummary}} <a href="/daemons">details →</a></li>
+</ul>
 </section>
 </div>
 
@@ -1425,6 +1455,7 @@ type overviewData struct {
 	Mismatch             bool
 	ConfigMismatch       bool
 	BannerText           string
+	BannerDetail         string
 	BannerClass          string
 	ClusterState         string
 	ClusterClass         string
@@ -1850,6 +1881,7 @@ func handleStatus(ref *configRef) http.HandlerFunc {
 			Mismatch:             scopesMismatch(rows),
 			ConfigMismatch:       configHashMismatch(rows),
 			BannerText:           bannerT,
+			BannerDetail:         bannerDetail(reachable, total, len(probeHostRows), rows),
 			BannerClass:          bannerC,
 			ClusterState:         overallState,
 			ClusterClass:         overallClass,

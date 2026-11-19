@@ -91,14 +91,15 @@ var backupTmpl = template.Must(template.New("backup").Parse(`<!doctype html>
 <strong>{{.ClusterID}}</strong>).</p>
 
 <div class="tab-host">
-<section class="tab-pane" id="tab-export" data-tab="Export" data-tab-order="3">
+<section class="tab-pane" id="tab-export" data-tab="Export &amp; import" data-tab-order="3">
 <h2>Export</h2>
 <p>
 <a href="/config/export?mode=all">Export all</a> —
 <a href="/config/export?mode=cluster">Export cluster identity</a> (no scopes) —
 <a href="/config/export?mode=scopes">Export scopes only</a> (no PSK/tokens)
 </p>
-
+<h2>Import</h2>
+<p class="dim">Not built yet — no design exists for this either.</p>
 </section>
 <section class="tab-pane" id="tab-backup" data-tab="Backup" data-tab-order="1" data-tab-default>
 <h2>Backup</h2>
@@ -198,10 +199,6 @@ uploaded backup and stages the difference against the current live
 config as an ordinary pending change, reviewed and committed exactly
 like any other config edit.</p>
 
-</section>
-<section class="tab-pane" id="tab-import" data-tab="Import" data-tab-order="4">
-<h2>Import</h2>
-<p class="dim">Not built yet — no design exists for this either.</p>
 </section>
 </div>
 `))
