@@ -352,7 +352,7 @@ func TestScopesTmpl_ProbeColumn_GatedOnHasProbeHosts(t *testing.T) {
 	if err := scopesTmpl.Execute(&buf, without); err != nil {
 		t.Fatalf("scopesTmpl.Execute failed: %v", err)
 	}
-	if strings.Contains(buf.String(), ">Probe<span") || strings.Contains(buf.String(), "DHCP✔") {
+	if strings.Contains(buf.String(), ">Probe<span") || strings.Contains(buf.String(), "✔ DHCP") {
 		t.Error("expected no Probe column at all when HasProbeHosts is false")
 	}
 
@@ -365,7 +365,7 @@ func TestScopesTmpl_ProbeColumn_GatedOnHasProbeHosts(t *testing.T) {
 	if !strings.Contains(out, ">Probe<span") {
 		t.Error("expected a Probe column header when HasProbeHosts is true")
 	}
-	if !strings.Contains(out, "DHCP✔") {
+	if !strings.Contains(out, "✔ DHCP") {
 		t.Errorf("expected the probe cell's short DHCP status rendered, got: %s", out)
 	}
 }
@@ -1872,5 +1872,25 @@ func TestBuildScopeRows_PreferredNodeMarkerAndRebalanceNote(t *testing.T) {
 				t.Errorf("OffPreferred/RebalanceNote = %v/%q, want %v/%q", r.OffPreferred, r.RebalanceNote, tt.off, tt.note)
 			}
 		})
+	}
+}
+
+func TestChipText_MovesTheMarkToTheFront(t *testing.T) {
+	for in, want := range map[string]string{"DNS✔": "✔ DNS", "DHCP✖": "✖ DHCP", "DNS…": "… DNS", "DHCP?": "? DHCP", "pending...": "pending..."} {
+		if got := chipText(in); got != want {
+			t.Errorf("chipText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestChipIcon(t *testing.T) {
+	if chipIcon("ok", "active") != "✔" || chipIcon("crit", "EXPIRED") != "✖" || chipIcon("warn", "disabled") != "○" || chipIcon("warn", "x") != "…" || chipIcon("dim", "x") != "·" {
+		t.Error("status marks changed")
+	}
+}
+
+func TestNodeDotClass(t *testing.T) {
+	if nodeDotClass("core-2") != "node-core-2" || nodeDotClass("—") != "" || nodeDotClass("") != "" {
+		t.Error("only core names get a node colour")
 	}
 }

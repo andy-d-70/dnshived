@@ -508,3 +508,11 @@ func TestStyleHTML_TabHashDecodeCannotThrow(t *testing.T) {
 		t.Error("dnshivedInitTabs must fall back to the raw fragment when it cannot be decoded")
 	}
 }
+
+func TestNavHTML_HasThemeButtonAndAccountMenu(t *testing.T) {
+	for _, want := range []string{`id="theme_switcher"`, `class="user-menu"`, `href="/password"`, `action="/logout"`, `id="user-name"`} {
+		if !strings.Contains(navHTML, want) {
+			t.Errorf("the nav lacks %q", want)
+		}
+	}
+}

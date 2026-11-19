@@ -136,10 +136,10 @@ func TestScopesTmpl_PreferredNodeMarkerKeepsItsSlot(t *testing.T) {
 	if got := strings.Count(out, `class="pref-slot"`); got != 2 {
 		t.Errorf("every row keeps the marker slot, got %d slots for 2 rows", got)
 	}
-	if got := strings.Count(out, "&ne;"); got != 1 {
+	if got := strings.Count(out, `class="offpref"`); got != 1 {
 		t.Errorf("only the off-preferred row shows the marker, got %d", got)
 	}
-	if !strings.Contains(out, `title="not on its preferred node: served by core-2, preferred is core-1"`) {
+	if !strings.Contains(out, `title="not on its preferred node: served by core-2, preferred is core-1. Use Rebalance to move it back."`) {
 		t.Error("the marker needs a tooltip naming both nodes")
 	}
 }

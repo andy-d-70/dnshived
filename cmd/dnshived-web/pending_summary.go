@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -158,10 +159,8 @@ func refreshPendingHasChanges(ref *configRef) {
 func handlePendingSummary() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if pendingHasChanges.Load() {
-			w.Write([]byte(`{"hasChanges":true}`))
-		} else {
-			w.Write([]byte(`{"hasChanges":false}`))
-		}
+		user, _ := userFromContext(r)
+		name, _ := json.Marshal(user.Name)
+		fmt.Fprintf(w, `{"hasChanges":%t,"user":%s}`, pendingHasChanges.Load(), name)
 	}
 }

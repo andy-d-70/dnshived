@@ -122,6 +122,34 @@ window.addEventListener('resize',function(){closeAll(null)});
 })();
 </script>`
 
+// chipIcon is the leading mark of a status pill for a .ok/.warn/.crit class.
+func chipIcon(class, text string) string {
+	switch class {
+	case "ok":
+		return "✔"
+	case "crit":
+		return "✖"
+	case "warn":
+		if text == "disabled" {
+			return "○"
+		}
+		return "…"
+	}
+	return "·"
+}
+
+// nodeDotClass is the node-colour class for a core name, "" for anything else.
+func nodeDotClass(name string) string {
+	switch name {
+	case config.RoleCore1, config.RoleCore2, config.RoleCore3:
+		return roleClass(name)
+	}
+	return ""
+}
+
+func (r scopeRow) StatusIcon() string { return chipIcon(r.Class, r.Status) }
+func (r scopeRow) TokenClass() string { return nodeDotClass(r.Token) }
+
 var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
 <title>dnshived-web — scopes</title>
 ` + styleHTML + `
@@ -140,18 +168,18 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
 {{template "pagerbar" .PagerTop}}
 <div class="table-wrap">
 <table class="scope-table list-table" border="1" cellpadding="4" cellspacing="0">
-<colgroup>{{if .HasProbeHosts}}<col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:6%"><col style="width:10%"><col style="width:11%"><col style="width:7%"><col style="width:10%"><col style="width:22rem"><col style="width:3.5rem">{{else}}<col style="width:14%"><col style="width:9%"><col style="width:12%"><col style="width:7%"><col style="width:15%"><col style="width:12%"><col style="width:10%"><col style="width:17%"><col style="width:3.5rem">{{end}}</colgroup>
+<colgroup>{{if .HasProbeHosts}}<col style="width:8%"><col style="width:10%"><col style="width:8%"><col style="width:6%"><col style="width:10%"><col style="width:9%"><col style="width:8%"><col style="width:9%"><col style="width:22rem"><col style="width:3.5rem">{{else}}<col style="width:14%"><col style="width:9%"><col style="width:12%"><col style="width:7%"><col style="width:15%"><col style="width:12%"><col style="width:10%"><col style="width:17%"><col style="width:3.5rem">{{end}}</colgroup>
 <tr>{{range .Headers}}<th aria-sort="{{.AriaSort}}" style="white-space:nowrap;vertical-align:middle"{{if .Title}} title="{{.Title}}"{{end}}><a href="{{.URL}}" style="color:inherit;text-decoration:none">{{.Label}}<span style="display:inline-block;width:1em">{{.Arrow}}</span></a></th>{{end}}<th></th></tr>
 {{range .Rows}}{{$name := .Name}}
 <tr>
   <td style="white-space:nowrap">{{if .Color}}<span class="name-dot" style="background:{{.Color}}" title="color tag — change on the scope's own edit page"></span>{{end}}<a href="/scopes/{{.Name}}">{{.Display}}</a>{{if .PendingDelete}} <span class="crit" title="a pending change stages this scope's removal — still live and served until you commit from Pending changes">marked for deletion</span>{{end}}</td>
-  <td class="{{.WorkerClass}}">{{.Worker}}<span class="pref-slot">{{if .OffPreferred}}<span class="warn" title="not on its preferred node: served by {{.Worker}}, preferred is {{.Preferred}}">&ne;</span>{{end}}</span></td>
+  <td style="white-space:nowrap">{{if ne .Worker "—"}}<i class="dot {{.WorkerClass}}"></i>{{.Worker}}{{else}}<span class="dim">—</span>{{end}}<span class="pref-slot">{{if .OffPreferred}}<span class="offpref" title="not on its preferred node: served by {{.Worker}}, preferred is {{.Preferred}}. Use Rebalance to move it back.">&hookrightarrow; {{.Preferred}}</span>{{end}}</span></td>
   <td title="{{.Worker}}'s trunk NIC ({{.ParentInterface}}), VLAN-tagged for this scope">{{.Interface}}</td>
   <td>{{.VLANID}}</td>
   <td>{{.Subnet}}</td>
-  <td>{{.Token}}</td>
-  <td class="{{.Class}}"{{if .StatusTitle}} title="{{.StatusTitle}}"{{end}}>{{.Status}}</td>
-  <td style="white-space:nowrap">{{if gt .PoolSize 0}}<span class="pool-bar"><span class="pool-fill {{.PoolClass}}" style="width:{{.PoolUsagePct}}%"></span></span><span class="{{.PoolClass}}" title="{{.PoolUsed}} of {{.PoolSize}} addresses in use">{{.PoolUsed}}/{{.PoolSize}}</span>{{else}}<span class="dim">—</span>{{end}}</td>
+  <td style="white-space:nowrap">{{if .TokenClass}}<i class="dot {{.TokenClass}}"></i>{{end}}{{.Token}}</td>
+  <td style="white-space:nowrap"><span class="chip {{.Class}}"{{if .StatusTitle}} title="{{.StatusTitle}}"{{end}}>{{.StatusIcon}} {{.Status}}</span></td>
+  <td style="white-space:nowrap">{{if gt .PoolSize 0}}<span class="pool-bar"><span class="pool-fill {{.PoolClass}}" style="width:{{.PoolUsagePct}}%"></span></span><span class="{{.PoolClass}}" title="{{.PoolUsed}} of {{.PoolSize}} addresses in use">{{.PoolUsagePct}} %</span>{{else}}<span class="dim">—</span>{{end}}</td>
   {{if $.HasProbeHosts}}<td style="white-space:nowrap;font-variant-numeric:tabular-nums">{{range .ProbeCells}}{{template "probecell" .}}{{end}}</td>{{end}}
   <td style="width:3rem;text-align:center"><details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.Name}}">&#9776;</summary>
   <div class="row-menu-list" role="menu">

@@ -243,14 +243,17 @@ const navHTML = `<script>document.documentElement.classList.add('js')</script>
 <a href="/logs" class="nav-item" title="system log, audit log, daemons" data-match="/logs,/audit,/daemons"><span class="nav-name">Logs</span></a>
 </nav>
 <a href="/pending" class="nav-item nav-pending-btn" title="review and commit staged changes" data-match="/pending"><span class="nav-name">Pending changes<span id="pending-marker" title="a change is staged and waiting to be committed" style="visibility:hidden;margin-left:.3rem">&#9679;</span></span></a>
-<button type="button" id="theme_switcher" class="nav-theme-select" onclick="dnshivedCycleTheme()" title="color scheme — click to cycle">Normal</button>
-<form method="post" action="/logout" style="margin:0;display:flex"><button type="submit" class="nav-theme-select" title="end this web-UI session">Log out</button></form>
+<button type="button" id="theme_switcher" class="nav-theme-select" onclick="dnshivedCycleTheme()" title="color scheme — click to cycle">Theme</button>
+<details class="user-menu" id="user-menu"><summary class="nav-theme-select" title="your account"><span id="user-name">Account</span><span aria-hidden="true">&#9662;</span></summary>
+<div class="user-menu-list"><a href="/password">Change password</a><form method="post" action="/logout"><button type="submit" title="end this web-UI session">Log out</button></form></div></details>
 </div>
 <script>
+document.addEventListener('click',function(e){var m=document.getElementById('user-menu');if(m&&m.open&&!m.contains(e.target)){m.removeAttribute('open')}});
 function pollPendingMarker(){
   if(document.hidden) return;
   fetch('/api/pending-summary').then(function(r){return r.json();}).then(function(d){
     var m=document.getElementById('pending-marker');
+    var u=document.getElementById('user-name');if(u&&d.user){u.textContent=d.user;u.title=d.user}
     if(d.hasChanges){
       m.className='warn';
       m.style.visibility='visible';
@@ -286,7 +289,7 @@ function dnshivedApplyTheme(t){
   if(t==='normal'){ document.documentElement.removeAttribute('data-theme'); }
   else { document.documentElement.setAttribute('data-theme', t); }
   var btn=document.getElementById('theme_switcher');
-  if(btn) btn.textContent=DNSHIVED_THEME_LABELS[t]||'Normal';
+  if(btn) btn.title='color scheme: '+(DNSHIVED_THEME_LABELS[t]||'Normal')+' — click to cycle';
 }
 (function(){
   try{ dnshivedApplyTheme(localStorage.getItem('dnshived-theme')||'normal'); }catch(e){}
@@ -541,8 +544,8 @@ const styleHTML = `<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 --accent:#2563eb;--head:#eaedf2;
 --ok:#0a7a34;--warn:#955806;--crit:#c0392b;
 --on-accent:#fff;--on-ok:#fff;--on-warn:#fff;--on-crit:#fff;
---core-1:#c00;--core-2:#06c;--core-3:#000;--worker-probe:#080;
---tint-1:#fdf2f1;--tint-2:#f0f6fd;--tint-3:#f0f0f0;--tint-crit:#fdeceb;
+--core-1:#6d3fd1;--core-2:#0b7f8f;--core-3:#8a5a2b;--worker-probe:#080;
+--tint-1:#f3eefc;--tint-2:#ebf6f7;--tint-3:#f7f0e8;--tint-crit:#fdeceb;
 /* --nav-h is the sticky nav's height; other sticky elements offset below it. */
 --nav-h:4.8rem;
 }
@@ -551,16 +554,16 @@ const styleHTML = `<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 --accent:#0057e6;--head:#d2e8ff;
 --ok:#006b27;--warn:#8f5200;--crit:#b8231a;
 --on-accent:#fff;--on-ok:#fff;--on-warn:#fff;--on-crit:#fff;
---core-1:#c40d0d;--core-2:#0058a8;--core-3:#111;--worker-probe:#006b27;
---tint-1:#ffd9d4;--tint-2:#cfe9ff;--tint-3:#dcdcdc;--tint-crit:#ffd6d0;
+--core-1:#6d3fd1;--core-2:#0b7f8f;--core-3:#8a5a2b;--worker-probe:#006b27;
+--tint-1:#e3d8fa;--tint-2:#cdeaee;--tint-3:#eadccb;--tint-crit:#ffd6d0;
 }
 :root[data-theme="dark"]{
 --bg:#0f1318;--panel:#171c23;--border:#2a323d;--text:#e7ebf0;--muted:#8f9bab;
 --accent:#5b9dff;--head:#20262f;
 --ok:#3ddc84;--warn:#ffb84d;--crit:#ff6b6b;
 --on-accent:#0b1220;--on-ok:#0b1220;--on-warn:#0b1220;--on-crit:#0b1220;
---core-1:#ff6b6b;--core-2:#5b9dff;--core-3:#e7ebf0;--worker-probe:#3ddc84;
---tint-1:rgba(255,107,107,.14);--tint-2:rgba(91,157,255,.14);--tint-3:rgba(231,235,240,.14);--tint-crit:rgba(255,107,107,.14);
+--core-1:#b794ff;--core-2:#4fd1e0;--core-3:#d4a373;--worker-probe:#3ddc84;
+--tint-1:rgba(183,148,255,.14);--tint-2:rgba(79,209,224,.14);--tint-3:rgba(212,163,115,.14);--tint-crit:rgba(255,107,107,.14);
 }
 *{box-sizing:border-box}
 html{font-size:14.5px}
@@ -603,6 +606,16 @@ display:inline-flex;align-items:center;justify-content:center;white-space:nowrap
 .nav-theme-select{flex-shrink:0;align-self:center}
 /* the label changes with the theme; a fixed width keeps the buttons beside it from moving */
 #theme_switcher{width:5.6rem;text-align:center}
+.nav-outer .nav-theme-select{background:var(--panel);color:var(--text);border-color:var(--border);cursor:pointer}
+.nav-outer .nav-theme-select:hover{background:var(--head)}
+.user-menu{position:relative;flex-shrink:0;align-self:center;border:0;background:transparent;box-shadow:none;padding:0;margin:0}
+.user-menu>summary{list-style:none;width:9rem;justify-content:space-between;gap:.4rem}
+.user-menu>summary::-webkit-details-marker{display:none}
+#user-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.user-menu-list{position:absolute;right:0;top:calc(100% + 4px);min-width:100%;z-index:30;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,.18);padding:.3rem}
+.user-menu-list a,.user-menu-list button{display:block;width:100%;text-align:left;font:inherit;color:var(--text);background:transparent;border:0;border-radius:6px;padding:.4rem .6rem;cursor:pointer;text-decoration:none;white-space:nowrap}
+.user-menu-list a:hover,.user-menu-list button:hover{background:var(--head);text-decoration:none}
+.user-menu-list form{margin:0}
 /* below this width the items fold into the Menu button; the brand stays visible */
 @media (max-width:1180px){
 nav .nav-item:not(.brand),nav .nav-sep{display:none}
@@ -819,6 +832,14 @@ overflow:hidden;vertical-align:middle;margin-right:.4rem}
 .pool-fill.ok{background:var(--ok)}
 .pool-fill.warn{background:var(--warn)}
 .pool-fill.crit{background:var(--crit)}
+.dot{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:.35rem;background:currentColor;vertical-align:baseline}
+.chip{display:inline-flex;align-items:center;gap:.25rem;padding:.05rem .55rem;border-radius:999px;border:1px solid var(--border);font-size:.86em;white-space:nowrap;background:var(--panel);font-weight:600}
+.chip.ok{background:color-mix(in srgb,var(--ok) 13%,transparent);border-color:transparent;color:var(--ok)}
+.chip.warn{background:color-mix(in srgb,var(--warn) 15%,transparent);border-color:transparent;color:var(--warn)}
+.chip.crit{background:color-mix(in srgb,var(--crit) 13%,transparent);border-color:transparent;color:var(--crit)}
+.chip.dim{color:var(--muted)}
+.offpref{display:inline-block;margin-left:.3rem;padding:0 .4rem;border:1px solid var(--warn);border-radius:999px;color:var(--warn);font-size:.8em;white-space:nowrap}
+.pc-act .probe-now-form button.btn-sm{background:var(--panel);color:var(--text);border:1px solid var(--border);font-weight:600}
 .node-core-1{color:var(--core-1)}
 .node-core-2{color:var(--core-2)}
 .node-core-3{color:var(--core-3)}

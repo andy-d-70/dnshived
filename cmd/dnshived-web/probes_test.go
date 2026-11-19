@@ -44,7 +44,7 @@ func TestProbesTmpl_RendersWithProbeHostColumns(t *testing.T) {
 	if !strings.Contains(out, "from probe-a") || !strings.Contains(out, "from probe-b") {
 		t.Error("expected probe-host column headers to render")
 	}
-	if !strings.Contains(out, "DNS✖") || !strings.Contains(out, "DHCP-NONE") || !strings.Contains(out, "unreachable") {
+	if !strings.Contains(out, "✖ DNS") || !strings.Contains(out, "DHCP-NONE") || !strings.Contains(out, "unreachable") {
 		t.Error("expected probe-b's cell content and note to render")
 	}
 }

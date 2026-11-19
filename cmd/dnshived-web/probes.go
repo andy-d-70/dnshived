@@ -624,6 +624,25 @@ func (r probeRow) Result() probeRowResult {
 
 type probeRowResult struct{ Text, Class string }
 
+func (r probeRowResult) Icon() string { return chipIcon(r.Class, r.Text) }
+
+func (r probeRow) StatusIcon() string { return chipIcon(r.Class, r.Status) }
+func (r probeRow) TokenClass() string { return nodeDotClass(r.Token) }
+
+// chipText moves a trailing mark of a probe label to the front: "DNS✔" is
+// shown as "✔ DNS".
+func chipText(s string) string {
+	for _, m := range []string{"✔", "✖", "…", "?"} {
+		if strings.HasSuffix(s, m) {
+			return m + " " + strings.TrimSuffix(s, m)
+		}
+	}
+	return s
+}
+
+func (c probeCellData) DNSChip() string  { return chipText(c.DNSText) }
+func (c probeCellData) DHCPChip() string { return chipText(c.DHCPText) }
+
 func (r probeRow) hasPending() bool {
 	for _, c := range r.ProbeHostCells {
 		if c.DNSText == "pending..." || c.DHCPText == "pending..." || strings.Contains(c.Note, "not probed yet") {
@@ -649,7 +668,7 @@ type probeCellData struct {
 const probeAutoRefreshSeconds = 20
 
 // probeCellDefineHTML is the "probecell" named template.
-const probeCellDefineHTML = `{{define "probecell"}}<div class="probe-cell"><span class="pc-text"><span class="{{.DNSClass}}"{{if .Title}} title="{{.Title}}"{{end}}>{{.DNSText}}</span>{{if .DHCPText}} <span class="{{.DHCPClass}}">{{.DHCPText}}</span>{{end}}{{if .Note}} <span class="dim">({{.Note}})</span>{{end}}</span><span class="pc-act"><a class="dim probe-detail" href="/probes/{{.Scope}}/{{.Worker}}">detail</a><form class="probe-now-form" method="post" action="/probes/{{.Scope}}/{{.Worker}}/refresh"><button type="submit" class="btn-sm">probe now</button></form></span></div>{{end}}`
+const probeCellDefineHTML = `{{define "probecell"}}<div class="probe-cell"><span class="pc-text"><span class="chip {{.DNSClass}}"{{if .Title}} title="{{.Title}}"{{end}}>{{.DNSChip}}</span>{{if .DHCPText}} <span class="chip {{.DHCPClass}}">{{.DHCPChip}}</span>{{end}}{{if .Note}} <span class="dim">({{.Note}})</span>{{end}}</span><span class="pc-act"><a class="dim probe-detail" href="/probes/{{.Scope}}/{{.Worker}}">detail</a><form class="probe-now-form" method="post" action="/probes/{{.Scope}}/{{.Worker}}/refresh"><button type="submit" class="btn-sm">probe now</button></form></span></div>{{end}}`
 
 // probePopupHTML is the dialog and the script that fill it with the probe
 // detail; without JavaScript the "detail" link and "probe now" still open the
@@ -880,18 +899,18 @@ function addSelectedDNSChecks(){
 var probesTmpl = template.Must(template.New("probes").Parse(`` + probeCellDefineHTML + pagerBarDefineHTML + `{{define "probe-results-body"}}{{template "pagerbar" .PagerTop}}
 <div class="table-wrap">
 <table class="list-table probe-table" border="1" cellpadding="4" cellspacing="0">
-<colgroup><col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:6%"><col style="width:10%"><col style="width:11%"><col style="width:7%"><col style="width:10%">{{range .ProbeHostNames}}<col style="width:22rem">{{end}}<col style="width:3.5rem"></colgroup>
+<colgroup><col style="width:8%"><col style="width:10%"><col style="width:8%"><col style="width:6%"><col style="width:10%"><col style="width:9%"><col style="width:8%"><col style="width:9%">{{range .ProbeHostNames}}<col style="width:22rem">{{end}}<col style="width:3.5rem"></colgroup>
 <tr><th>Scope</th><th>Worker</th><th>Interface</th><th>VLAN</th><th>Subnet</th><th>Token Owner</th><th>Status</th><th>Result</th>{{range .ProbeHostNames}}<th>from {{.}}</th>{{end}}<th></th></tr>
 {{range .Rows}}
 <tr>
   <td><a href="/scopes/{{.Name}}">{{.Scope}}</a></td>
-  <td class="{{.WorkerClass}}">{{.Worker}}</td>
+  <td style="white-space:nowrap">{{if ne .Worker "—"}}<i class="dot {{.WorkerClass}}"></i>{{.Worker}}{{else}}<span class="dim">—</span>{{end}}</td>
   <td>{{.Interface}}</td>
   <td>{{.VLANID}}</td>
   <td>{{.Subnet}}</td>
-  <td>{{.Token}}</td>
-  <td class="{{.Class}}"{{if .StatusTitle}} title="{{.StatusTitle}}"{{end}}>{{.Status}}</td>
-  {{with .Result}}<td class="{{.Class}}">{{.Text}}</td>{{end}}
+  <td style="white-space:nowrap">{{if .TokenClass}}<i class="dot {{.TokenClass}}"></i>{{end}}{{.Token}}</td>
+  <td style="white-space:nowrap"><span class="chip {{.Class}}"{{if .StatusTitle}} title="{{.StatusTitle}}"{{end}}>{{.StatusIcon}} {{.Status}}</span></td>
+  {{with .Result}}<td style="white-space:nowrap"><span class="chip {{.Class}}">{{.Icon}} {{.Text}}</span></td>{{end}}
   {{range .ProbeHostCells}}<td>{{template "probecell" .}}</td>{{end}}
   <td style="width:3rem;text-align:center"><details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.Name}}">&#9776;</summary>
   <div class="row-menu-list" role="menu">

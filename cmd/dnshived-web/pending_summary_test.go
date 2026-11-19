@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -241,4 +242,16 @@ func BenchmarkPendingTick(b *testing.B) {
 			}
 		}
 	})
+}
+
+func TestHandlePendingSummary_CarriesAValidUserField(t *testing.T) {
+	rec := httptest.NewRecorder()
+	handlePendingSummary()(rec, httptest.NewRequest(http.MethodGet, "/api/pending-summary", nil))
+	var got struct {
+		HasChanges bool   `json:"hasChanges"`
+		User       string `json:"user"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("the summary must stay valid JSON: %v (%s)", err, rec.Body.String())
+	}
 }

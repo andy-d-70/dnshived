@@ -38,6 +38,8 @@
 
 **Fixed**
 
+- Web UI: the menu bar's right side has a Theme button and an account menu with your name, Change password and Log out.
+- Web UI: the Scopes and Probes lists show the status as a coloured pill, the worker and token owner with a dot in the node's colour (core-1 purple, core-2 teal, core-3 brown, no longer red, blue and black), the preferred node as a "↪ core" pill when a scope is served elsewhere, the pool as a bar with a percentage, and the probe result as DNS and DHCP pills.
 - Web UI: the Probes results table follows the same layout as the Scopes table (same columns and widths, a result column, a row menu with probe now and details), and its menu keeps working after the table refreshes itself. The manual probes list has a row menu and an "Add a manual probe" card, the probe history settings use segmented controls, and the pages are centered in wide windows.
 - Web UI: the top menu stays where it is when a long page scrolls instead of moving up a little, and a strip of page background keeps scrolled content a little above the footer.
 - The "CLOCK SKEW" warning could appear for all nodes at once because cached node data looked old. It now needs two fresh readings in a row, names the node it compares against, and is logged when it is raised and cleared.
