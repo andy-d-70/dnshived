@@ -690,6 +690,14 @@ var bootstrapCommitTmpl = template.Must(template.New("bootstrap-commit").Parse(`
 {{if .StandaloneNote}}
 <p class="hint">This cluster has fewer than the usual 3 core nodes — it will serve standalone. Onboard the remaining core-1/core-2/core-3 role(s), and a probe host, whenever you're ready; nothing here needs to wait for them.</p>
 {{end}}
+{{if .ImportUsed}}
+<h2>After the import</h2>
+<ul>
+<li>Imported scopes are parked: open <strong>Scopes</strong> in the web UI and enable them (one by one, or all at once) when this cluster should serve them; nothing is built or served for them before.</li>
+<li>Probe hosts must be paired again, API clients and monitoring need the new token shown below, and web users must be created again: the file holds none of them.</li>
+<li>The other cores join this cluster with its join code.</li>
+</ul>
+{{end}}
 {{if .WebUILink}}
 <h2>Log in to the cluster</h2>
 <p>Web UI: <a href="{{.WebUILink}}">{{.WebUILink}}</a></p>
@@ -711,6 +719,7 @@ type bootstrapCommitData struct {
 	Results        []pushResult
 	AllOK          bool
 	StandaloneNote bool
+	ImportUsed     bool
 	WebUILink      string
 	WebUIUsername  string
 	WebUIPassword  string
@@ -734,6 +743,27 @@ func bootstrapCommitHandler(cfgPath string, state *builderState) http.HandlerFun
 		if err != nil {
 			http.Error(w, "generate secrets: "+err.Error(), http.StatusInternalServerError)
 			return
+		}
+		imp := state.importCopy()
+		if imp != nil && imp.keepID && imp.src.Cluster.ClusterID != "" {
+			secrets.ClusterID = imp.src.Cluster.ClusterID
+		}
+		if imp != nil {
+			selfNode := nodes[0]
+			for _, n := range coreNodes(nodes) {
+				if n.Self {
+					selfNode = n
+				}
+			}
+			probeCfg, err := buildClusterConfig(secrets, selfNode, nodes, mgmtSetup{})
+			if err == nil {
+				_, err = applyBootstrapImport(probeCfg, imp)
+			}
+			if err != nil {
+				loglevel.Warnf("[BOOTSTRAP:ERROR] the import file cannot be used: %v", err)
+				http.Error(w, "the import file cannot be used: "+err.Error(), http.StatusBadRequest)
+				return
+			}
 		}
 
 		webUsers, err := buildWebUICredentials(secrets.WebUIPassword)
@@ -789,6 +819,12 @@ func bootstrapCommitHandler(cfgPath string, state *builderState) http.HandlerFun
 			if err != nil {
 				results = append(results, pushResult{Addr: n.Addr, Role: n.Role, Self: n.Self, OK: false, Message: "build config: " + err.Error()})
 				continue
+			}
+			if imp != nil {
+				if cc, err = applyBootstrapImport(cc, imp); err != nil {
+					results = append(results, pushResult{Addr: n.Addr, Role: n.Role, Self: n.Self, OK: false, Message: "import: " + err.Error()})
+					continue
+				}
 			}
 			raw, err := json.MarshalIndent(cc, "", "  ")
 			if err != nil {
@@ -855,7 +891,7 @@ func bootstrapCommitHandler(cfgPath string, state *builderState) http.HandlerFun
 			}
 		}
 
-		data := bootstrapCommitData{Results: results, AllOK: allOK}
+		data := bootstrapCommitData{Results: results, AllOK: allOK, ImportUsed: imp != nil}
 		if allOK && !coreRolesComplete(nodes) {
 			data.StandaloneNote = true
 		}

@@ -99,6 +99,7 @@ func diffClusterFields(live, candidate config.Cluster) []clusterDiffEntry {
 	if !reflect.DeepEqual(live.Access, candidate.Access) {
 		out = append(out, accessDiffEntries(live.Access, candidate.Access)...)
 	}
+	out = append(out, parkedDiffEntries(live.ParkedScopes, candidate.ParkedScopes)...)
 	if !reflect.DeepEqual(live.DefaultDHCPOptions, candidate.DefaultDHCPOptions) {
 		added, removed := diffLines(live.DefaultDHCPOptions, candidate.DefaultDHCPOptions)
 		for _, d := range diffLineDetails(added, removed) {
@@ -794,4 +795,32 @@ func handlePendingDiscardScope(ref *configRef) http.HandlerFunc {
 		}
 		http.Redirect(w, r, "/pending", http.StatusSeeOther)
 	}
+}
+
+func parkedDiffEntries(live, candidate map[string]config.ScopeConfig) []clusterDiffEntry {
+	var out []clusterDiffEntry
+	for _, name := range sortedScopeKeys(candidate) {
+		old, had := live[name]
+		switch {
+		case !had:
+			out = append(out, clusterDiffEntry{"parked_scopes", "+ " + name + " (parked)"})
+		case !reflect.DeepEqual(old, candidate[name]):
+			out = append(out, clusterDiffEntry{"parked_scopes", "~ " + name + " (changed)"})
+		}
+	}
+	for _, name := range sortedScopeKeys(live) {
+		if _, kept := candidate[name]; !kept {
+			out = append(out, clusterDiffEntry{"parked_scopes", "- " + name + " (no longer parked)"})
+		}
+	}
+	return out
+}
+
+func sortedScopeKeys(m map[string]config.ScopeConfig) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

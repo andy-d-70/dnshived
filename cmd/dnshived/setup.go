@@ -56,6 +56,9 @@ type builderState struct {
 	// (internal/config.Cluster.Platform).
 	platformMgmt    string
 	platformWorkers []string
+
+	// imp is the optional export file the cluster starts from (setup_import.go).
+	imp *setupImport
 }
 
 func (b *builderState) setRole(role string) error {
@@ -305,6 +308,7 @@ type bootstrapSetupData struct {
 	Nodes             []clusterNode
 	ReadyToCommit     bool
 	Error             string
+	Import            *setupImportView
 }
 
 // newBootstrapSetupData builds bootstrapSetupData from the builder state's
@@ -369,6 +373,7 @@ func newBootstrapSetupData(hostname, controlPort string, state *builderState) bo
 		Roles:             setupRoles,
 		Nodes:             state.getNodes(),
 		ReadyToCommit:     hasAtLeastOneCoreNode(state.allNodes()),
+		Import:            state.importView(addr),
 	}
 }
 
@@ -509,6 +514,7 @@ var bootstrapSetupTmpl = template.Must(template.New("bootstrap-setup").Parse(`<!
 <li>Other nodes: {{if .Nodes}}<ul>{{range .Nodes}}<li>{{.Role}} at {{.Addr}}{{if .TrunkParent}} (trunk: {{.TrunkParent}}){{end}}{{template "detected" .}}</li>{{end}}</ul>{{else}}none — onboard peers and a probe host later{{end}}</li>
 </ul>
 <p>A single core node is a real, fully-supported starting point — optimal is 3 (core-1/core-2/core-3), but one does the job.</p>
+` + setupImportCardHTML + `
 {{if .ReadyToCommit}}
 <form method="post" action="/setup/commit">
 <button type="submit">Create cluster</button>

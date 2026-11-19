@@ -244,6 +244,9 @@ func newBootstrapMux(hostname, otp, cfgPath string, state *builderState, sess *b
 	mux.HandleFunc("POST /setup/mgmt-vip", bootstrapSessionMiddleware(sess, bootstrapSetMgmtVIPHandler(hostname, controlPort, state)))
 	mux.HandleFunc("POST /setup/tls", bootstrapSessionMiddleware(sess, bootstrapSetTLSHandler(hostname, controlPort, state)))
 	mux.HandleFunc("POST /setup/nodes", bootstrapSessionMiddleware(sess, bootstrapAddNodeHandler(hostname, controlPort, state)))
+	mux.HandleFunc("POST /setup/import/upload", bootstrapSessionMiddleware(sess, bootstrapImportUploadHandler(hostname, controlPort, state)))
+	mux.HandleFunc("POST /setup/import/choose", bootstrapSessionMiddleware(sess, bootstrapImportChooseHandler(hostname, controlPort, state)))
+	mux.HandleFunc("POST /setup/import/clear", bootstrapSessionMiddleware(sess, bootstrapImportClearHandler(state)))
 	mux.HandleFunc("POST /setup/commit", bootstrapSessionMiddleware(sess, bootstrapCommitHandler(cfgPath, state)))
 	return mux
 }

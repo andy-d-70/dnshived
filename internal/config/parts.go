@@ -27,6 +27,7 @@ const (
 	PartBase   = "base"
 	PartScope  = "scope"
 	PartDomain = "domain"
+	PartParked = "parked"
 )
 
 type PartRef struct {
@@ -69,6 +70,11 @@ func PartPath(kind, name string) (string, error) {
 			return "", fmt.Errorf("part scope %q: not a valid scope name", name)
 		}
 		return "scopes/" + name + ".json", nil
+	case PartParked:
+		if !ValidScopeName(name) {
+			return "", fmt.Errorf("part parked scope %q: not a valid scope name", name)
+		}
+		return "parked/" + name + ".json", nil
 	case PartDomain:
 		if !domainNamePattern.MatchString(name) {
 			return "", fmt.Errorf("part domain %q: not a valid domain name", name)
@@ -79,7 +85,7 @@ func PartPath(kind, name string) (string, error) {
 }
 
 func knownPartKind(kind string) bool {
-	return kind == PartBase || kind == PartScope || kind == PartDomain
+	return kind == PartBase || kind == PartScope || kind == PartDomain || kind == PartParked
 }
 
 func baseReplicated(c *Cluster) []byte {
@@ -87,7 +93,9 @@ func baseReplicated(c *Cluster) []byte {
 	if err != nil {
 		return nil
 	}
-	extra, err := json.Marshal(c.v2Extra())
+	x := c.v2Extra()
+	x.ParkedScopes = nil
+	extra, err := json.Marshal(x)
 	if err != nil {
 		return nil
 	}
@@ -117,7 +125,7 @@ func (c *Cluster) v2Extra() documentV2Extra {
 		SanityCheckDisabled: c.SanityCheckDisabled, BackupEnabled: c.BackupEnabled,
 		BackupIntervalHours: c.BackupIntervalHours, BackupRetentionCount: c.BackupRetentionCount,
 		BackupPassword: c.BackupPassword, BackupReplicateToPeers: c.BackupReplicateToPeers,
-		Access: c.Access,
+		Access: c.Access, ParkedScopes: normalizedParked(c.ParkedScopes),
 	}
 }
 
@@ -130,6 +138,7 @@ func (c *Cluster) Split() (Manifest, map[string][]byte, error) {
 	base := *c
 	base.Scopes = nil
 	base.LocalDomains = nil
+	base.ParkedScopes = nil
 	stored, err := json.MarshalIndent(&base, "", "  ")
 	if err != nil {
 		return Manifest{}, nil, fmt.Errorf("marshal base part: %w", err)
@@ -154,6 +163,25 @@ func (c *Cluster) Split() (Manifest, map[string][]byte, error) {
 		}
 		files[p] = stored
 		m.Parts = append(m.Parts, PartRef{Kind: PartScope, Name: name, Hash: shortHash(scopeReplicated(sc)), Size: len(stored)})
+	}
+
+	parkedNames := make([]string, 0, len(c.ParkedScopes))
+	for name := range c.ParkedScopes {
+		parkedNames = append(parkedNames, name)
+	}
+	sort.Strings(parkedNames)
+	for _, name := range parkedNames {
+		p, err := PartPath(PartParked, name)
+		if err != nil {
+			return Manifest{}, nil, err
+		}
+		sc := c.ParkedScopes[name]
+		stored, err := json.MarshalIndent(sc, "", "  ")
+		if err != nil {
+			return Manifest{}, nil, fmt.Errorf("marshal parked scope %s: %w", name, err)
+		}
+		files[p] = stored
+		m.Parts = append(m.Parts, PartRef{Kind: PartParked, Name: name, Hash: shortHash(scopeReplicated(sc)), Size: len(stored)})
 	}
 
 	for _, d := range c.LocalDomains {
@@ -183,7 +211,7 @@ func Assemble(m Manifest, read func(path string) ([]byte, error)) (*Cluster, err
 	}
 	var c *Cluster
 	seen := make(map[string]bool, len(m.Parts))
-	var scopes map[string]ScopeConfig
+	var scopes, parked map[string]ScopeConfig
 	var domains []LocalDomain
 	for _, ref := range m.Parts {
 		if !knownPartKind(ref.Kind) {
@@ -219,6 +247,16 @@ func Assemble(m Manifest, read func(path string) ([]byte, error)) (*Cluster, err
 			}
 			scopes[ref.Name] = sc
 			got = shortHash(scopeReplicated(sc))
+		case PartParked:
+			var sc ScopeConfig
+			if err := json.Unmarshal(data, &sc); err != nil {
+				return nil, fmt.Errorf("parse part %s: %w", path, err)
+			}
+			if parked == nil {
+				parked = map[string]ScopeConfig{}
+			}
+			parked[ref.Name] = sc
+			got = shortHash(scopeReplicated(sc))
 		case PartDomain:
 			var d LocalDomain
 			if err := json.Unmarshal(data, &d); err != nil {
@@ -238,6 +276,7 @@ func Assemble(m Manifest, read func(path string) ([]byte, error)) (*Cluster, err
 		return nil, errors.New("split config has no base part")
 	}
 	c.Scopes = scopes
+	c.ParkedScopes = parked
 	c.LocalDomains = domains
 	for _, ref := range m.Parts {
 		if ref.Kind == PartBase && shortHash(baseReplicated(c)) != ref.Hash {
@@ -341,7 +380,7 @@ func SaveSplit(dir string, c *Cluster) error {
 	if err := writeAtomic(filepath.Join(dir, manifestFileName), raw); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
 	}
-	for _, sub := range []string{"scopes", "domains"} {
+	for _, sub := range []string{"scopes", "domains", "parked"} {
 		entries, err := os.ReadDir(filepath.Join(dir, sub))
 		if err != nil {
 			continue

@@ -35,28 +35,29 @@ const newTokenSlots = 5
 // configPushPayload mirrors cmd/dnshived's configUpdate JSON shape exactly
 // (field-for-field).
 type configPushPayload struct {
-	PSK                   string                        `json:"psk"`
-	TrustedHosts          []string                      `json:"trusted_hosts"`
-	TLSCert               string                        `json:"tls_cert"`
-	TLSKey                string                        `json:"tls_key"`
-	APITokens             []config.APIToken             `json:"api_tokens"`
-	LogLevel              string                        `json:"log_level"`
-	HelperSocket          string                        `json:"helper_socket"`
-	Platform              *config.Platform              `json:"platform"`
-	Scopes                map[string]config.ScopeConfig `json:"scopes"`
-	ProbeIntervalMS       int                           `json:"probe_interval_ms"`
-	MgmtVIP               *config.MgmtVIPConfig         `json:"mgmt_vip"`
-	DefaultDNSChecks      []config.DNSCheck             `json:"default_dns_checks"`
-	GlobalDNSRecords      []config.DNSRecord            `json:"global_dns_records"`
-	LocalDomains          []config.LocalDomain          `json:"local_domains"`
-	ScopeDefaults         *config.ScopeDefaults         `json:"scope_defaults"`
-	DefaultDHCPOptions    []string                      `json:"default_dhcp_options"`
-	CoreDNSAddress        string                        `json:"core_dns_address"`
-	CoreDHCPAddress       string                        `json:"core_dhcp_address"`
-	CoreDNSQueryLogging   bool                          `json:"core_dns_query_logging"`
-	DNSRelayCacheSize     int                           `json:"dnsrelay_cache_size"`
-	DNSRelayCacheMaxBytes int                           `json:"dnsrelay_cache_max_bytes"`
-	SanityCheckDisabled   bool                          `json:"sanity_check_disabled"`
+	PSK                   string                         `json:"psk"`
+	TrustedHosts          []string                       `json:"trusted_hosts"`
+	TLSCert               string                         `json:"tls_cert"`
+	TLSKey                string                         `json:"tls_key"`
+	APITokens             []config.APIToken              `json:"api_tokens"`
+	LogLevel              string                         `json:"log_level"`
+	HelperSocket          string                         `json:"helper_socket"`
+	Platform              *config.Platform               `json:"platform"`
+	Scopes                map[string]config.ScopeConfig  `json:"scopes"`
+	ParkedScopes          *map[string]config.ScopeConfig `json:"parked_scopes,omitempty"`
+	ProbeIntervalMS       int                            `json:"probe_interval_ms"`
+	MgmtVIP               *config.MgmtVIPConfig          `json:"mgmt_vip"`
+	DefaultDNSChecks      []config.DNSCheck              `json:"default_dns_checks"`
+	GlobalDNSRecords      []config.DNSRecord             `json:"global_dns_records"`
+	LocalDomains          []config.LocalDomain           `json:"local_domains"`
+	ScopeDefaults         *config.ScopeDefaults          `json:"scope_defaults"`
+	DefaultDHCPOptions    []string                       `json:"default_dhcp_options"`
+	CoreDNSAddress        string                         `json:"core_dns_address"`
+	CoreDHCPAddress       string                         `json:"core_dhcp_address"`
+	CoreDNSQueryLogging   bool                           `json:"core_dns_query_logging"`
+	DNSRelayCacheSize     int                            `json:"dnsrelay_cache_size"`
+	DNSRelayCacheMaxBytes int                            `json:"dnsrelay_cache_max_bytes"`
+	SanityCheckDisabled   bool                           `json:"sanity_check_disabled"`
 
 	// Access is the access list; left out, the daemon keeps what it has.
 	Access json.RawMessage `json:"access,omitempty"`
@@ -241,6 +242,31 @@ func clusterOnlyExport(c config.Cluster) config.Cluster {
 	return c
 }
 
+// dataExport is the "data" export mode's shape: everything the cluster replicates (scopes, domains,
+// records, options, access list, settings) without identity or trust material, so the file can be
+// imported into any cluster, including a new one.
+func dataExport(c config.Cluster) config.Cluster {
+	c.NodeID, c.Role, c.ControlAddr, c.BindAddr, c.DataDir = "", "", "", "", ""
+	c.PSK, c.Peers, c.TrustedHosts = "", nil, nil
+	c.TLSCert, c.TLSKey, c.APITokens, c.HelperSocket = "", "", nil, ""
+	c.BackupPassword = ""
+	c.ConfigRevision, c.ConfigRevisionAt, c.ConfigRevisionOrigin, c.MembershipEpoch = 0, "", "", 0
+	c.OutageRulesActive, c.AccessListActive = false, false
+	scopes := make(map[string]config.ScopeConfig, len(c.Scopes))
+	for name, sc := range c.Scopes {
+		sc.NodeIP, sc.NodeIPOverrides, sc.RebalanceApprovedAt = "", nil, 0
+		scopes[name] = sc
+	}
+	c.Scopes = scopes
+	parked := make(map[string]config.ScopeConfig, len(c.ParkedScopes))
+	for name, sc := range c.ParkedScopes {
+		sc.NodeIP, sc.NodeIPOverrides, sc.RebalanceApprovedAt = "", nil, 0
+		parked[name] = sc
+	}
+	c.ParkedScopes = parked
+	return c
+}
+
 // exportFilename builds a descriptive, collision-resistant download
 // filename.
 func exportFilename(clusterID, mode string) string {
@@ -258,8 +284,8 @@ func handleConfigExport(ref *configRef) http.HandlerFunc {
 		if mode == "" {
 			mode = "all"
 		}
-		if mode != "all" && mode != "cluster" && mode != "scopes" {
-			http.Error(w, "unknown mode — want all, cluster, or scopes", http.StatusBadRequest)
+		if mode != "all" && mode != "cluster" && mode != "scopes" && mode != "data" {
+			http.Error(w, "unknown mode — want all, cluster, scopes or data", http.StatusBadRequest)
 			return
 		}
 
@@ -275,6 +301,8 @@ func handleConfigExport(ref *configRef) http.HandlerFunc {
 			body = c
 		case "cluster":
 			body = clusterOnlyExport(c)
+		case "data":
+			body = dataExport(c)
 		case "scopes":
 			body = scopesExport{ClusterID: c.ClusterID, SourceNode: node.Name, Scopes: c.Scopes}
 		}
@@ -1171,9 +1199,13 @@ func parentChoices(c config.Cluster) []string {
 // already-loaded config.Cluster into a configPushPayload UNEDITED.
 func clusterPushPayloadFrom(c config.Cluster) configPushPayload {
 	access, _ := marshalAccess(c.Access)
+	parked := make(map[string]config.ScopeConfig, len(c.ParkedScopes))
+	for name, sc := range c.ParkedScopes {
+		parked[name] = sc
+	}
 	return configPushPayload{
-		Access: access,
-		PSK:    c.PSK, TrustedHosts: c.TrustedHosts,
+		Access: access, ParkedScopes: &parked,
+		PSK: c.PSK, TrustedHosts: c.TrustedHosts,
 		TLSCert: c.TLSCert, TLSKey: c.TLSKey, APITokens: c.APITokens,
 		LogLevel: c.LogLevel, HelperSocket: c.HelperSocket, Platform: c.Platform,
 		ProbeIntervalMS: c.ProbeIntervalMS, MgmtVIP: c.MgmtVIP,

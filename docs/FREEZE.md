@@ -137,6 +137,16 @@ know is skipped, so a later version can add kinds. A part is checked against its
 manifest hash when it is read. `cluster.json` stays authoritative while it exists;
 the split directory is read only when the single file is missing.
 
+Configuration import in 0.9.8.10 (new, same rules): `cluster.json` gains the optional
+`parked_scopes` (scopes kept but never built or served until moved to `scopes`;
+older versions ignore it), the config push body gains the optional `parked_scopes`
+(absent leaves the parked scopes unchanged, a map replaces them), the v2 content hash
+covers `parked_scopes` only while it is present, and the split format has a part kind
+`parked`. Web UI: `GET /config/export?mode=data`, `GET /config/import` and
+`POST /config/import/{upload,preview,stage}` (edit-configuration role),
+`POST /scopes/parked/{enable,remove}`. Bootstrap wizard: `POST /setup/import/{upload,choose,clear}`.
+An import never reads keys, tokens, certificates, trusted hosts or node identity from a file.
+
 Config additions in 0.9.8.10 (optional, ignored by older versions): the access
 list gains `blocked` (entries with a service, an address or MAC and an optional
 note), and a reservation gains `client_id` (DHCP option 61) and `names` (extra

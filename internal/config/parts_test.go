@@ -254,3 +254,59 @@ func TestPartPath_RejectsUnsafeNames(t *testing.T) {
 		}
 	}
 }
+
+func TestParkedScopes_HashSplitAndValidation(t *testing.T) {
+	base := splitFixture()
+	h1, h2 := base.ConfigDocumentHashes()
+
+	with := splitFixture()
+	with.ParkedScopes = map[string]ScopeConfig{"guest": {VIP: "192.168.110.1/24", VLANID: 110}}
+	g1, g2 := with.ConfigDocumentHashes()
+	if g1 != h1 {
+		t.Error("the v1 hash must not change for parked scopes")
+	}
+	if g2 == h2 {
+		t.Error("the v2 hash must cover parked scopes")
+	}
+
+	withIP := splitFixture()
+	withIP.ParkedScopes = map[string]ScopeConfig{"guest": {VIP: "192.168.110.1/24", VLANID: 110, NodeIP: "192.168.110.22/24"}}
+	if _, x2 := withIP.ConfigDocumentHashes(); x2 != g2 {
+		t.Error("a node address inside a parked scope must not change the hash")
+	}
+
+	m, files, err := with.Split()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Assemble(m, func(p string) ([]byte, error) {
+		b, ok := files[p]
+		if !ok {
+			return nil, os.ErrNotExist
+		}
+		return b, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marshalDoc(t, got) != marshalDoc(t, with) {
+		t.Error("a parked scope must survive the split round trip")
+	}
+	if m0, _, _ := base.Split(); m0.Hash() == m.Hash() {
+		t.Error("the manifest hash must follow a parked scope")
+	}
+
+	clash := splitFixture()
+	clash.ParkedScopes = map[string]ScopeConfig{"office": {}}
+	if err := clash.validate(); err == nil {
+		t.Error("a parked scope with the name of a live scope must be refused")
+	}
+	bad := splitFixture()
+	bad.ParkedScopes = map[string]ScopeConfig{"../x": {}}
+	if err := bad.validate(); err == nil {
+		t.Error("a parked scope with an invalid name must be refused")
+	}
+	if err := with.validate(); err != nil {
+		t.Errorf("a parked scope with its own name is valid: %v", err)
+	}
+}

@@ -186,6 +186,41 @@ network is ignored there, and the page says so. The values come from the same
 function the DHCP configuration is rendered from, so the page cannot disagree
 with what the nodes serve.
 
+## Export and import
+
+**Maintenance, Export & import** exports the configuration in four modes: all
+(everything, including keys and tokens, for your own safekeeping), cluster (without
+scopes), scopes, and **data** (everything the cluster replicates, without keys, tokens,
+certificates or node identity: the file to copy a configuration into another cluster).
+
+**Import a file…** reads any of them, a `cluster.json` or an encrypted backup (enter its
+password; only the configuration is read, not the leases or reliability history). Choose per group what to
+take: scopes (per scope), local domains, global DNS records and DNS checks, DHCP
+defaults, access list, settings and platform; for each group *merge* (the default:
+keep what the file does not mention, add what is new) or *replace*. Platform and settings
+are off by default. The overview lists what is new, changed, removed or skipped and why;
+nothing is staged until you press Stage, and nothing applies until you commit.
+
+- Keys, API tokens, certificates, trusted hosts, node identity and the backup password in
+  the file are never used.
+- Existing scopes are never touched. Scopes from the file arrive **parked**.
+- The access list and the platform of a running cluster are kept unless you choose replace.
+
+**Restore** (Maintenance, Restore) puts the data of a backup into the pending change of a running cluster. The cluster key, tokens, certificate paths, trusted hosts and backup password stay the running cluster's own; only the data comes back. A backup of another cluster is refused: use Import for that. The import's platform group also takes the management VIP of the file, so tick it only when that cluster is not running.
+
+**Parked scopes** are kept in the configuration, but no VLAN interface, VRRP or DHCP/DNS
+serving is built for them. The Scopes page lists them below the table: *Enable* (one),
+*Enable all*, *Remove*. Each is staged as a pending change; enabling needs the usual scope
+checks (VLAN, VRRP id, addresses) to pass.
+
+**A new cluster from a file:** on the setup wizard's review step, upload the export or backup (with its password), choose
+the groups and press Save choice before Create cluster. The new cluster has its own key,
+tokens and certificates. After the creation: enable the parked scopes, pair probe hosts
+again, use the new monitoring token, create the web users again and let the other cores
+join with the new join code. *Restore* (keep the cluster ID) needs the word RESTORE; the
+page warns when control addresses from the file still answer, because the original cluster
+may still be running, and the decision is yours.
+
 ## DNS domains editor
 
 **DNS** opens on the domains editor: the local domains on the left (with the number of records; a link mark for a linked domain) and the chosen domain's records on the right. The first row adds a record: pick the type (A, AAAA, CNAME, MX, TXT, SRV, PTR, CAA), the name (`@` for the domain itself), the value (MX and SRV have priority, weight, port and target fields) and an optional TTL. The list has search over name, type and value, sorting by name, type, value or TTL, and the shared page size; the chips show all records, the static ones or the names that DHCP reservations publish (read-only; edit those under DHCP, Hosts). A row's menu edits it as a line (`TYPE|NAME|VALUE…`, the format of the text editor) or deletes it. The entry *(DHCP names)* lists every name the reservations publish, short ones included.

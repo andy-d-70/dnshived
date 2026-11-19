@@ -199,6 +199,7 @@ var scopesTmpl = template.Must(template.New("scopes").Parse(`<!doctype html>
 </div>
 {{template "pagerbar" .PagerBottom}}
 {{if eq .Total 0}}<p class="dim">{{if or .Q .Show}}(no scope matches the filter){{else}}(no scopes configured){{end}}</p>{{end}}
+` + parkedSectionHTML + `
 <p class="dim">Interface is the VLAN sub-interface this scope is actually constructed
 on, on the Worker column's node — parent trunk NIC + VLAN ID
 (<code>parent.vlan_id</code>), the same naming the daemon itself uses.
@@ -224,6 +225,7 @@ type scopesPageData struct {
 	Show          string
 	Chips         []listChip
 	FilterHidden  []formField
+	Parked        []parkedRow
 }
 
 // buildScopeRows builds the Scopes page's row set — extracted as a pure
@@ -304,8 +306,10 @@ func handleScopes(ref *configRef) http.HandlerFunc {
 		roles := roleByNodeID(rows)
 
 		configScopes := map[string]config.ScopeConfig{}
+		var parkedScopes map[string]config.ScopeConfig
 		if c, _, err := firstReachableConfig(nodesIncludingSelf(cfg)); err == nil {
 			configScopes = c.Scopes
+			parkedScopes = c.ParkedScopes
 		}
 
 		pendingDeletes := map[string]bool{}
@@ -380,6 +384,7 @@ func handleScopes(ref *configRef) http.HandlerFunc {
 		pagerTop, pagerBottom := newPagerBars("/scopes", keep, per, len(scopes), page, totalPages, start, end)
 
 		data := scopesPageData{
+			Parked:        buildParkedRows(parkedScopes),
 			Rows:          scopes[start:end],
 			Total:         len(scopes),
 			Page:          page,

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"dnshived/internal/config"
 	"dnshived/internal/webauth"
 )
 
@@ -206,5 +207,26 @@ func TestHandleBackupRestorePost_WaitEndsWhenTheClientLeaves(t *testing.T) {
 	}
 	if w.Body.Len() != 0 {
 		t.Errorf("a response was written to a client that had left: %s", w.Body.String())
+	}
+}
+
+func TestKeepOwnTrust(t *testing.T) {
+	old := config.Cluster{PSK: "old-psk", TrustedHosts: []string{"192.0.2.9"}, TLSCert: "oc", TLSKey: "ok", APITokens: []config.APIToken{{Name: "old", Token: "t0"}}, HelperSocket: "/old", BackupPassword: "old-pw",
+		LogLevel: "debug", LocalDomains: []config.LocalDomain{{Name: "restored.lan"}}}
+	now := config.Cluster{PSK: "new-psk", TrustedHosts: []string{"192.0.2.77"}, TLSCert: "nc", TLSKey: "nk", APITokens: []config.APIToken{{Name: "mine", Token: "t1"}}, HelperSocket: "/new", BackupPassword: "new-pw"}
+	p := clusterPushPayloadFrom(old)
+	keepOwnTrust(&p, now)
+	if p.PSK != "new-psk" || p.TrustedHosts[0] != "192.0.2.77" || p.TLSKey != "nk" || p.APITokens[0].Token != "t1" || p.HelperSocket != "/new" || p.BackupPassword != "new-pw" {
+		t.Errorf("trust came from the backup: %+v", p)
+	}
+	if p.LogLevel != "debug" || len(p.LocalDomains) != 1 {
+		t.Errorf("the data of the backup must come back: %+v", p)
+	}
+	old.BackupEnabled = true
+	noPW := config.Cluster{PSK: "k"}
+	p = clusterPushPayloadFrom(old)
+	keepOwnTrust(&p, noPW)
+	if p.BackupEnabled {
+		t.Error("backups cannot be switched on by a restore when this cluster has no backup password")
 	}
 }

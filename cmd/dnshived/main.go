@@ -2014,6 +2014,9 @@ type configUpdate struct {
 	// Access is the access list: absent leaves it unchanged, null clears it.
 	Access json.RawMessage `json:"access"`
 
+	// ParkedScopes absent (an older sender) leaves the parked scopes unchanged; a map, empty or not, replaces them.
+	ParkedScopes *map[string]config.ScopeConfig `json:"parked_scopes"`
+
 	BackupEnabled          bool   `json:"backup_enabled"`
 	BackupIntervalHours    int    `json:"backup_interval_hours"`
 	BackupRetentionCount   int    `json:"backup_retention_count"`
@@ -2044,6 +2047,12 @@ func (u configUpdate) applyTo(c *config.Cluster) {
 	c.HelperSocket = u.HelperSocket
 	c.Platform = u.Platform
 	c.Scopes = u.Scopes
+	if u.ParkedScopes != nil {
+		c.ParkedScopes = nil
+		if len(*u.ParkedScopes) > 0 {
+			c.ParkedScopes = *u.ParkedScopes
+		}
+	}
 	c.ProbeIntervalMS = u.ProbeIntervalMS
 	c.MgmtVIP = u.MgmtVIP
 	c.DefaultDNSChecks = u.DefaultDNSChecks

@@ -556,7 +556,7 @@ func TestHandleBackupRestorePost_DecryptsAndStagesCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	live := config.Cluster{ClusterID: "live-cluster"}
+	live := config.Cluster{ClusterID: "restored-cluster", PSK: "live-psk"}
 	srv, pushed := fakeCandidateNode(t, live)
 	defer srv.Close()
 	cfg := &WebConfig{Nodes: []NodeConfig{nodeConfigFor(t, srv)}}
@@ -571,8 +571,8 @@ func TestHandleBackupRestorePost_DecryptsAndStagesCandidate(t *testing.T) {
 	if w.Code >= 400 {
 		t.Fatalf("handler returned HTTP %d: %s", w.Code, w.Body.String())
 	}
-	if pushed.PSK != "restored-psk" {
-		t.Errorf("pushed candidate PSK = %q, want %q", pushed.PSK, "restored-psk")
+	if pushed.PSK != "live-psk" {
+		t.Errorf("pushed candidate PSK = %q, want the running cluster's own key %q", pushed.PSK, "live-psk")
 	}
 	if len(pushed.Scopes) != 1 {
 		t.Errorf("pushed candidate has %d scope(s), want 1", len(pushed.Scopes))
@@ -610,6 +610,8 @@ func TestHandleBackupRestorePost_DirectFromNodeSkipsUpload(t *testing.T) {
 			w.Write(blob)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/candidate":
 			json.NewEncoder(w).Encode(map[string]any{"exists": false})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/config":
+			json.NewEncoder(w).Encode(config.Cluster{ClusterID: "restored-cluster", PSK: "live-psk"})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/candidate":
 			json.NewDecoder(r.Body).Decode(&pushed)
 			json.NewEncoder(w).Encode(map[string]any{"ok": true})
@@ -631,8 +633,8 @@ func TestHandleBackupRestorePost_DirectFromNodeSkipsUpload(t *testing.T) {
 	if w.Code >= 400 {
 		t.Fatalf("handler returned HTTP %d: %s", w.Code, w.Body.String())
 	}
-	if pushed.PSK != "restored-psk" {
-		t.Errorf("pushed candidate PSK = %q, want %q (blob should have been fetched server-side, no upload)", pushed.PSK, "restored-psk")
+	if pushed.PSK != "live-psk" {
+		t.Errorf("pushed candidate PSK = %q, want the running cluster's own key %q (blob fetched server-side, no upload)", pushed.PSK, "live-psk")
 	}
 	if len(pushed.Scopes) != 1 {
 		t.Errorf("pushed candidate has %d scope(s), want 1", len(pushed.Scopes))
@@ -716,5 +718,31 @@ func TestHandleBackupRestorePost_WrongPasswordShowsErrorNotCrash(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "wrong password") {
 		t.Errorf("body does not mention the wrong-password error: %s", w.Body.String())
+	}
+}
+
+func TestHandleBackupRestorePost_RefusesABackupOfAnotherCluster(t *testing.T) {
+	restored := config.Cluster{ClusterID: "other-cluster", PSK: "k", MgmtVIP: &config.MgmtVIPConfig{VIP: "192.0.2.254/24", VRRPID: 60}}
+	plaintext, _ := json.Marshal(restored)
+	backupDir := t.TempDir()
+	info, err := backup.Create(backupDir, "hunter2", plaintext, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, _ := backup.Read(backupDir, info.Name)
+	srv, pushed := fakeCandidateNode(t, config.Cluster{ClusterID: "live-cluster", PSK: "live-psk"})
+	defer srv.Close()
+	cfg := &WebConfig{Nodes: []NodeConfig{nodeConfigFor(t, srv)}}
+	r, err := buildMultipartBackupUpload(t, info.Name, "hunter2", blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	handleBackupRestorePost(newConfigRef(cfg))(w, r)
+	if !strings.Contains(w.Body.String(), "belongs to cluster other-cluster") {
+		t.Errorf("the page must say why: %s", w.Body.String())
+	}
+	if pushed.MgmtVIP != nil || pushed.PSK != "" {
+		t.Error("nothing may be staged")
 	}
 }

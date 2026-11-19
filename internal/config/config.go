@@ -753,6 +753,10 @@ type Cluster struct {
 	// Scopes defines the VLAN/DHCP/VIP scopes this cluster manages.
 	Scopes map[string]ScopeConfig `json:"scopes,omitempty"`
 
+	// ParkedScopes are scopes kept in the configuration that nothing builds or serves
+	// until they are enabled (moved to Scopes). Versions without the field ignore it.
+	ParkedScopes map[string]ScopeConfig `json:"parked_scopes,omitempty"`
+
 	// ProbeIntervalMS is how often the observer probes peers, in milliseconds.
 	ProbeIntervalMS int `json:"probe_interval_ms,omitempty"`
 
@@ -928,6 +932,9 @@ type documentV2Extra struct {
 
 	// Access is left out of the hash while there is no list, so a cluster without one keeps its hash.
 	Access *access.Config `json:"access,omitempty"`
+
+	// ParkedScopes is left out while there are none, so a cluster without any keeps its hash.
+	ParkedScopes map[string]ScopeConfig `json:"parked_scopes,omitempty"`
 }
 
 // ConfigDocumentHash returns a stable, truncated SHA-256 digest over every
@@ -985,12 +992,7 @@ func (c *Cluster) ConfigDocumentHashes() (v1, v2 string) {
 		return "", ""
 	}
 	v1 = shortHash(data)
-	extra, err := json.Marshal(documentV2Extra{
-		SanityCheckDisabled: c.SanityCheckDisabled, BackupEnabled: c.BackupEnabled,
-		BackupIntervalHours: c.BackupIntervalHours, BackupRetentionCount: c.BackupRetentionCount,
-		BackupPassword: c.BackupPassword, BackupReplicateToPeers: c.BackupReplicateToPeers,
-		Access: c.Access,
-	})
+	extra, err := json.Marshal(c.v2Extra())
 	if err != nil {
 		return v1, ""
 	}
@@ -1151,6 +1153,10 @@ func (c *Cluster) validate() error {
 		if c.Platform.Mgmt == "" {
 			return fmt.Errorf("platform.mgmt is required")
 		}
+	}
+
+	if err := validateParkedScopes(c.ParkedScopes, c.Scopes); err != nil {
+		return err
 	}
 
 	// A scope can only be built on a known trunk, so platform is required
@@ -1742,3 +1748,32 @@ func ipRangesOverlap(aStart, aEnd, bStart, bEnd uint32) bool {
 	}
 	return aStart <= bEnd && bStart <= aEnd
 }
+
+// validateParkedScopes checks only what keeps a parked scope addressable: its name, and that
+// no live scope has the same one. The full scope rules run when it is enabled.
+func validateParkedScopes(parked, live map[string]ScopeConfig) error {
+	for name := range parked {
+		if !ValidScopeName(name) {
+			return fmt.Errorf("parked_scopes: %q is not a valid scope name", name)
+		}
+		if _, dup := live[name]; dup {
+			return fmt.Errorf("parked_scopes: %q is also a live scope", name)
+		}
+	}
+	return nil
+}
+
+func normalizedParked(parked map[string]ScopeConfig) map[string]ScopeConfig {
+	if len(parked) == 0 {
+		return nil
+	}
+	out := make(map[string]ScopeConfig, len(parked))
+	for name, sc := range parked {
+		sc.NodeIP = ""
+		out[name] = sc
+	}
+	return out
+}
+
+// ValidDomainName reports whether name is acceptable as a local domain name.
+func ValidDomainName(name string) bool { return domainNamePattern.MatchString(name) }

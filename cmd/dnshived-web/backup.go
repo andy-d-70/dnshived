@@ -21,6 +21,7 @@ import (
 
 	"dnshived/internal/backup"
 	"dnshived/internal/backupcrypt"
+	"dnshived/internal/config"
 	"dnshived/internal/passpolicy"
 	"dnshived/internal/webauth"
 )
@@ -96,10 +97,11 @@ var backupTmpl = template.Must(template.New("backup").Parse(`<!doctype html>
 <p>
 <a href="/config/export?mode=all">Export all</a> —
 <a href="/config/export?mode=cluster">Export cluster identity</a> (no scopes) —
-<a href="/config/export?mode=scopes">Export scopes only</a> (no PSK/tokens)
+<a href="/config/export?mode=scopes">Export scopes only</a> (no PSK/tokens) —
+<a href="/config/export?mode=data">Export data</a> (everything replicated, no keys, tokens or node identity; the file to copy a configuration into another cluster)
 </p>
 <h2>Import</h2>
-<p class="dim">Not built yet — no design exists for this either.</p>
+<p>Take scopes, domains, DNS records, DHCP defaults, the access list and settings from an export file, chosen per group. Keys, tokens, certificates and node identity in the file are never used; scopes arrive parked. <a href="/config/import">Import a file&hellip;</a></p>
 </section>
 <section class="tab-pane" id="tab-backup" data-tab="Backup" data-tab-order="1" data-tab-default>
 <h2>Backup</h2>
@@ -795,8 +797,18 @@ func handleBackupRestorePost(ref *configRef) http.HandlerFunc {
 			return
 		}
 
+		current, _, _, err := currentEditableConfig(nodesIncludingSelf(cfg))
+		if err != nil {
+			renderTemplate(w, restoreTmpl, restorePageData{DecryptError: "could not read the current configuration to keep its keys: " + err.Error(), Node: nodeName, Name: name}, "restore")
+			return
+		}
+		if restored.ClusterID != "" && current.ClusterID != "" && restored.ClusterID != current.ClusterID {
+			renderTemplate(w, restoreTmpl, restorePageData{DecryptError: "this backup belongs to cluster " + restored.ClusterID + ", not to this cluster (" + current.ClusterID + "). Restore only puts a cluster's own backup back; to take the data of another cluster use Import, which parks the scopes and leaves addresses such as the management VIP alone.", Node: nodeName, Name: name}, "restore")
+			return
+		}
 		payload := clusterPushPayloadFrom(restored.Cluster)
 		payload.Scopes = restored.Cluster.Scopes
+		keepOwnTrust(&payload, current)
 
 		if r.PostFormValue("restore_leases") != "" && restored.DHCPLeases != nil && len(restored.DHCPLeases.Leases) > 0 {
 			if self, ok := selfNodeConfig(cfg); ok {
@@ -815,6 +827,17 @@ func handleBackupRestorePost(ref *configRef) http.HandlerFunc {
 		}
 
 		pushCandidateAndRenderResult(w, cfg, payload, user, "/backup", "back to config management")
+	}
+}
+
+// keepOwnTrust makes a restore bring back the data of a backup but never its keys: the cluster key,
+// tokens, certificate paths, trusted hosts and backup password stay the running cluster's own.
+func keepOwnTrust(p *configPushPayload, current config.Cluster) {
+	p.PSK, p.TrustedHosts = current.PSK, current.TrustedHosts
+	p.TLSCert, p.TLSKey, p.APITokens, p.HelperSocket = current.TLSCert, current.TLSKey, current.APITokens, current.HelperSocket
+	p.BackupPassword = current.BackupPassword
+	if current.BackupPassword == "" {
+		p.BackupEnabled = false
 	}
 }
 

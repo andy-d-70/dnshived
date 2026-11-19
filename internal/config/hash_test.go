@@ -72,8 +72,8 @@ func TestConfigDocumentHashes_IgnoreNodeLocalAndMetadataFields(t *testing.T) {
 
 func TestHashedKeys(t *testing.T) {
 	v1, v2 := HashedKeys()
-	if len(v1) != 21 || len(v2) != 28 {
-		t.Errorf("v1 has %d keys, v2 has %d, want 21 and 28", len(v1), len(v2))
+	if len(v1) != 21 || len(v2) != 29 {
+		t.Errorf("v1 has %d keys, v2 has %d, want 21 and 29", len(v1), len(v2))
 	}
 	set := map[string]bool{}
 	for _, k := range v2 {
