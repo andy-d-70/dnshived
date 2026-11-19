@@ -774,3 +774,55 @@ func TestDiffClusterFields_LocalDomainsUnlinkReported(t *testing.T) {
 		t.Errorf("diffs = %+v, want a local_domains entry for the unlink (ForkedFrom cleared)", diffs)
 	}
 }
+
+func TestDiffScopeFields_ReservationsAreNeverASilentDiff(t *testing.T) {
+	base := config.ScopeConfig{Reservations: []config.Reservation{{MAC: "AA:BB:CC:00:00:01", IP: "10.0.0.5", Hostname: "nas"}}}
+	cases := map[string]func(s *config.ScopeConfig){
+		"added": func(s *config.ScopeConfig) {
+			s.Reservations = append(s.Reservations, config.Reservation{MAC: "aa:bb:cc:00:00:02", IP: "10.0.0.6"})
+		},
+		"removed": func(s *config.ScopeConfig) { s.Reservations = nil },
+		"changed": func(s *config.ScopeConfig) {
+			s.Reservations = []config.Reservation{{MAC: "aa:bb:cc:00:00:01", IP: "10.0.0.5", Hostname: "nas", Names: []string{"files"}}}
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			next := base
+			next.Reservations = append([]config.Reservation(nil), base.Reservations...)
+			mutate(&next)
+			d := diffScopeFields(base, next)
+			if len(d) != 1 || !strings.Contains(d[0], "reservation "+name) {
+				t.Errorf("diff = %v", d)
+			}
+		})
+	}
+	if d := diffScopeFields(base, base); len(d) != 0 {
+		t.Errorf("no change, no diff: %v", d)
+	}
+}
+
+func TestDiffScopeFields_TheMissingDHCPFieldsAndTheSafetyNet(t *testing.T) {
+	yes := true
+	for name, mutate := range map[string]func(s *config.ScopeConfig){
+		"client_dns_server":  func(s *config.ScopeConfig) { s.ClientDNSServer = "10.0.0.2" },
+		"dhcp_lease_time":    func(s *config.ScopeConfig) { s.DHCPLeaseTime = "2h" },
+		"dhcp_no_ping":       func(s *config.ScopeConfig) { s.DHCPNoPing = true },
+		"dhcp_iot_defaults":  func(s *config.ScopeConfig) { s.DHCPIoTDefaults = true },
+		"dhcp_broadcast":     func(s *config.ScopeConfig) { s.DHCPBroadcast = &yes },
+		"dhcp_authoritative": func(s *config.ScopeConfig) { s.DHCPAuthoritative = &yes },
+		"vrrp_unicast":       func(s *config.ScopeConfig) { s.VRRPUnicast = &yes },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var next config.ScopeConfig
+			mutate(&next)
+			if d := diffScopeFields(config.ScopeConfig{}, next); len(d) != 1 || !strings.Contains(d[0], name) {
+				t.Errorf("diff = %v", d)
+			}
+		})
+	}
+	extra := config.ScopeConfig{Extra: map[string]json.RawMessage{"future": json.RawMessage(`1`)}}
+	if d := diffScopeFields(config.ScopeConfig{}, extra); len(d) != 1 || !strings.Contains(d[0], "other settings") {
+		t.Errorf("a change no field line names is still a diff: %v", d)
+	}
+}

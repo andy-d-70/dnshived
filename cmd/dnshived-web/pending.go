@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -353,6 +354,29 @@ func diffScopeFields(old, new config.ScopeConfig) []string {
 		diffs = append(diffs, formatFieldLineDiff("dhcp_options", added, removed)...)
 	}
 	str("color", old.Color, new.Color)
+	str("client_dns_server", old.ClientDNSServer, new.ClientDNSServer)
+	str("dhcp_lease_time", old.DHCPLeaseTime, new.DHCPLeaseTime)
+	if old.DHCPNoPing != new.DHCPNoPing {
+		diffs = append(diffs, fmt.Sprintf("dhcp_no_ping: %v → %v", old.DHCPNoPing, new.DHCPNoPing))
+	}
+	if old.DHCPIoTDefaults != new.DHCPIoTDefaults {
+		diffs = append(diffs, fmt.Sprintf("dhcp_iot_defaults: %v → %v", old.DHCPIoTDefaults, new.DHCPIoTDefaults))
+	}
+	optBool := func(field string, o, n *bool) {
+		if (o == nil) != (n == nil) || o != nil && *o != *n {
+			text := func(b *bool) string {
+				if b == nil {
+					return "default"
+				}
+				return strconv.FormatBool(*b)
+			}
+			diffs = append(diffs, fmt.Sprintf("%s: %s → %s", field, text(o), text(n)))
+		}
+	}
+	optBool("dhcp_broadcast", old.DHCPBroadcast, new.DHCPBroadcast)
+	optBool("dhcp_authoritative", old.DHCPAuthoritative, new.DHCPAuthoritative)
+	optBool("vrrp_unicast", old.VRRPUnicast, new.VRRPUnicast)
+	diffs = append(diffs, diffReservations(old.Reservations, new.Reservations)...)
 	if old.ProbeDisabled != new.ProbeDisabled {
 		diffs = append(diffs, fmt.Sprintf("probe_disabled: %v → %v", old.ProbeDisabled, new.ProbeDisabled))
 	}
@@ -368,6 +392,64 @@ func diffScopeFields(old, new config.ScopeConfig) []string {
 			newText = time.Unix(new.RebalanceApprovedAt, 0).Format("2006-01-02 15:04:05")
 		}
 		diffs = append(diffs, fmt.Sprintf("rebalance approved: %s → %s", oldText, newText))
+	}
+	if !reflect.DeepEqual(old.ContentLinks, new.ContentLinks) {
+		diffs = append(diffs, "template links of the scope changed")
+	}
+	if !reflect.DeepEqual(old.Extra, new.Extra) {
+		diffs = append(diffs, "other settings of the scope changed")
+	}
+	return diffs
+}
+
+func reservationText(r config.Reservation) string {
+	parts := []string{r.IP}
+	if r.Hostname != "" {
+		parts = append(parts, "name "+r.Hostname)
+	}
+	if len(r.Names) > 0 {
+		parts = append(parts, "extra names "+strings.Join(r.Names, ", "))
+	}
+	if r.ClientID != "" {
+		parts = append(parts, "client id "+r.ClientID)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// diffReservations lists the reservations added, removed or changed, matched by MAC.
+func diffReservations(old, new []config.Reservation) []string {
+	index := func(rs []config.Reservation) map[string]config.Reservation {
+		m := make(map[string]config.Reservation, len(rs))
+		for _, r := range rs {
+			m[strings.ToLower(r.MAC)] = r
+		}
+		return m
+	}
+	o, n := index(old), index(new)
+	macs := make(map[string]bool, len(o)+len(n))
+	for m := range o {
+		macs[m] = true
+	}
+	for m := range n {
+		macs[m] = true
+	}
+	sorted := make([]string, 0, len(macs))
+	for m := range macs {
+		sorted = append(sorted, m)
+	}
+	sort.Strings(sorted)
+	var diffs []string
+	for _, m := range sorted {
+		or, inOld := o[m]
+		nr, inNew := n[m]
+		switch {
+		case inOld && !inNew:
+			diffs = append(diffs, fmt.Sprintf("reservation removed: %s (%s)", m, reservationText(or)))
+		case !inOld && inNew:
+			diffs = append(diffs, fmt.Sprintf("reservation added: %s (%s)", m, reservationText(nr)))
+		case !reflect.DeepEqual(or, nr):
+			diffs = append(diffs, fmt.Sprintf("reservation changed: %s (%s → %s)", m, reservationText(or), reservationText(nr)))
+		}
 	}
 	return diffs
 }
