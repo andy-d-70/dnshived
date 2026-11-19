@@ -544,7 +544,7 @@ const styleHTML = `<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 --core-1:#c00;--core-2:#06c;--core-3:#000;--worker-probe:#080;
 --tint-1:#fdf2f1;--tint-2:#f0f6fd;--tint-3:#f0f0f0;--tint-crit:#fdeceb;
 /* --nav-h is the sticky nav's height; other sticky elements offset below it. */
---nav-h:3.3rem;
+--nav-h:4.8rem;
 }
 :root[data-theme="glowing"]{
 --bg:#e6f2ff;--panel:#fff;--border:#b7d3f5;--text:#0b1220;--muted:#4a5b7a;
@@ -564,14 +564,14 @@ const styleHTML = `<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 }
 *{box-sizing:border-box}
 html{font-size:14.5px}
-body{margin:0;padding:1.5rem;max-width:1400px;background:var(--bg);color:var(--text);
+body{margin:0;padding:0 1.5rem 1.5rem;max-width:1400px;background:var(--bg);color:var(--text);
 font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 font-size:13px;line-height:1.45}
 h1{font-size:var(--fs-h1);margin:0 0 .75rem;font-weight:650}
 h2,h3{font-weight:600}
 a{color:var(--accent);text-decoration:none}
 a:hover{text-decoration:underline}
-.nav-outer{display:flex;align-items:center;gap:.5rem;margin:0 0 1.1rem;
+.nav-outer{display:flex;align-items:center;gap:.5rem;margin:0 0 1.1rem;padding-top:1.5rem;background:var(--bg);
 position:sticky;top:0;z-index:20}
 nav{display:flex;flex-wrap:wrap;align-items:stretch;gap:.15rem;background:var(--panel);
 border:1px solid var(--border);border-radius:8px;padding:.35rem .5rem;

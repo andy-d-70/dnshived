@@ -38,6 +38,7 @@
 
 **Fixed**
 
+- Web UI: the top menu stays where it is when a long page scrolls instead of moving up a little, and a strip of page background keeps scrolled content a little above the footer.
 - The "CLOCK SKEW" warning could appear for all nodes at once because cached node data looked old. It now needs two fresh readings in a row, names the node it compares against, and is logged when it is raised and cleared.
 - The probes page reloaded itself every 20 seconds and wiped what was typed; only the results table refreshes now. Links to the probe settings land on the right tab, and the Pending changes button keeps its width.
 - A malformed fragment in the address left every tab pane hidden.

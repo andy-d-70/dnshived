@@ -287,6 +287,7 @@ body{padding-bottom:calc(2.5em + 1.2rem)}
 .appfoot{--hb:var(--muted);position:fixed;left:0;right:0;bottom:0;z-index:40;display:grid;grid-template-columns:auto auto auto 1fr auto;align-items:center;column-gap:1.1em;
 height:2.5em;padding:0 1.1em;background:var(--panel);border-top:1px solid var(--border);color:var(--muted);
 font-size:clamp(11px,.42vw + 7.2px,15px);line-height:1.3;white-space:nowrap;font-variant-numeric:tabular-nums}
+.appfoot::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:.9rem;background:var(--bg);pointer-events:none}
 .appfoot>*{overflow:hidden;text-overflow:ellipsis;min-width:0}
 .appfoot .ft-title{color:var(--text);font-weight:650}
 .appfoot .ft-upd{display:inline-block;width:10.5em;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--muted)}
