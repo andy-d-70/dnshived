@@ -236,7 +236,7 @@ const navHTML = `<script>document.documentElement.classList.add('js')</script>
 <a href="/probes" class="nav-item" title="dhcp and dns checks from the probe host" data-match="/probes,/config/probe-parallel"><span class="nav-name">Probes</span></a>
 <span class="nav-sep" aria-hidden="true"></span>
 <a href="/hosts" class="nav-item" title="hosts, default DHCP options, option sets, DNS server for clients" data-match="/hosts,/simulator,/config/dhcp,/optionsets,/groups,/rollout"><span class="nav-name">DHCP</span></a>
-<a href="/config/dns" class="nav-item" title="DNS records and checks, local domains, record sets" data-match="/config/dns,/config/domains,/templates"><span class="nav-name">DNS</span></a>
+<a href="/config/domains" class="nav-item" title="DNS domains and records, checks, record sets" data-match="/config/dns,/config/domains,/templates"><span class="nav-name">DNS</span></a>
 <a href="/users" class="nav-item" title="users, tokens, mail, password policy" data-match="/security,/users,/config/mail,/password"><span class="nav-name">Security</span></a>
 <a href="/backup" class="nav-item" title="export, import, backup and restore" data-match="/backup,/config/export"><span class="nav-name">Maintenance</span></a>
 <a href="/config" class="nav-item" title="nodes, interfaces, cluster-wide settings" data-match="/config"><span class="nav-name">Cluster settings</span></a>
@@ -869,6 +869,19 @@ overflow:hidden;vertical-align:middle;margin-right:.4rem}
 .pend-body{margin-top:.4rem}
 .pend-body ul{margin:.2rem 0 0;padding-left:1.1rem}
 .actionbar button{margin-left:.4rem}
+.dom-layout{display:grid;grid-template-columns:16rem minmax(0,1fr);gap:1rem;align-items:start}
+.dom-rail{padding:.6rem}
+.dom-rail input{width:100%;box-sizing:border-box}
+.rail-list{list-style:none;margin:.5rem 0;padding:0;max-height:26rem;overflow:auto}
+.rail-list li{display:flex;justify-content:space-between;gap:.4rem;padding:.25rem .4rem;border-radius:6px}
+.rail-list li.on{background:var(--head);font-weight:600}
+.rail-list a{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);text-decoration:none}
+.rail-add{display:flex;flex-direction:column;gap:.35rem}
+.dom-head{display:flex;align-items:baseline;gap:.8rem}
+.dom-head h2{margin:.2rem 0}
+.quickadd{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin:.4rem 0 .8rem}
+.dom-table td.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dom-actions{margin-top:.8rem}
 .dot{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:.35rem;background:currentColor;vertical-align:baseline}
 .chip{display:inline-flex;align-items:center;gap:.25rem;padding:.05rem .55rem;border-radius:999px;border:1px solid var(--border);font-size:.86em;white-space:nowrap;background:var(--panel);font-weight:600}
 .chip.ok{background:color-mix(in srgb,var(--ok) 13%,transparent);border-color:transparent;color:var(--ok)}
@@ -895,6 +908,16 @@ func tabLinksHTML(items [][2]string, active string) string {
 	}
 	b.WriteString(`</div>`)
 	return b.String()
+}
+
+// dnsTabs is the strip of the DNS group's route pages; the older pane tabs of
+// /config/dns link back to it.
+func dnsTabs(active string) string {
+	return tabLinksHTML([][2]string{
+		{"/config/domains", "Domains"},
+		{"/config/dns#tab-dns", "DNS records &amp; checks"},
+		{"/config/dns#tab-templates", "Templates"},
+	}, active)
 }
 
 // logsTabs is the strip the Daemons page shows so it reads as a tab of Logs.

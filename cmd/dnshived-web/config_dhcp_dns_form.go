@@ -19,7 +19,7 @@ you commit it. Elsewhere: <a href="/hosts">hosts</a>, <a href="/config">cluster 
 options</a>, <a href="/probes#tab-behavior">DNS probe checks</a>.</p>
 
 {{if .ShowDNS}}<script>if(/^#(tab-)?(dhcp|dhcp-templates)$/.test(location.hash))location.replace("/config/dhcp"+location.hash);</script>{{end}}
-<div class="tab-host">
+<div class="tab-host"{{if .ShowDNS}} data-extra-tabs='[["Domains","/config/domains","DNS records &amp; checks"]]'{{end}}>
 {{if .ShowDNS}}<section class="tab-pane" id="tab-domains" data-tab="Local domains" data-tab-order="4">
 <h2 id="domains">Local domains &amp; hostnames</h2>
 <p class="dim">Named DNS zones (e.g. <code>foo.lan</code>) — resolve

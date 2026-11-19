@@ -1452,6 +1452,8 @@ type probeDetailData struct {
 	HistoryOff  bool
 	HistoryErr  string
 	HistoryRows []historyRow
+
+	LocalDomains []string
 }
 
 // findProbeHost looks up worker by name among cfg.ProbeHosts.
@@ -1548,6 +1550,7 @@ func handleProbeDetail(ref *configRef) http.HandlerFunc {
 		pr, err := fetchProbe(*node, scope)
 		probeDisabled, known, pending := fetchScopeProbeDisabled(nodesIncludingSelf(cfg), scope)
 		data := buildProbeDetailData(scope, worker, pr, err, probeDisabled, known, pending)
+		data.LocalDomains = localDomainNames(nodesIncludingSelf(cfg))
 		attachScopeHistory(&data, *node)
 		renderProbeDetail(w, r, data)
 	}
@@ -1643,6 +1646,7 @@ func handleProbeRefresh(ref *configRef) http.HandlerFunc {
 		probeDisabled, known, pending := fetchScopeProbeDisabled(nodesIncludingSelf(cfg), scope)
 		data := buildProbeDetailData(scope, worker, pr, err, probeDisabled, known, pending)
 		data.JustRefreshed = err == nil && pr.Reachable
+		data.LocalDomains = localDomainNames(nodesIncludingSelf(cfg))
 		attachScopeHistory(&data, *node)
 		renderProbeDetail(w, r, data)
 	}
@@ -1702,7 +1706,7 @@ var probeDetailTmpl = template.Must(template.New("probe-detail").Parse(`<!doctyp
   <td>{{.Name}}</td><td>{{.Type}}</td><td>{{.Against}}</td><td>{{.Answered}}</td>
   <td>{{.LatencyMS}}ms</td><td>{{.Expected}}</td><td>{{.Got}}</td>
   <td class="{{if .Skipped}}dim{{else if .Valid}}ok{{else}}warn{{end}}">{{if .Skipped}}n/a{{else}}{{.Valid}}{{end}}</td>
-  <td>{{.Reason}}</td>
+  <td>{{.Reason}}{{if and (not .Skipped) (not .Valid)}}{{$n := .Name}}{{with $.AddLink $n .Type}} <a href="{{.}}" title="Open the DNS editor with this name filled in, in the local domain that holds it">Add to {{$.AddDomain $n}}…</a>{{end}}{{end}}</td>
   <td>{{.Skipped}}</td><td>{{.Error}}</td>
 </tr>{{end}}
 </table>

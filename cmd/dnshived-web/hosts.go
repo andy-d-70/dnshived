@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"math"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -39,6 +40,7 @@ type hostRow struct {
 	TTL       string
 	Renewed   string
 	addr      netip.Addr
+	ttlSec    int64
 }
 
 func leaseDuration(s string) time.Duration {
@@ -163,7 +165,7 @@ func buildHostRows(scope string, sc config.ScopeConfig, leases []dnsmasqLease, n
 			name = res.Hostname
 		}
 		row := hostRow{Scope: scope, MAC: mac, IP: l.IP, Name: name, ClientID: res.ClientID, Names: strings.Join(res.Names, ", "), ResName: res.Hostname, Reserved: isRes, Seen: true,
-			TTL: hostTTL(now, l.Expiry, l.NeverExpires), Renewed: hostRenewed(now, l.Expiry, l.NeverExpires, dur), Private: privateMAC(mac)}
+			TTL: hostTTL(now, l.Expiry, l.NeverExpires), Renewed: hostRenewed(now, l.Expiry, l.NeverExpires, dur), Private: privateMAC(mac), ttlSec: hostTTLSeconds(now, l.Expiry, l.NeverExpires)}
 		row.Icon, row.IconTitle = hostIcon(name)
 		row.Icon, row.IconTitle = ouiFallback(row.Icon, row.IconTitle, mac)
 		row.addr, _ = netip.ParseAddr(l.IP)
@@ -175,7 +177,7 @@ func buildHostRows(scope string, sc config.ScopeConfig, leases []dnsmasqLease, n
 		if seen[mac] {
 			continue
 		}
-		row := hostRow{Scope: scope, MAC: mac, IP: r.IP, Name: r.Hostname, ClientID: r.ClientID, Names: strings.Join(r.Names, ", "), ResName: r.Hostname, Reserved: true, TTL: "—", Renewed: "—", Private: privateMAC(mac)}
+		row := hostRow{Scope: scope, MAC: mac, IP: r.IP, Name: r.Hostname, ClientID: r.ClientID, Names: strings.Join(r.Names, ", "), ResName: r.Hostname, Reserved: true, TTL: "—", Renewed: "—", Private: privateMAC(mac), ttlSec: math.MaxInt64}
 		row.Icon, row.IconTitle = hostIcon(r.Hostname)
 		row.Icon, row.IconTitle = ouiFallback(row.Icon, row.IconTitle, mac)
 		row.addr, _ = netip.ParseAddr(r.IP)
@@ -196,7 +198,7 @@ func addUnknownStatic(rows []hostRow, scope string, neigh []scopeNeighbor, skip 
 		if !n.Complete || mac == "" || known[n.IP] || known[mac] || skip[n.IP] {
 			continue
 		}
-		row := hostRow{Scope: scope, MAC: mac, IP: n.IP, Unknown: true, Seen: true, TTL: "—", Renewed: "—", Private: privateMAC(mac)}
+		row := hostRow{Scope: scope, MAC: mac, IP: n.IP, Unknown: true, Seen: true, TTL: "—", Renewed: "—", Private: privateMAC(mac), ttlSec: math.MaxInt64}
 		row.Icon, row.IconTitle = hostIcon("")
 		row.Icon, row.IconTitle = ouiFallback(row.Icon, row.IconTitle, mac)
 		row.addr, _ = netip.ParseAddr(n.IP)
@@ -252,6 +254,120 @@ func sortHostRows(rows []hostRow) {
 	})
 }
 
+func hostScopeNames(rows []hostRow) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range rows {
+		if !seen[r.Scope] {
+			seen[r.Scope] = true
+			out = append(out, r.Scope)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func hostTTLSeconds(now, expiry time.Time, never bool) int64 {
+	if never {
+		return math.MaxInt64
+	}
+	return int64(expiry.Sub(now).Seconds())
+}
+
+// filterHostScope keeps one scope's rows; an empty scope keeps all.
+func filterHostScope(rows []hostRow, scope string) []hostRow {
+	if scope == "" {
+		return rows
+	}
+	out := rows[:0:0]
+	for _, r := range rows {
+		if r.Scope == scope {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+func hostKind(r hostRow) string {
+	switch {
+	case r.Unknown:
+		return "static?"
+	case r.Reserved:
+		return "reserved"
+	}
+	return "dynamic"
+}
+
+// sortHostRowsBy orders by a column, ties broken by the default order (scope,
+// address, MAC). Keys: scope, name, ip, mac, ttl, kind.
+func sortHostRowsBy(rows []hostRow, key string, desc bool) {
+	sortHostRows(rows)
+	less := func(a, b hostRow) int {
+		switch key {
+		case "name":
+			return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+		case "ip":
+			return a.addr.Compare(b.addr)
+		case "mac":
+			return strings.Compare(a.MAC, b.MAC)
+		case "ttl":
+			switch {
+			case a.ttlSec < b.ttlSec:
+				return -1
+			case a.ttlSec > b.ttlSec:
+				return 1
+			}
+		case "kind":
+			return strings.Compare(hostKind(a), hostKind(b))
+		}
+		return 0
+	}
+	if key == "" || key == "scope" {
+		if desc {
+			for i, j := 0, len(rows)-1; i < j; i, j = i+1, j-1 {
+				rows[i], rows[j] = rows[j], rows[i]
+			}
+		}
+		return
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		c := less(rows[i], rows[j])
+		if desc {
+			return c > 0
+		}
+		return c < 0
+	})
+}
+
+func hostSortHeaders(base url.Values, key string, desc bool) []domSortHeader {
+	cols := []struct{ Label, Key string }{{"Scope", "scope"}, {"Name", "name"}, {"Address", "ip"}, {"MAC", "mac"}, {"TTL left", "ttl"}}
+	out := make([]domSortHeader, len(cols))
+	if key == "" {
+		key = "scope"
+	}
+	for i, c := range cols {
+		v := url.Values{}
+		for k, vs := range base {
+			if k != "sort" && k != "dir" && k != "page" {
+				v[k] = vs
+			}
+		}
+		v.Set("sort", c.Key)
+		h := domSortHeader{Label: c.Label, AriaSort: "none"}
+		if key == c.Key {
+			if desc {
+				h.Arrow, h.AriaSort = "▼", "descending"
+			} else {
+				v.Set("dir", "desc")
+				h.Arrow, h.AriaSort = "▲", "ascending"
+			}
+		}
+		h.URL = "/hosts?" + v.Encode()
+		out[i] = h
+	}
+	return out
+}
+
 func fetchHostRows(scopes []scopeRow, cluster config.Cluster, nodes []NodeConfig, probeOctet string, now time.Time) []hostRow {
 	cfgScopes := cluster.Scopes
 	byName := make(map[string]NodeConfig, len(nodes))
@@ -297,6 +413,9 @@ func fetchHostRows(scopes []scopeRow, cluster config.Cluster, nodes []NodeConfig
 }
 
 type hostsPageData struct {
+	Headers      []domSortHeader
+	Scopes       []string
+	Scope        string
 	Rows         []hostRow
 	Total        int
 	Q            string
@@ -325,6 +444,11 @@ func handleHosts(ref *configRef) http.HandlerFunc {
 		scopes := buildScopeRows(rows, cfgScopes, tokens, roleByNodeID(rows), iotScopeSet(rows), map[string]bool{})
 		all := fetchHostRows(scopes, cluster, nodes, probeOctet, time.Now())
 		sortHostRows(all)
+		scopeNames := hostScopeNames(all)
+		scopeSel := strings.TrimSpace(r.URL.Query().Get("scope"))
+		all = filterHostScope(all, scopeSel)
+		sortKey := r.URL.Query().Get("sort")
+		sortDesc := r.URL.Query().Get("dir") == "desc"
 
 		q := listQuery(r.URL.Query())
 		show := listShow(r.URL.Query().Get("show"), "dynamic", "reserved", "static")
@@ -345,8 +469,18 @@ func handleHosts(ref *configRef) http.HandlerFunc {
 		if show != "" {
 			keep.Set("show", show)
 		}
+		if scopeSel != "" {
+			keep.Set("scope", scopeSel)
+		}
+		if sortKey != "" {
+			keep.Set("sort", sortKey)
+			if sortDesc {
+				keep.Set("dir", "desc")
+			}
+		}
 		chips := listChips("/hosts", "", keep, show, []chipDef{{"", "All", len(all)}, {"dynamic", "Dynamic", len(all) - nRes - nUnknown}, {"reserved", "Reserved", nRes}, {"static", "Unknown static", nUnknown}})
 		list := filterHostRows(all, q, show)
+		sortHostRowsBy(list, sortKey, sortDesc)
 
 		size := pagerSize(per, len(list))
 		pages := (len(list) + size - 1) / size
@@ -357,9 +491,11 @@ func handleHosts(ref *configRef) http.HandlerFunc {
 		page = min(max(page, 1), pages)
 		start, end := (page-1)*size, min(page*size, len(list))
 		top, bottom := newPagerBars("/hosts", keep, per, len(list), page, pages, start, end)
+		top.Show = true
 		renderTemplate(w, hostsTmpl, hostsPageData{
 			Rows: list[start:end], Total: len(list), Q: q, Chips: chips,
-			FilterHidden: hiddenFields(keep, "per", "show"), PagerTop: top, PagerBottom: bottom,
+			FilterHidden: hiddenFields(keep, "per", "show", "sort", "dir"), PagerTop: top, PagerBottom: bottom,
+			Headers: hostSortHeaders(keep, sortKey, sortDesc), Scopes: scopeNames, Scope: scopeSel,
 			Tabs: template.HTML(tabLinksHTML([][2]string{{"/hosts", "Hosts"}, {"/config/dhcp", "Default options &amp; sets"}}, "/hosts")),
 		}, "hosts")
 	}
@@ -372,7 +508,7 @@ var hostsTmpl = template.Must(template.New("hosts").Parse(`<!doctype html>
 <div class="pagehead"><h1>DHCP</h1></div>
 {{.Tabs}}
 <div class="listbar">
-<form method="get" action="/hosts">{{range .FilterHidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}<input type="search" name="q" value="{{.Q}}" placeholder="Search anything: name, MAC, address, scope…" aria-label="Search hosts"></form>
+<form method="get" action="/hosts">{{range .FilterHidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}<input type="search" name="q" value="{{.Q}}" placeholder="Search anything: name, MAC, address, scope…" aria-label="Search hosts"><select name="scope" class="js-combo" aria-label="Scope" onchange="this.form.submit()"><option value="">All scopes</option>{{$sc := .Scope}}{{range .Scopes}}<option value="{{.}}"{{if eq . $sc}} selected{{end}}>{{.}}</option>{{end}}</select></form>
 {{range .Chips}}<a class="lchip{{if .Active}} sel{{end}}" href="{{.URL}}">{{.Label}}</a>{{end}}
 <span class="grow"></span>
 <a class="lbtn" href="/simulator" title="Work out what a client would get in a scope, without sending anything">Client simulator</a>
@@ -383,7 +519,7 @@ var hostsTmpl = template.Must(template.New("hosts").Parse(`<!doctype html>
 <div class="table-wrap">
 <table class="list-table" border="1" cellpadding="4" cellspacing="0" style="min-width:56rem">
 <colgroup><col style="width:12%"><col style="width:21%"><col style="width:12%"><col style="width:15%"><col style="width:9%"><col style="width:12%"><col style="width:5%"><col style="width:9%"><col style="width:5%"></colgroup>
-<tr><th>Scope</th><th>Name</th><th>Address</th><th>MAC</th><th>TTL left</th><th>Last renewed</th><th>Type</th><th>Kind</th><th></th></tr>
+<tr>{{range .Headers}}<th aria-sort="{{.AriaSort}}"><a href="{{.URL}}" style="color:inherit;text-decoration:none">{{.Label}}<span style="display:inline-block;width:1em">{{.Arrow}}</span></a></th>{{end}}<th>Last renewed</th><th>Type</th><th>Kind</th><th></th></tr>
 {{range .Rows}}
 <tr data-scope="{{.Scope}}" data-ip="{{.IP}}">
   <td style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><a href="/scopes/{{.Scope}}">{{.Scope}}</a></td>
@@ -413,7 +549,7 @@ var hostsTmpl = template.Must(template.New("hosts").Parse(`<!doctype html>
 {{template "pagerbar" .PagerBottom}}
 {{if eq .Total 0}}<p class="dim">{{if .Q}}(no host matches the search){{else}}(no hosts yet){{end}}</p>{{end}}
 <p class="dim">Dynamic hosts are the active leases of every scope; reserved hosts are the reservations in the scopes' configuration. Last renewed is derived from the lease expiry and the scope's lease time.</p>
-` + hostsCheckScript + rowMenuScriptHTML))
+` + hostsCheckScript + rowMenuScriptHTML + comboboxScriptHTML))
 
 const hostsCheckScript = `<script>
 (function(){

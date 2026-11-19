@@ -17,7 +17,7 @@ import), Cluster settings (nodes, interfaces, addresses, access list) and Logs
 (general, audit, daemons, daemon logs), plus the Pending changes button, a
 Theme button and the account menu (your name, change password, log out). Long
 pages are split into tabs. Node colours are the same everywhere: core-1 purple,
-core-2 teal, core-3 brown.
+core-2 teal, core-3 brown. The footer line shows the cluster state, per-core uptime and load, the DHCP readout (active clients in the scopes the cores serve, then reservations), the configuration revision and the newest event; fields drop out at narrower widths.
 
 - **Changes are staged, then committed.** Every edit becomes a pending
   change on all nodes; nothing applies until you commit it on Pending
@@ -181,6 +181,18 @@ clients or the same client in up to three scopes. A reservation for another
 network is ignored there, and the page says so. The values come from the same
 function the DHCP configuration is rendered from, so the page cannot disagree
 with what the nodes serve.
+
+## DNS domains editor
+
+**DNS** opens on the domains editor: the local domains on the left (with the number of records; a link mark for a linked domain) and the chosen domain's records on the right. The first row adds a record: pick the type (A, AAAA, CNAME, MX, TXT, SRV, PTR, CAA), the name (`@` for the domain itself), the value (MX and SRV have priority, weight, port and target fields) and an optional TTL. The list has search over name, type and value, sorting by name, type, value or TTL, and the shared page size; the chips show all records, the static ones or the names that DHCP reservations publish (read-only; edit those under DHCP, Hosts). A row's menu edits it as a line (`TYPE|NAME|VALUE…`, the format of the text editor) or deletes it. The entry *(DHCP names)* lists every name the reservations publish, short ones included.
+
+- Every change is staged as a pending change, like all others. A record that duplicates another, or a CNAME beside other data at the same name, is refused with a message that names the record in the way.
+- A **linked** domain answers with the records of its original and is read-only here; edit the original, the change is copied. *Link a new domain* makes one, *Unlink* turns a link into a standalone copy.
+- **Import** takes a zone file (A, AAAA, CNAME, PTR, MX, SRV, TXT, CAA) or the editor's lines, pasted or loaded from a file (at most 512 KiB and 5000 lines), and lists each record as new, duplicate, conflict or skipped. Only the new ones are staged. **Export** downloads the domain as a zone file (`.zone`); `?format=lines` gives the editor's lines.
+- **Apply a record set** adds the records of a record set (the shipped Dante Domain Manager, NMOS and NDI sets, or your own) to the domain: the set's example domain `fake.lan` and `{domain}` become the domain, and the same overview shows what is new, duplicate or in conflict first.
+- **Make a record set…** (row menu of an A, AAAA or CNAME record) collects what belongs to that host: its records, the aliases that point at it, the SRV records whose target it is, the TXT records of those service instances and the PTR records that list them, and stores them as a record set in the example-domain form.
+- **Mail records…** builds an SPF record (the domain's mail servers, extra hosts, the policy for everything else), a DMARC record (policy, report address, percentage, alignment) and a DKIM record (selector and public key). A name may carry only one SPF and one DMARC record, so a second one is shown as a conflict. A key longer than 255 characters is stored as one value and served in 255-character parts, which resolvers join.
+- A DNS check that fails in the probe detail offers **Add to <domain>…** when a local domain holds the name; it opens this editor with the name and type filled in.
 
 ## Path beacons
 

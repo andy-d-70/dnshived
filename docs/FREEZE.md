@@ -123,12 +123,22 @@ Daemon API additions in 0.9.8.10 (new, same rules): `GET /api/v1/neighbors/<scop
 `POST /api/v1/neighbors/<scope>/probe` (up to 16 IPv4 host addresses inside the
 scope's network, one call per scope every two seconds); both admin.
 
+Daemon status additions in 0.9.8.10 (optional fields of `GET /api/v1/status`,
+absent on older daemons): `dhcp_active` (active leases whose address lies in a
+scope this node serves) and `dhcp_reserved` (reservations in the configuration).
+
 Config additions in 0.9.8.10 (optional, ignored by older versions): the access
 list gains `blocked` (entries with a service, an address or MAC and an optional
 note), and a reservation gains `client_id` (DHCP option 61) and `names` (extra
 DNS names, at most eight).
 
-Web UI additions in 0.9.8.10 (new, same rules): `GET /simulator` (view role,
+Web UI additions in 0.9.8.10 (new, same rules): the DNS domains editor,
+`GET /config/domains` (view role; query `d`, `q`, `show`, `sort`, `dir`, `per`,
+`page`, `addname`, `addtype`) and `GET /config/domains/<name>/export` (view role),
+and, with the edit-scopes role, `POST /config/domains/<name>/records/add`,
+`/records/edit`, `/records/delete`, `/import`, `/import/stage`, `/apply`,
+`/template` and `/mail`; every one of them stages an ordinary pending change or
+only shows a preview. `GET /simulator` (view role,
 read-only), `GET /users/policy` (admin; the password policy tab), `POST /hosts/check` (edit role; the on-demand ARP check) and the optional
 field `user` of `GET /api/pending-summary`; the Security menu item opens `/users` (users
 without the manage-users role are redirected to `/security`). `GET /api/footer` (view role) and

@@ -124,7 +124,7 @@ func TestNavHTML_EveryItemHasANameAndATooltip(t *testing.T) {
 }
 
 func TestNavHTML_ItemsAreInTheAgreedOrder(t *testing.T) {
-	order := []string{`href="/"`, `href="/scopes"`, `href="/probes"`, `nav-sep`, `href="/hosts"`, `href="/config/dns"`, `href="/users"`, `href="/backup"`, `href="/config"`, `href="/logs"`}
+	order := []string{`href="/"`, `href="/scopes"`, `href="/probes"`, `nav-sep`, `href="/hosts"`, `href="/config/domains"`, `href="/users"`, `href="/backup"`, `href="/config"`, `href="/logs"`}
 	last := -1
 	for _, want := range order {
 		idx := strings.Index(navHTML, want)
