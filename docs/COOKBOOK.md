@@ -63,8 +63,10 @@ sudo systemctl restart dnshived
 sudo journalctl -u dnshived -n 100 | grep AGENT:DECOMMISSION
 ip -o link show | grep '@'          # no VLAN sub-interfaces left
 
-# 2. Only then remove the config:
-sudo systemctl stop dnshived dnshived-helper dnshived-web
+# 2. Only then remove the config (if the cluster had a management VIP,
+#    its own keepalived keeps announcing it until it is stopped):
+sudo systemctl stop dnshived dnshived-helper dnshived-web dnshived-keepalived-mgmt
+ip -o addr show | grep -F "<the management VIP>"   # nothing may be left
 sudo rm -f /etc/dnshived/cluster.json /etc/dnshived/webui-users.json /etc/dnshived/web.json
 sudo systemctl start dnshived
 ```
