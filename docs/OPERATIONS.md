@@ -9,10 +9,15 @@ and monitoring. Connection flags can be stored in `~/.dnshived/rc`
 
 Reachable at `https://<mgmt-vip>:8443/` or on any core node's own
 address; ports 80/443 redirect there. Menu: the dnshived logo (Overview),
-Scopes (list, topology view, defaults for new scopes), Probes, DHCP, DNS,
-Security (API tokens, users, mail), Maintenance (backup, restore, export),
-Cluster settings (nodes, interfaces, addresses, access list) and Logs (with the daemon
-list), plus the Pending changes button. Long pages are split into tabs.
+Scopes (list, topology view, defaults for new scopes), Probes (results,
+manual probes, probe hosts, history, behavior), DHCP (hosts, client
+simulator, default options, option sets), DNS, Security (users, API tokens,
+mail and reset, password policy), Maintenance (backup, restore, export and
+import), Cluster settings (nodes, interfaces, addresses, access list) and Logs
+(general, audit, daemons, daemon logs), plus the Pending changes button, a
+Theme button and the account menu (your name, change password, log out). Long
+pages are split into tabs. Node colours are the same everywhere: core-1 purple,
+core-2 teal, core-3 brown.
 
 - **Changes are staged, then committed.** Every edit becomes a pending
   change on all nodes; nothing applies until you commit it on Pending
@@ -130,10 +135,52 @@ connection.
   a version that has it (`GET /api/v1/access` names the cores that hold it
   back). An older web interface that does not know the list leaves it
   unchanged when it commits.
+- **Blocked clients.** A second list cuts single clients off: by address for
+  DNS, by MAC for DHCP. A block is enforced even in *Report only*, beats a
+  whitelisted host and never beats an always-allowed address. Add one from the
+  Hosts row menu (Block…) or on the Blocked clients tab; at most 200 entries,
+  each with an optional note. Like the rest of the list it reaches the relays
+  only when every core runs a version that has it.
 - **Behind a reverse proxy** the web interface sees the proxy's address, not
   the client's; forwarded-for headers are not trusted.
 - The dropped-source tables hold at most 256 sources per relay; the list holds
   at most 1000 networks and 5000 hosts.
+
+## Hosts and the client simulator
+
+**DHCP, Hosts** lists every client of every scope in one table: active leases,
+reservations and hosts that answer ARP but have neither (shown as *Unknown
+static*). Search covers name, MAC, address and scope; chips filter Dynamic,
+Reserved and Unknown static. The row menu offers Reserve or Make static,
+Release, Rename, Client ID, Names, Block and Simulate.
+
+- **Reservations** carry the MAC, the address and the host name, optionally a
+  DHCP client identifier (option 61, for clients that ask by identifier rather
+  than by MAC) and up to eight extra DNS names. Extra names are served as A
+  records for the reserved address; one may not repeat the host name, another
+  extra name or another reservation's host name.
+- **Check now and Check shown** ask the node that serves a scope which of the
+  listed addresses answer ARP: it reads its neighbor table for the scope's VLAN
+  and sends one UDP datagram to port 9 from its own VLAN address to make the
+  kernel resolve the address. Up to 16 addresses of the scope's own network per
+  call, one call per scope every two seconds, IPv4 only, no packet to anything
+  outside the scope. A host that does not answer ARP (powered off, other VLAN)
+  is simply not seen.
+- **Type icons** come from the manufacturer prefix of the MAC (the public IEEE
+  list, generated into the web interface by `tools/gen-oui.py`). A private
+  (randomized) MAC gets no guess.
+
+**DHCP, Client simulator** shows what a client would get in a scope without
+sending anything: address (a reservation inside the scope's subnet, else the
+current lease, else the pool), mask, gateway, DHCP server, lease time, DNS
+servers, the other options, the names it is published under and the service
+records (names starting with an underscore, such as the Dante Domain Manager
+discovery records) its scope and the global list hold. Pick a client by MAC,
+name or address and a scope (empty: its current one); three slots compare
+clients or the same client in up to three scopes. A reservation for another
+network is ignored there, and the page says so. The values come from the same
+function the DHCP configuration is rendered from, so the page cannot disagree
+with what the nodes serve.
 
 ## Path beacons
 

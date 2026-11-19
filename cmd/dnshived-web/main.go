@@ -172,6 +172,7 @@ func main() {
 	mux.HandleFunc("/config/dns", requirePermission(store, webauth.PermViewStatus, handleDHCPDNSConfigGet(ref, templates)))
 	mux.HandleFunc("POST /hosts/check", requirePermission(store, webauth.PermEditScopes, handleHostsCheck(ref)))
 	mux.HandleFunc("/hosts", requirePermission(store, webauth.PermViewStatus, handleHosts(ref)))
+	mux.HandleFunc("/simulator", requirePermission(store, webauth.PermViewStatus, handleSimulator(ref)))
 	mux.HandleFunc("/config/dhcp", requirePermission(store, webauth.PermViewStatus, handleDHCPDNSConfigGet(ref, templates)))
 	mux.HandleFunc("/config/access", requirePermission(store, webauth.PermViewStatus, handleAccessPage(ref, "networks")))
 	mux.HandleFunc("/config/access/hosts", requirePermission(store, webauth.PermViewStatus, handleAccessPage(ref, "hosts")))

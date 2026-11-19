@@ -118,7 +118,20 @@ replaced or written and are empty when the file does not exist. A client may
 only compare them for equality; an older daemon answers 404 and the client
 falls back to fetching the documents.
 
-Web UI additions in 0.9.8.10 (new, same rules): `GET /api/footer` (view role) and
+Daemon API additions in 0.9.8.10 (new, same rules): `GET /api/v1/neighbors/<scope>`
+(the serving node's ARP view of the scope's VLAN) and
+`POST /api/v1/neighbors/<scope>/probe` (up to 16 IPv4 host addresses inside the
+scope's network, one call per scope every two seconds); both admin.
+
+Config additions in 0.9.8.10 (optional, ignored by older versions): the access
+list gains `blocked` (entries with a service, an address or MAC and an optional
+note), and a reservation gains `client_id` (DHCP option 61) and `names` (extra
+DNS names, at most eight).
+
+Web UI additions in 0.9.8.10 (new, same rules): `GET /simulator` (view role,
+read-only), `GET /users/policy` (admin; the password policy tab), `POST /hosts/check` (edit role; the on-demand ARP check) and the optional
+field `user` of `GET /api/pending-summary`; the Security menu item opens `/users` (users
+without the manage-users role are redirected to `/security`). `GET /api/footer` (view role) and
 `POST /api/update-check` (edit-configuration role, form field `enabled=1`);
 `web.json` gains the optional key `update_check`; the scope list and the probe
 results accept `per=10|25|50|100|all` and ignore any other value.

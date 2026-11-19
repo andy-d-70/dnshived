@@ -235,7 +235,7 @@ const navHTML = `<script>document.documentElement.classList.add('js')</script>
 <a href="/scopes" class="nav-item" title="manage dhcp scopes, defaults for new scopes, topology" data-match="/scopes,/topology,/config/scopes"><span class="nav-name">Scopes</span></a>
 <a href="/probes" class="nav-item" title="dhcp and dns checks from the probe host" data-match="/probes,/config/probe-parallel"><span class="nav-name">Probes</span></a>
 <span class="nav-sep" aria-hidden="true"></span>
-<a href="/hosts" class="nav-item" title="hosts, default DHCP options, option sets, DNS server for clients" data-match="/hosts,/config/dhcp,/optionsets,/groups,/rollout"><span class="nav-name">DHCP</span></a>
+<a href="/hosts" class="nav-item" title="hosts, default DHCP options, option sets, DNS server for clients" data-match="/hosts,/simulator,/config/dhcp,/optionsets,/groups,/rollout"><span class="nav-name">DHCP</span></a>
 <a href="/config/dns" class="nav-item" title="DNS records and checks, local domains, record sets" data-match="/config/dns,/config/domains,/templates"><span class="nav-name">DNS</span></a>
 <a href="/users" class="nav-item" title="users, tokens, mail, password policy" data-match="/security,/users,/config/mail,/password"><span class="nav-name">Security</span></a>
 <a href="/backup" class="nav-item" title="export, import, backup and restore" data-match="/backup,/config/export"><span class="nav-name">Maintenance</span></a>

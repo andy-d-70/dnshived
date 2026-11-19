@@ -9,6 +9,7 @@
 
 **Added**
 
+- Web UI, DHCP: a client simulator shows what a client would get in a scope before it asks: address (reservation, current lease or pool), mask, gateway, DHCP server, lease time, DNS servers, the other options, the names it is published under and the service records (such as Dante Domain Manager discovery) it would find. Pick a client by MAC, name or address and a scope, and compare up to three clients or the same client in up to three scopes. Nothing is sent or changed.
 - Web UI, DHCP, Hosts: one list of every host across all scopes, the active leases and the reservations, with search over name, MAC, address and scope, Dynamic and Reserved chips, the time left on the lease, when it was last renewed, a client type icon and a mark for private (randomized) MAC addresses. A dynamic host can be made static or released from its row menu.
 - Web UI: the "DHCP & DNS" menu item is two items. DHCP holds the default DHCP options, the DHCP option sets and the DNS server for clients; DNS holds the DNS records and checks, the local domains and the DNS record sets. Old links to the DHCP part of the former page (`/config/dns#dhcp`) are forwarded.
 

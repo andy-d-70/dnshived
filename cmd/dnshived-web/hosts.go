@@ -375,6 +375,7 @@ var hostsTmpl = template.Must(template.New("hosts").Parse(`<!doctype html>
 <form method="get" action="/hosts">{{range .FilterHidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}<input type="search" name="q" value="{{.Q}}" placeholder="Search anything: name, MAC, address, scope…" aria-label="Search hosts"></form>
 {{range .Chips}}<a class="lchip{{if .Active}} sel{{end}}" href="{{.URL}}">{{.Label}}</a>{{end}}
 <span class="grow"></span>
+<a class="lbtn" href="/simulator" title="Work out what a client would get in a scope, without sending anything">Client simulator</a>
 <button type="button" class="btn quiet sm" id="check-all" title="Ask the serving nodes which of the hosts on this page answer ARP right now">Check shown</button>
 </div>
 ` + pagerBarDefineHTML + `
@@ -402,6 +403,7 @@ var hostsTmpl = template.Must(template.New("hosts").Parse(`<!doctype html>
   {{if .Reserved}}<form method="post" action="/scopes/{{.Scope}}/reservations" onsubmit="var n=prompt('Host name (letters, digits, dot, hyphen, underscore; empty clears it):',this.hostname.value);if(n===null)return false;this.hostname.value=n.trim();"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.ResName}}"><button type="submit" role="menuitem" title="Change the host name of this reservation; staged as a pending change">Rename…</button></form>
   <form method="post" action="/scopes/{{.Scope}}/reservations" onsubmit="var n=prompt('DHCP client identifier (option 61) as hex bytes like 01:aa:bb:cc:dd:ee:ff; empty = match by MAC only:',this.client_id.value);if(n===null)return false;this.client_id.value=n.trim();"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.ResName}}"><input type="hidden" name="client_id" value="{{.ClientID}}"><button type="submit" role="menuitem" title="The server then answers only when the MAC and this identifier both match">Client ID…</button></form>
   <form method="post" action="/scopes/{{.Scope}}/reservations" onsubmit="var n=prompt('Extra DNS names for this address, comma separated (up to 8); empty removes them:',this.names.value);if(n===null)return false;this.names.value=n.trim();"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="ip" value="{{.IP}}"><input type="hidden" name="hostname" value="{{.ResName}}"><input type="hidden" name="names" value="{{.Names}}"><button type="submit" role="menuitem" title="More names that resolve to this address; staged as a pending change">Names…</button></form>{{end}}
+  <a role="menuitem" href="/simulator?c1={{.MAC}}&amp;s1={{.Scope}}" title="What this client would get in its scope">Simulate…</a>
   <form method="get" action="/config/access/blocked"><input type="hidden" name="mac" value="{{.MAC}}"><input type="hidden" name="addr" value="{{.IP}}"><button type="submit" role="menuitem" title="Open the blocked clients page with this client filled in; nothing is blocked until you stage and commit it">Block…</button></form>
   </div></details>{{end}}</td>
 </tr>
