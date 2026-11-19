@@ -610,6 +610,29 @@ func (r probeRow) hasIssue() bool {
 	return false
 }
 
+// result sums the row up: an issue in any cell, else pending while any cell
+// has no answer yet, else ok.
+func (r probeRow) Result() probeRowResult {
+	if r.hasIssue() {
+		return probeRowResult{"issue", "crit"}
+	}
+	if r.hasPending() {
+		return probeRowResult{"pending", "dim"}
+	}
+	return probeRowResult{"ok", "ok"}
+}
+
+type probeRowResult struct{ Text, Class string }
+
+func (r probeRow) hasPending() bool {
+	for _, c := range r.ProbeHostCells {
+		if c.DNSText == "pending..." || c.DHCPText == "pending..." || strings.Contains(c.Note, "not probed yet") {
+			return true
+		}
+	}
+	return false
+}
+
 // probeCellData holds DNS and DHCP as independently colored halves.
 type probeCellData struct {
 	Scope     string
@@ -659,7 +682,20 @@ dlg.addEventListener('click',function(e){if(e.target===dlg){dlg.close()}});
 })();
 </script>`
 
-const probeManagementHTML = `<section class="tab-pane" id="tab-hosts" data-tab="Probe hosts &amp; TLS" data-tab-order="3" data-tab-default>
+const probeManagementHTML = `<style>
+.probe-card{margin:.9rem 0}
+.probe-card h3{margin:0 0 .5rem;font-size:1.05rem}
+.fieldset{display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end}
+.fieldset>.fl,.probe-card .fieldset>label{display:flex;flex-direction:column;gap:.15rem;color:var(--muted)}
+.rseg{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--panel)}
+.rseg label{display:inline-flex;margin:0;color:var(--text)}
+.rseg input{position:absolute;opacity:0;pointer-events:none}
+.rseg span{padding:.3rem .8rem;border-right:1px solid var(--border);cursor:pointer}
+.rseg label:last-child span{border-right:0}
+.rseg input:checked+span{background:var(--accent);color:var(--on-accent);font-weight:600}
+.rseg input:focus-visible+span{outline:2px solid var(--accent);outline-offset:-2px}
+</style>
+<section class="tab-pane" id="tab-hosts" data-tab="Probe hosts &amp; TLS" data-tab-order="3" data-tab-default>
 <h2 id="settings">Probe hosts &amp; settings</h2>
 <p class="dim">A probe host runs one DHCP check and one DNS check per physical
 interface at a time, each interface on its own, and moves to the next scope as
@@ -728,21 +764,28 @@ never accepts a second server.</p>
 <h4>{{.Name}}</h4>
 {{if .Err}}<p class="warn" title="The probe host did not answer GET /api/v1/watch; it may run an older version.">Manual probes not available: {{.Err}}</p>{{end}}
 {{if .Rows}}<div class="table-wrap"><table border="1" cellpadding="4">
-<tr><th>Name</th><th>Interface</th><th>VLAN</th><th>Result</th><th>DHCP servers seen</th><th>Probed</th><th></th></tr>
+<tr><th>Name</th><th>Interface</th><th>VLAN</th><th>Result</th><th>DHCP servers seen</th><th>Probed</th><th style="width:3.5rem"></th></tr>
 {{$addr := .Addr}}{{range .Rows}}{{$name := .Name}}<tr>
   <td>{{.Name}}</td><td>{{.Interface}}</td><td>{{.VLAN}}</td>
   <td><span class="{{.ResultClass}}"{{if .Title}} title="{{.Title}}"{{end}}>{{.ResultText}}</span></td>
   <td>{{range .Chips}}<span class="{{.Class}}" title="{{.Title}}">{{.Server}} <small>{{.Label}}</small></span>{{if .CanToggle}} <form method="post" action="/probes/manual/ack" style="display:inline"><input type="hidden" name="addr" value="{{$addr}}"><input type="hidden" name="name" value="{{$name}}"><input type="hidden" name="server" value="{{.Server}}"><input type="hidden" name="action" value="{{.Action}}"><button type="submit" class="btn-sm">{{.Action}}</button></form>{{end}}&nbsp; {{end}}{{if not .Served}}<form method="post" action="/probes/manual/ack" style="display:inline"><input type="hidden" name="addr" value="{{$addr}}"><input type="hidden" name="name" value="{{$name}}"><input type="hidden" name="action" value="ack"><input type="text" name="server" size="14" placeholder="add address" pattern="[0-9]{1,3}(\.[0-9]{1,3}){3}" required title="An IPv4 address to acknowledge as a known DHCP server on this segment, also one that is not answering now."> <button type="submit" class="btn-sm">add</button></form>{{end}}</td>
   <td class="dim">{{.Age}}</td>
-  <td><form method="post" action="/probes/manual/remove" style="display:inline"><input type="hidden" name="addr" value="{{$addr}}"><input type="hidden" name="name" value="{{.Name}}"><button type="submit">Remove</button></form></td>
+  <td style="width:3rem;text-align:center"><details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.Name}}">&#9776;</summary>
+  <div class="row-menu-list" role="menu">
+  <a role="menuitem" href="/probes/history">History of this probe</a>
+  <form method="post" action="/probes/manual/remove" onsubmit="return confirm('Remove the manual probe {{.Name}}?')"><input type="hidden" name="addr" value="{{$addr}}"><input type="hidden" name="name" value="{{.Name}}"><button type="submit" role="menuitem" class="danger">Remove&hellip;</button></form>
+  </div></details></td>
 </tr>{{end}}
 </table></div>{{end}}
-{{if not .Err}}<form method="post" action="/probes/manual/add">
+{{if not .Err}}<form method="post" action="/probes/manual/add" class="card probe-card">
+<h3>Add a manual probe</h3>
 <input type="hidden" name="addr" value="{{.Addr}}">
-<label>Name: <input type="text" name="name" size="14" pattern="[a-z0-9][a-z0-9_-]{0,31}" required title="lowercase letters, digits, - and _"></label>
-<label>Interface: <input type="text" name="interface" list="manual-ifaces" size="10" required></label>
-<label>VLAN (0 = untagged): <input type="number" name="vlan_id" min="0" max="4094" value="0" class="narrow"></label>
+<div class="fieldset">
+<label>Name<input type="text" name="name" size="14" pattern="[a-z0-9][a-z0-9_-]{0,31}" required title="lowercase letters, digits, - and _"></label>
+<label>Interface<input type="text" name="interface" list="manual-ifaces" size="10" required></label>
+<label>VLAN (0 = untagged)<input type="number" name="vlan_id" min="0" max="4094" value="0" class="narrow"></label>
 <button type="submit">Add manual probe</button>
+</div>
 </form>{{end}}
 {{end}}
 <datalist id="manual-ifaces">{{range .ManualIfaces}}<option value="{{.}}">{{end}}</datalist>
@@ -757,8 +800,8 @@ never accepts a second server.</p>
 {{if .Err}}<p class="warn" title="The probe host did not answer GET /api/v1/history; it may run an older version.">History not available: {{.Err}}</p>{{else}}
 <form method="post" action="/probes/history">
 <input type="hidden" name="addr" value="{{.Addr}}">
-<p>DHCP: <label><input type="radio" name="dhcp" value="none"{{if eq .Settings.DHCP "none"}} checked{{end}}> none</label> <label><input type="radio" name="dhcp" value="failures"{{if eq .Settings.DHCP "failures"}} checked{{end}}> failures only</label> <label><input type="radio" name="dhcp" value="all"{{if eq .Settings.DHCP "all"}} checked{{end}}> all</label></p>
-<p>DNS: <label><input type="radio" name="dns" value="none"{{if eq .Settings.DNS "none"}} checked{{end}}> none</label> <label><input type="radio" name="dns" value="failures"{{if eq .Settings.DNS "failures"}} checked{{end}}> failures only</label> <label><input type="radio" name="dns" value="all"{{if eq .Settings.DNS "all"}} checked{{end}}> all</label> <span class="warn" title="DNS is probed for every scope every 20 seconds: with 100 scopes, all results are on the order of 100 MB a day. The size and age limits below bound it.">&#9888; "all" is a lot of data</span></p>
+<p class="fieldset"><span class="fl">DHCP<span class="rseg"><label><input type="radio" name="dhcp" value="none"{{if eq .Settings.DHCP "none"}} checked{{end}}><span>none</span></label> <label><input type="radio" name="dhcp" value="failures"{{if eq .Settings.DHCP "failures"}} checked{{end}}><span>failures only</span></label> <label><input type="radio" name="dhcp" value="all"{{if eq .Settings.DHCP "all"}} checked{{end}}><span>all</span></label></span></span></p>
+<p class="fieldset"><span class="fl">DNS<span class="rseg"><label><input type="radio" name="dns" value="none"{{if eq .Settings.DNS "none"}} checked{{end}}><span>none</span></label> <label><input type="radio" name="dns" value="failures"{{if eq .Settings.DNS "failures"}} checked{{end}}><span>failures only</span></label> <label><input type="radio" name="dns" value="all"{{if eq .Settings.DNS "all"}} checked{{end}}><span>all</span></label></span><span class="warn" title="DNS is probed for every scope every 20 seconds: with 100 scopes, all results are on the order of 100 MB a day. The size and age limits below bound it.">&#9888; "all" is a lot of data</span></span></p>
 <p><label><input type="checkbox" name="syslog"{{if .Settings.Syslog}} checked{{end}}> also write every record to syslog</label></p>
 <details><summary class="dim">Limits (defaults: 25 MB per file, 4 files, 7 days)</summary>
 <p><label>largest file, MB: <input type="number" name="max_file_mb" min="1" max="1024" value="{{.Settings.MaxFileMB}}" class="narrow"></label>
@@ -837,8 +880,8 @@ function addSelectedDNSChecks(){
 var probesTmpl = template.Must(template.New("probes").Parse(`` + probeCellDefineHTML + pagerBarDefineHTML + `{{define "probe-results-body"}}{{template "pagerbar" .PagerTop}}
 <div class="table-wrap">
 <table class="list-table probe-table" border="1" cellpadding="4" cellspacing="0">
-<colgroup><col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:6%"><col style="width:10%"><col style="width:11%"><col style="width:7%">{{range .ProbeHostNames}}<col style="width:22rem">{{end}}<col></colgroup>
-<tr><th>Scope</th><th>Worker</th><th>Interface</th><th>VLAN</th><th>Subnet</th><th>Token Owner</th><th>Status</th>{{range .ProbeHostNames}}<th>from {{.}}</th>{{end}}<th></th></tr>
+<colgroup><col style="width:9%"><col style="width:7%"><col style="width:8%"><col style="width:6%"><col style="width:10%"><col style="width:11%"><col style="width:7%"><col style="width:10%">{{range .ProbeHostNames}}<col style="width:22rem">{{end}}<col style="width:3.5rem"></colgroup>
+<tr><th>Scope</th><th>Worker</th><th>Interface</th><th>VLAN</th><th>Subnet</th><th>Token Owner</th><th>Status</th><th>Result</th>{{range .ProbeHostNames}}<th>from {{.}}</th>{{end}}<th></th></tr>
 {{range .Rows}}
 <tr>
   <td><a href="/scopes/{{.Name}}">{{.Scope}}</a></td>
@@ -848,8 +891,15 @@ var probesTmpl = template.Must(template.New("probes").Parse(`` + probeCellDefine
   <td>{{.Subnet}}</td>
   <td>{{.Token}}</td>
   <td class="{{.Class}}"{{if .StatusTitle}} title="{{.StatusTitle}}"{{end}}>{{.Status}}</td>
+  {{with .Result}}<td class="{{.Class}}">{{.Text}}</td>{{end}}
   {{range .ProbeHostCells}}<td>{{template "probecell" .}}</td>{{end}}
-  <td></td>
+  <td style="width:3rem;text-align:center"><details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.Name}}">&#9776;</summary>
+  <div class="row-menu-list" role="menu">
+  <a role="menuitem" href="/scopes/{{.Name}}">Open scope</a>
+  {{range $i, $c := .ProbeHostCells}}<a role="menuitem" class="probe-detail" href="/probes/{{$c.Scope}}/{{$c.Worker}}">Details · {{index $.ProbeHostNames $i}}</a>
+  <form method="post" action="/probes/{{$c.Scope}}/{{$c.Worker}}/refresh" class="probe-now-form"><button type="submit" role="menuitem">Probe now · {{index $.ProbeHostNames $i}}</button></form>
+  {{end}}
+  </div></details></td>
 </tr>
 {{end}}
 </table>
@@ -891,7 +941,7 @@ Updated {{.UpdatedAt}}, refreshes every ` + fmt.Sprint(probeAutoRefreshSeconds) 
     busy=true;
     fetch('/probes?fragment=results&page='+encodeURIComponent(box.getAttribute('data-page'))+'&per='+encodeURIComponent(box.getAttribute('data-per')||'')+'&q='+encodeURIComponent(box.getAttribute('data-q')||'')+'&show='+encodeURIComponent(box.getAttribute('data-show')||''),{credentials:'same-origin'})
       .then(function(r){ if(!r.ok||r.headers.get('X-Probe-Fragment')!=='1') throw 0; return r.text(); })
-      .then(function(t){ if(!document.querySelector('dialog[open]')&&!selected()){ box.innerHTML=t; } last=Date.now(); })
+      .then(function(t){ if(!document.querySelector('dialog[open]')&&!selected()&&!document.querySelector('details.row-menu[open]')){ box.innerHTML=t; if(window.bindRowMenus){window.bindRowMenus();} } last=Date.now(); })
       .catch(function(){})
       .then(function(){ busy=false; });
   }
@@ -901,7 +951,7 @@ Updated {{.UpdatedAt}}, refreshes every ` + fmt.Sprint(probeAutoRefreshSeconds) 
 </script>
 </section>
 </div>
-` + probePopupHTML + `
+` + rowMenuScriptHTML + probePopupHTML + `
 `))
 
 type probeChecksErrData struct {
@@ -1274,9 +1324,9 @@ func handleProbes(ref *configRef) http.HandlerFunc {
 		for _, sr := range buildScopeRows(statusRows, cfgScopes, tokens, roleByNodeID(statusRows), iotSet, nil) {
 			info[sr.Name] = sr
 		}
-		nAll, nIssues := len(probeRows), 0
+		nAll, nIssues, nPend := len(probeRows), 0, 0
 		q := listQuery(r.URL.Query())
-		show := listShow(r.URL.Query().Get("show"), "issues")
+		show := listShow(r.URL.Query().Get("show"), "issues", "pending")
 		var kept []probeRow
 		for i := range probeRows {
 			pr := &probeRows[i]
@@ -1287,7 +1337,10 @@ func handleProbes(ref *configRef) http.HandlerFunc {
 			if pr.hasIssue() {
 				nIssues++
 			}
-			if !listMatch(q, pr.Name, pr.Worker, pr.Interface, strconv.Itoa(pr.VLANID), pr.Subnet) || (show == "issues" && !pr.hasIssue()) {
+			if pr.hasPending() {
+				nPend++
+			}
+			if !listMatch(q, pr.Name, pr.Worker, pr.Interface, strconv.Itoa(pr.VLANID), pr.Subnet) || (show == "issues" && !pr.hasIssue()) || (show == "pending" && !pr.hasPending()) {
 				continue
 			}
 			kept = append(kept, *pr)
@@ -1302,7 +1355,7 @@ func handleProbes(ref *configRef) http.HandlerFunc {
 		if show != "" {
 			keep.Set("show", show)
 		}
-		chips := listChips("/probes", "#results", keep, show, []chipDef{{"", "All", nAll}, {"issues", "Issues", nIssues}})
+		chips := listChips("/probes", "#results", keep, show, []chipDef{{"", "All", nAll}, {"issues", "Issues", nIssues}, {"pending", "Pending", nPend}})
 		size := pagerSize(per, len(probeRows))
 		totalPages := (len(probeRows) + size - 1) / size
 		if totalPages == 0 {

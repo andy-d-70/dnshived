@@ -1408,3 +1408,40 @@ func TestScopeDisabledCell_NeverReadsAsProbeOnly(t *testing.T) {
 		t.Errorf("cell = %+v", c)
 	}
 }
+
+func TestProbeRow_ResultSumsTheCells(t *testing.T) {
+	ok := probeCellData{DNSText: "DNS✔", DNSClass: "ok", DHCPText: "DHCP✔", DHCPClass: "ok"}
+	bad := probeCellData{DNSText: "DNS✘", DNSClass: "crit"}
+	wait := probeCellData{DNSText: "pending...", DNSClass: "dim"}
+	half := probeCellData{DNSText: "DNS✔", DNSClass: "ok", DHCPText: "DHCP…", DHCPClass: "warn", Note: "6s ago DHCP not probed yet"}
+	for name, tc := range map[string]struct {
+		cells []probeCellData
+		want  string
+	}{
+		"ok": {[]probeCellData{ok}, "ok"}, "issue wins over pending": {[]probeCellData{wait, bad}, "issue"}, "pending": {[]probeCellData{ok, wait}, "pending"}, "half probed is pending": {[]probeCellData{half}, "pending"},
+	} {
+		if got := (probeRow{ProbeHostCells: tc.cells}).Result().Text; got != tc.want {
+			t.Errorf("%s: result = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+func TestProbesResultsBody_HasResultColumnAndRowMenu(t *testing.T) {
+	var b strings.Builder
+	data := probesPageData{
+		Total:          1,
+		ProbeHostNames: []string{"probe"},
+		Rows: []probeRow{{Scope: "office", Name: "office", ProbeHostCells: []probeCellData{
+			{Scope: "office", Worker: "core-1", DNSText: "DNS✔", DNSClass: "ok"},
+		}}},
+	}
+	if err := probesTmpl.ExecuteTemplate(&b, "probe-results-body", data); err != nil {
+		t.Fatal(err)
+	}
+	out := b.String()
+	for _, want := range []string{"<th>Result</th>", `class="row-menu"`, "Probe now · probe", `href="/probes/office/core-1"`, `<col style="width:3.5rem">`} {
+		if !strings.Contains(out, want) {
+			t.Errorf("results body lacks %q", want)
+		}
+	}
+}

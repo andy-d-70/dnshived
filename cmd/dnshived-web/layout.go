@@ -564,7 +564,7 @@ const styleHTML = `<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 }
 *{box-sizing:border-box}
 html{font-size:14.5px}
-body{margin:0;padding:0 1.5rem 1.5rem;max-width:1400px;background:var(--bg);color:var(--text);
+body{margin:0 auto;padding:0 1.5rem 1.5rem;max-width:1400px;background:var(--bg);color:var(--text);
 font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
 font-size:13px;line-height:1.45}
 h1{font-size:var(--fs-h1);margin:0 0 .75rem;font-weight:650}

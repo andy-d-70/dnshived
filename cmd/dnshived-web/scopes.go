@@ -88,8 +88,9 @@ func poolUsageClass(pct int) string {
 // scrolling container cannot clip it.
 const rowMenuScriptHTML = `<script>
 (function(){
-var menus=document.querySelectorAll('details.row-menu'),DELAY=400;
-function closeAll(except){menus.forEach(function(m){if(m!==except){m.removeAttribute('open')}})}
+var DELAY=400;
+function all(){return document.querySelectorAll('details.row-menu')}
+function closeAll(except){all().forEach(function(m){if(m!==except){m.removeAttribute('open')}})}
 function place(m){
  var btn=m.querySelector('summary'),list=m.querySelector('.row-menu-list'),r=btn.getBoundingClientRect();
  list.style.left='0px';list.style.top='0px';
@@ -97,7 +98,9 @@ function place(m){
  if(top+h>window.innerHeight-8){top=Math.max(8,r.top-h-4)}
  list.style.left=left+'px';list.style.top=top+'px';m.setAttribute('data-placed','');
 }
-menus.forEach(function(m){
+function bind(m){
+ if(m.hasAttribute('data-bound'))return;
+ m.setAttribute('data-bound','');
  var timer=null,list=m.querySelector('.row-menu-list');
  function clear(){if(timer){clearTimeout(timer);timer=null}}
  m.addEventListener('toggle',function(){if(m.open){closeAll(m);place(m)}else{m.removeAttribute('data-placed');clear()}});
@@ -110,8 +113,10 @@ menus.forEach(function(m){
   else if(e.key==='ArrowUp'){e.preventDefault();(items[i-1]||items[items.length-1]).focus()}
  });
  list.addEventListener('click',function(e){if(e.target.closest('a,button')){m.removeAttribute('open')}});
-});
-document.addEventListener('click',function(e){menus.forEach(function(m){if(m.open&&!m.contains(e.target)){m.removeAttribute('open')}})});
+}
+window.bindRowMenus=function(){all().forEach(bind)};
+window.bindRowMenus();
+document.addEventListener('click',function(e){all().forEach(function(m){if(m.open&&!m.contains(e.target)){m.removeAttribute('open')}})});
 window.addEventListener('scroll',function(){closeAll(null)},true);
 window.addEventListener('resize',function(){closeAll(null)});
 })();
