@@ -125,6 +125,57 @@ func sortedScopeNames(cluster config.Cluster) []string {
 	return names
 }
 
+// Answer is what a client of one scope is told: the values renderScopes
+// writes for that scope.
+type Answer struct {
+	RangeStart, RangeEnd string
+	Netmask              string
+	LeaseTime            string
+	Router               string
+	ServerID             string
+	DNSServers           string
+	// Options are the extra dhcp-option values (the scope's own list, or the
+	// cluster default list when the scope has none).
+	Options []string
+}
+
+// ScopeAnswer returns the answer for a scope, false when the scope is
+// missing or too incomplete to be rendered (the renderer skips those too).
+func ScopeAnswer(cluster config.Cluster, name string) (Answer, bool) {
+	sc, ok := cluster.Scopes[name]
+	if !ok {
+		return Answer{}, false
+	}
+	if sc.NodeIP == "" || sc.VIP == "" || sc.Gateway == "" || sc.DHCPRange[0] == "" || sc.DHCPRange[1] == "" {
+		return Answer{}, false
+	}
+	netmask, err := netmaskFromCIDR(sc.VIP)
+	if err != nil {
+		return Answer{}, false
+	}
+	leaseTime := sc.DHCPLeaseTime
+	if leaseTime == "" {
+		if sc.DHCPIoTDefaults {
+			leaseTime = iotDefaultLeaseTime
+		} else {
+			leaseTime = defaultLeaseTime
+		}
+	}
+	dnsServer := sc.ClientDNSServer
+	if dnsServer == "" {
+		dnsServer = effectiveDNSServers(cluster, sc)
+	}
+	options := sc.DHCPOptions
+	if len(options) == 0 {
+		options = cluster.DefaultDHCPOptions
+	}
+	return Answer{
+		RangeStart: sc.DHCPRange[0], RangeEnd: sc.DHCPRange[1],
+		Netmask: netmask, LeaseTime: leaseTime, Router: sc.Gateway,
+		ServerID: bareHost(sc.VIP), DNSServers: dnsServer, Options: options,
+	}, true
+}
+
 func renderScopes(buf *strings.Builder, cluster config.Cluster, names []string, include func(config.ScopeConfig) bool) []config.Reservation {
 	var allReservations []config.Reservation
 
@@ -133,44 +184,22 @@ func renderScopes(buf *strings.Builder, cluster config.Cluster, names []string, 
 		if include != nil && !include(sc) {
 			continue
 		}
-		if sc.NodeIP == "" || sc.VIP == "" || sc.Gateway == "" || sc.DHCPRange[0] == "" || sc.DHCPRange[1] == "" {
-			continue
-		}
-		netmask, err := netmaskFromCIDR(sc.VIP)
-		if err != nil {
+		ans, ok := ScopeAnswer(cluster, name)
+		if !ok {
 			continue
 		}
 
-		leaseTime := sc.DHCPLeaseTime
-		if leaseTime == "" {
-			if sc.DHCPIoTDefaults {
-				leaseTime = iotDefaultLeaseTime
-			} else {
-				leaseTime = defaultLeaseTime
-			}
-		}
-
-		fmt.Fprintf(buf, "dhcp-range=set:%s,%s,%s,%s,%s\n", name, sc.DHCPRange[0], sc.DHCPRange[1], netmask, leaseTime)
-		fmt.Fprintf(buf, "dhcp-option=tag:%s,option:router,%s\n", name, sc.Gateway)
+		fmt.Fprintf(buf, "dhcp-range=set:%s,%s,%s,%s,%s\n", name, ans.RangeStart, ans.RangeEnd, ans.Netmask, ans.LeaseTime)
+		fmt.Fprintf(buf, "dhcp-option=tag:%s,option:router,%s\n", name, ans.Router)
 
 		// Option 54 (server identifier) — the scope's own VIP, bare IP.
-		if vipHost := bareHost(sc.VIP); vipHost != "" {
-			fmt.Fprintf(buf, "dhcp-option=tag:%s,54,%s\n", name, vipHost)
+		if ans.ServerID != "" {
+			fmt.Fprintf(buf, "dhcp-option=tag:%s,54,%s\n", name, ans.ServerID)
 		}
-
-		dnsServer := sc.ClientDNSServer
-		if dnsServer == "" {
-			dnsServer = effectiveDNSServers(cluster, sc)
+		if ans.DNSServers != "" {
+			fmt.Fprintf(buf, "dhcp-option=tag:%s,option:dns-server,%s\n", name, ans.DNSServers)
 		}
-		if dnsServer != "" {
-			fmt.Fprintf(buf, "dhcp-option=tag:%s,option:dns-server,%s\n", name, dnsServer)
-		}
-
-		dhcpOptions := sc.DHCPOptions
-		if len(dhcpOptions) == 0 {
-			dhcpOptions = cluster.DefaultDHCPOptions
-		}
-		for _, opt := range dhcpOptions {
+		for _, opt := range ans.Options {
 			fmt.Fprintf(buf, "dhcp-option=tag:%s,%s\n", name, opt)
 		}
 

@@ -478,3 +478,32 @@ func TestRenderForParent_MatchesRenderForASingleTrunkCluster(t *testing.T) {
 		t.Errorf("both renderers should include the single scope's own range:\nRender:\n%s\nRenderForParent:\n%s", whole, perTrunk)
 	}
 }
+
+func TestScopeAnswer_MatchesWhatTheRendererWrites(t *testing.T) {
+	cl := testCluster()
+	ans, ok := ScopeAnswer(cl, "office")
+	if !ok {
+		t.Fatal("office is complete")
+	}
+	if ans.Netmask != "255.255.255.0" || ans.Router != "192.168.10.1" || ans.ServerID != "192.168.10.254" || ans.RangeStart != "192.168.10.100" || ans.RangeEnd != "192.168.10.200" {
+		t.Errorf("answer = %+v", ans)
+	}
+	if len(ans.Options) != 1 || ans.Options[0] != "option:42,192.0.2.1" {
+		t.Errorf("a scope without its own options gets the cluster defaults: %v", ans.Options)
+	}
+	if own, _ := ScopeAnswer(cl, "av-dante"); len(own.Options) != 1 || own.Options[0] != "option:66,192.0.2.5" {
+		t.Errorf("a scope's own options win: %v", own.Options)
+	}
+	out, _ := Render(cl, "/var/lib/dnshived")
+	for _, want := range []string{"dhcp-range=set:office," + ans.RangeStart + "," + ans.RangeEnd + "," + ans.Netmask + "," + ans.LeaseTime, "dhcp-option=tag:office,option:router," + ans.Router} {
+		if !strings.Contains(out, want) {
+			t.Errorf("rendered text lacks %q", want)
+		}
+	}
+	if _, ok := ScopeAnswer(cl, "incomplete"); ok {
+		t.Error("an incomplete scope has no answer, as the renderer skips it")
+	}
+	if _, ok := ScopeAnswer(cl, "nope"); ok {
+		t.Error("an unknown scope has no answer")
+	}
+}
