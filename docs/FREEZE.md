@@ -125,7 +125,17 @@ scope's network, one call per scope every two seconds); both admin.
 
 Daemon status additions in 0.9.8.10 (optional fields of `GET /api/v1/status`,
 absent on older daemons): `dhcp_active` (active leases whose address lies in a
-scope this node serves) and `dhcp_reserved` (reservations in the configuration).
+scope this node serves) and `dhcp_reserved` (reservations in the configuration),
+and `config_formats` (the configuration formats the daemon reads: `single`, and
+`split`, a `cluster.json.d/` directory with a manifest and one part per domain
+and scope; a daemon without the field reads only the single file).
+
+Split configuration format (read support in 0.9.8.10, nothing writes it yet): the
+manifest (`manifest.json`, `format` 1) lists the parts by kind, name and content
+hash; part kinds are `base`, `scope` and `domain`, and a kind a daemon does not
+know is skipped, so a later version can add kinds. A part is checked against its
+manifest hash when it is read. `cluster.json` stays authoritative while it exists;
+the split directory is read only when the single file is missing.
 
 Config additions in 0.9.8.10 (optional, ignored by older versions): the access
 list gains `blocked` (entries with a service, an address or MAC and an optional

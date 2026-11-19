@@ -71,12 +71,14 @@ type nodeStatus struct {
 	Healthy     bool     `json:"healthy"`
 	Serving     []string `json:"serving"`
 	// DHCPActive and DHCPReserved are absent on a daemon without them.
-	DHCPActive   *int              `json:"dhcp_active,omitempty"`
-	DHCPReserved *int              `json:"dhcp_reserved,omitempty"`
-	Watermark    map[string]uint64 `json:"watermark"`
-	Version      string            `json:"version"`
-	ServerTime   string            `json:"server_time"`
-	ScopesHash   string            `json:"scopes_hash"`
+	DHCPActive   *int `json:"dhcp_active,omitempty"`
+	DHCPReserved *int `json:"dhcp_reserved,omitempty"`
+	// ConfigFormats is absent on a daemon that reads only the single file.
+	ConfigFormats []string          `json:"config_formats,omitempty"`
+	Watermark     map[string]uint64 `json:"watermark"`
+	Version       string            `json:"version"`
+	ServerTime    string            `json:"server_time"`
+	ScopesHash    string            `json:"scopes_hash"`
 	// ConfigHash mirrors Cluster.ConfigDocumentHash().
 	ConfigHash string `json:"config_hash"`
 	// ConfigHashV2 also covers the sanity-check and backup settings; empty for an older daemon.

@@ -9,9 +9,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -1054,6 +1057,11 @@ func (c *Cluster) HasScopes() bool {
 func Load(path string) (*Cluster, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			if _, serr := os.Stat(filepath.Join(SplitDir(path), manifestFileName)); serr == nil {
+				return LoadSplit(SplitDir(path))
+			}
+		}
 		return nil, fmt.Errorf("read cluster config %s: %w", path, err)
 	}
 	var c Cluster

@@ -823,6 +823,7 @@ func main() {
 		dhcpActive, dhcpReserved := dhcpClientCounts(fresh, ag.Serving(), filepath.Join(dataDir(fresh), dhcpcentralrender.CoreDHCPLeaseFileName), time.Now())
 
 		return map[string]interface{}{
+			"config_formats":    config.ConfigFormats(),
 			"dhcp_active":       dhcpActive,
 			"dhcp_reserved":     dhcpReserved,
 			"node_id":           self.NodeID,
