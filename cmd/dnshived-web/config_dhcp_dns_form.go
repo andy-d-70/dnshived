@@ -18,52 +18,9 @@ you commit it. Elsewhere: <a href="/hosts">hosts</a>, <a href="/config">cluster 
 <a href="/config/scopes">scopes</a>, <a href="/scopes/options">scope
 options</a>, <a href="/probes#tab-behavior">DNS probe checks</a>.</p>
 
-{{if .ShowDNS}}<script>if(/^#(tab-)?(dhcp|dhcp-templates)$/.test(location.hash))location.replace("/config/dhcp"+location.hash);</script>{{end}}
+{{if .ShowDNS}}<script>if(/^#(tab-)?(dhcp|dhcp-templates)$/.test(location.hash))location.replace("/config/dhcp"+location.hash);if(/^#(tab-)?domains$/.test(location.hash))location.replace("/config/domains");</script>{{end}}
 <div class="tab-host"{{if .ShowDNS}} data-extra-tabs='[["Domains","/config/domains","DNS records &amp; checks"]]'{{end}}>
-{{if .ShowDNS}}<section class="tab-pane" id="tab-domains" data-tab="Local domains" data-tab-order="4">
-<h2 id="domains">Local domains &amp; hostnames</h2>
-<p class="dim">Named DNS zones (e.g. <code>foo.lan</code>) — resolve
-cluster-wide, same as Global DNS records below. TTL: per-domain default,
-overridable per host. Bulk textarea = one record per line; the picker
-above it fills a line for you. Fork a domain to start a new one as its
-live-synced copy — every edit to the original pushes to its forks too,
-until unlinked. Click a domain's own summary line below to edit it.</p>
-{{range .LocalDomains}}
-<details class="tpl-picker-item">
-<summary>{{.Name}} <span class="dim">({{.RecordCount}} record(s), TTL {{if .TTL}}{{.TTL}}s{{else}}default{{end}}{{if .ForkedFrom}}, forked from {{.ForkedFrom}}{{end}})</span></summary>
-
-<form method="post" action="{{.SaveHref}}" onsubmit="return confirm('This will stage this domain\'s records as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">
-<label>Domain TTL (seconds, blank/0 = dnsmasq default)<br><input type="number" name="ttl" min="0" value="{{.TTL}}"></label>
-{{.Builder}}
-<textarea name="records" id="{{.TextareaID}}" rows="6" cols="70" data-line-list>{{.RecordsText}}</textarea>
-<p><input type="submit" value="Stage {{.Name}} as pending change"></p>
-</form>
-
-{{if .ForkedFrom}}
-<form method="post" action="{{.UnlinkHref}}" style="display:inline" onsubmit="return confirm('Unlink {{.Name}} from {{.ForkedFrom}}? Its current records stay as-is, but future edits to {{.ForkedFrom}} will no longer be pushed here.')">
-<button type="submit">unlink from {{.ForkedFrom}}</button>
-</form>
-{{else}}
-<form method="post" action="{{.ForkHref}}" style="display:inline">
-<input name="new_name" placeholder="fork as e.g. newdomain.tld" pattern="^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$" title="a valid domain name" required>
-<button type="submit" title="creates a new domain starting as a copy of this one, and keeps it live-synced to every future edit here until unlinked">fork {{.Name}}</button>
-</form>
-{{end}}
-<form method="post" action="{{.DeleteHref}}" style="display:inline" onsubmit="return confirm('Delete domain {{.Name}} and every host record under it?')">
-<button type="submit">delete {{.Name}}</button>
-</form>
-</details>
-{{else}}<p class="dim">no local domains yet</p>{{end}}
-
-<h3>+ Add a domain</h3>
-<form method="post" action="/config/domains/new">
-<input name="name" placeholder="e.g. foo.lan" required pattern="^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$" title="a valid domain name, e.g. foo.lan">
-<input type="number" name="ttl" min="0" placeholder="TTL seconds (optional)">
-<button type="submit">+ add domain</button>
-</form>
-
-</section>
-<section class="tab-pane" id="tab-dns" data-tab="DNS records &amp; checks" data-tab-order="2"{{if not .ShowDHCP}} data-tab-default{{end}}>
+{{if .ShowDNS}}<section class="tab-pane" id="tab-dns" data-tab="DNS records &amp; checks" data-tab-order="2"{{if not .ShowDHCP}} data-tab-default{{end}}>
 <h2 id="dns">DNS defaults</h2>
 <form method="post" action="/config/dns" onsubmit="return confirm('This will stage these DNS defaults as a pending change on every configured node — nothing is applied until you commit from Pending changes. Continue?')">
 

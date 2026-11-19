@@ -54,28 +54,6 @@ func TestParseDomainHostLines_MultipleRecords(t *testing.T) {
 	}
 }
 
-func TestBuildLocalDomainRows_SortedByName(t *testing.T) {
-	domains := []config.LocalDomain{{Name: "zeta.lan"}, {Name: "alpha.lan"}}
-	rows := buildLocalDomainRows(domains, nil)
-	if len(rows) != 2 || rows[0].Name != "alpha.lan" || rows[1].Name != "zeta.lan" {
-		t.Errorf("rows = %+v, want sorted alpha.lan, zeta.lan", rows)
-	}
-}
-
-func TestBuildLocalDomainRows_RecordsTextRoundTrips(t *testing.T) {
-	domains := []config.LocalDomain{{
-		Name:    "foo.lan",
-		Records: []config.LocalDomainHost{{Host: "nas1", Type: "A", Value: "192.168.10.20"}},
-	}}
-	rows := buildLocalDomainRows(domains, nil)
-	if rows[0].RecordsText != "A|nas1|192.168.10.20" {
-		t.Errorf("RecordsText = %q, want %q", rows[0].RecordsText, "A|nas1|192.168.10.20")
-	}
-	if rows[0].RecordCount != 1 {
-		t.Errorf("RecordCount = %d, want 1", rows[0].RecordCount)
-	}
-}
-
 func TestHandleLocalDomainAddPost_StagesNewDomain(t *testing.T) {
 	live := testClusterWithScopes()
 	srv, pushed := fakeCandidateNode(t, live)
@@ -118,71 +96,6 @@ func TestHandleLocalDomainAddPost_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
-func TestHandleLocalDomainSavePost_UpdatesTTLAndRecords(t *testing.T) {
-	live := testClusterWithScopes()
-	live.LocalDomains = []config.LocalDomain{
-		{Name: "foo.lan"},
-		{Name: "bar.lan", TTL: 100, Records: []config.LocalDomainHost{{Host: "x", Type: "A", Value: "10.0.0.9"}}},
-	}
-	srv, pushed := fakeCandidateNode(t, live)
-	defer srv.Close()
-
-	cfg := &WebConfig{Nodes: []NodeConfig{nodeConfigFor(t, srv)}}
-	form := strings.NewReader("ttl=3600&records=" + url.QueryEscape("A|nas1|192.168.10.20\nA|nas2|192.168.10.21"))
-	r := httptest.NewRequest(http.MethodPost, "/config/domains/foo.lan/save", form)
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.SetPathValue("name", "foo.lan")
-	w := httptest.NewRecorder()
-
-	handleLocalDomainSavePost(newConfigRef(cfg))(w, r)
-
-	if w.Code >= 400 {
-		t.Fatalf("handler returned HTTP %d: %s", w.Code, w.Body.String())
-	}
-	if len(pushed.Scopes) != 1 {
-		t.Errorf("pushed candidate has %d scope(s), want 1 (existing scopes must survive)", len(pushed.Scopes))
-	}
-	if len(pushed.LocalDomains) != 2 {
-		t.Fatalf("pushed LocalDomains has %d entries, want 2 (bar.lan must survive untouched)", len(pushed.LocalDomains))
-	}
-	var foo, bar config.LocalDomain
-	for _, d := range pushed.LocalDomains {
-		switch d.Name {
-		case "foo.lan":
-			foo = d
-		case "bar.lan":
-			bar = d
-		}
-	}
-	if foo.TTL != 3600 || len(foo.Records) != 2 {
-		t.Errorf("foo.lan = %+v, want TTL=3600 with 2 records", foo)
-	}
-	if bar.TTL != 100 || len(bar.Records) != 1 {
-		t.Errorf("bar.lan = %+v, want unchanged (TTL=100, 1 record)", bar)
-	}
-}
-
-func TestHandleLocalDomainSavePost_UnknownDomainReturns404(t *testing.T) {
-	live := testClusterWithScopes()
-	srv, _ := fakeCandidateNode(t, live)
-	defer srv.Close()
-
-	cfg := &WebConfig{Nodes: []NodeConfig{nodeConfigFor(t, srv)}}
-	form := strings.NewReader("ttl=0&records=")
-	r := httptest.NewRequest(http.MethodPost, "/config/domains/nope.lan/save", form)
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.SetPathValue("name", "nope.lan")
-	w := httptest.NewRecorder()
-
-	handleLocalDomainSavePost(newConfigRef(cfg))(w, r)
-
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", w.Code)
-	}
-}
-
-// TestHandleLocalDomainDeletePost_RemovesOnlyThatDomain confirms deleting
-// one domain leaves every other domain and every scope untouched.
 func TestHandleLocalDomainDeletePost_RemovesOnlyThatDomain(t *testing.T) {
 	live := testClusterWithScopes()
 	live.LocalDomains = []config.LocalDomain{{Name: "foo.lan"}, {Name: "bar.lan"}}
@@ -283,41 +196,6 @@ func TestHandleLocalDomainForkPost_RejectsDuplicateName(t *testing.T) {
 
 	if w.Code < 400 {
 		t.Fatalf("handler returned HTTP %d, want a 4xx for a duplicate target name", w.Code)
-	}
-}
-
-func TestHandleLocalDomainSavePost_PropagatesToForks(t *testing.T) {
-	live := testClusterWithScopes()
-	live.LocalDomains = []config.LocalDomain{
-		{Name: "foo.lan", TTL: 100, Records: []config.LocalDomainHost{{Host: "old", Type: "A", Value: "1.1.1.1"}}},
-		{Name: "fork.lan", TTL: 100, ForkedFrom: "foo.lan", Records: []config.LocalDomainHost{{Host: "old", Type: "A", Value: "1.1.1.1"}}},
-	}
-	srv, pushed := fakeCandidateNode(t, live)
-	defer srv.Close()
-
-	cfg := &WebConfig{Nodes: []NodeConfig{nodeConfigFor(t, srv)}}
-	form := strings.NewReader("ttl=3600&records=" + url.QueryEscape("A|nas1|192.168.10.20"))
-	r := httptest.NewRequest(http.MethodPost, "/config/domains/foo.lan/save", form)
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.SetPathValue("name", "foo.lan")
-	w := httptest.NewRecorder()
-
-	handleLocalDomainSavePost(newConfigRef(cfg))(w, r)
-
-	if w.Code >= 400 {
-		t.Fatalf("handler returned HTTP %d: %s", w.Code, w.Body.String())
-	}
-	var fork config.LocalDomain
-	for _, d := range pushed.LocalDomains {
-		if d.Name == "fork.lan" {
-			fork = d
-		}
-	}
-	if fork.TTL != 3600 || len(fork.Records) != 1 || fork.Records[0].Host != "nas1" {
-		t.Errorf("fork.lan = %+v, want it propagated to match foo.lan's newly-saved content (TTL=3600, nas1)", fork)
-	}
-	if fork.ForkedFrom != "foo.lan" {
-		t.Errorf("fork.lan lost its ForkedFrom link after a parent save: %+v", fork)
 	}
 }
 

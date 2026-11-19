@@ -1078,23 +1078,11 @@ func TestHandleDHCPDNSConfigGet_RendersLocalDomainsSection(t *testing.T) {
 		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `id="domains"`) {
-		t.Error("missing the Local domains section anchor")
+	if strings.Contains(body, `id="tab-domains"`) || strings.Contains(body, `id="domain_records_foo_lan"`) {
+		t.Error("the old Local domains pane must be gone; the Domains editor replaces it")
 	}
-	if !strings.Contains(body, "foo.lan") {
-		t.Errorf("missing the configured domain name, got:\n%s", body)
-	}
-	if !strings.Contains(body, "A|nas1|192.168.10.20") {
-		t.Errorf("missing the domain's own record in the bulk textarea, got:\n%s", body)
-	}
-	if !strings.Contains(body, `id="domain_records_foo_lan"`) {
-		t.Errorf("missing the domain's own textarea id, got:\n%s", body)
-	}
-	if !strings.Contains(body, "tpl-builder") {
-		t.Error("missing the structured record-add picker")
-	}
-	if idx1, idx2 := strings.Index(body, `id="domains"`), strings.Index(body, `id="dns"`); idx1 < 0 || idx2 < 0 || idx1 > idx2 {
-		t.Errorf("Local domains section must render before DNS defaults, got domains@%d dns@%d", idx1, idx2)
+	if !strings.Contains(body, `"/config/domains"`) {
+		t.Error("missing the Domains tab that links to the editor")
 	}
 }
 

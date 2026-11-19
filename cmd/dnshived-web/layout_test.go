@@ -458,7 +458,7 @@ func TestPageTemplates_UseTheTabLayout(t *testing.T) {
 	}{
 		{"maintenance", backupTmpl.Tree.Root.String(), []string{`id="tab-backup"`, `id="tab-restore"`, `id="tab-export"`}},
 		{"cluster settings", configFormTmpl.Tree.Root.String(), []string{`id="tab-nodes"`, `id="tab-interfaces"`, `id="tab-addresses"`, `id="tab-misc"`, `class="tab-submit"`}},
-		{"dhcp and dns", dhcpDNSConfigFormTmpl.Tree.Root.String(), []string{`id="tab-dhcp"`, `id="tab-dns"`, `id="tab-templates"`, `id="tab-domains"`, `data-line-list`}},
+		{"dhcp and dns", dhcpDNSConfigFormTmpl.Tree.Root.String(), []string{`id="tab-dhcp"`, `id="tab-dns"`, `id="tab-templates"`}},
 		{"logs", logsTmpl.Tree.Root.String(), []string{`id="tab-general"`, `id="tab-audit"`, `id="daemons"`, `data-extra-tabs`}},
 	}
 	for _, c := range cases {

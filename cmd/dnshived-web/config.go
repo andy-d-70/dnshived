@@ -414,7 +414,6 @@ func handleDHCPDNSConfigGet(ref *configRef, store *TemplateStore) http.HandlerFu
 			Pending:            isPending,
 			DNS:                buildDNSConfigFormData(c, node),
 			DHCP:               buildDHCPConfigFormData(c, node),
-			LocalDomains:       buildLocalDomainRows(c.LocalDomains, existing),
 			GlobalDNSBuilder:   dnsRecordBuilderHTML("global_dns_records", existing),
 			DefaultDHCPBuilder: dhcpOptionBuilderHTML("default_dhcp_options"),
 			DHCPTemplates:      buildTemplateRows(store.ByKind(TemplateKindDHCP)),
@@ -1658,7 +1657,6 @@ type dhcpDNSConfigFormData struct {
 	DNS  dnsConfigFormData
 	DHCP dhcpConfigFormData
 
-	LocalDomains       []localDomainFormRow
 	GlobalDNSBuilder   template.HTML
 	DefaultDHCPBuilder template.HTML
 

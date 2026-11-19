@@ -192,7 +192,7 @@ func main() {
 	mux.HandleFunc("POST /config/domains/{name}/records/edit", requirePermission(store, webauth.PermEditScopes, handleDomainRecordEdit(ref)))
 	mux.HandleFunc("POST /config/domains/{name}/records/delete", requirePermission(store, webauth.PermEditScopes, handleDomainRecordDelete(ref)))
 	mux.HandleFunc("POST /config/domains/new", requirePermission(store, webauth.PermEditScopes, handleLocalDomainAddPost(ref)))
-	mux.HandleFunc("POST /config/domains/{name}/save", requirePermission(store, webauth.PermEditScopes, handleLocalDomainSavePost(ref)))
+	mux.HandleFunc("POST /config/domains/{name}/ttl", requirePermission(store, webauth.PermEditScopes, handleDomainTTL(ref)))
 	mux.HandleFunc("POST /config/domains/{name}/delete", requirePermission(store, webauth.PermEditScopes, handleLocalDomainDeletePost(ref)))
 	mux.HandleFunc("POST /config/domains/{name}/fork", requirePermission(store, webauth.PermEditScopes, handleLocalDomainForkPost(ref)))
 	mux.HandleFunc("POST /config/domains/{name}/unlink", requirePermission(store, webauth.PermEditScopes, handleLocalDomainUnlinkPost(ref)))

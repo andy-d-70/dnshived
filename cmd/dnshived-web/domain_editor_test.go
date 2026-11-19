@@ -515,3 +515,52 @@ func TestDomEditor_PrefillsFromAFailedCheck(t *testing.T) {
 		t.Error("the add row is filled from the link")
 	}
 }
+
+func TestHandleDomainTTL(t *testing.T) {
+	tests := []struct {
+		name     string
+		ttl      string
+		wantTTL  int
+		wantPush bool
+	}{
+		{"set", "3600", 3600, true},
+		{"empty clears", "", 0, true},
+		{"not a number", "abc", 100, false},
+		{"negative", "-5", 100, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			live := testClusterWithScopes()
+			recs := []config.LocalDomainHost{{Host: "x", Type: "A", Value: "10.0.0.9"}}
+			live.LocalDomains = []config.LocalDomain{
+				{Name: "foo.lan", TTL: 100, Records: recs},
+				{Name: "link.lan", TTL: 100, ForkedFrom: "foo.lan", Records: recs},
+				{Name: "bar.lan", TTL: 7},
+			}
+			srv, pushed := fakeCandidateNode(t, live)
+			defer srv.Close()
+			cfg := &WebConfig{Nodes: []NodeConfig{nodeConfigFor(t, srv)}}
+			r := httptest.NewRequest(http.MethodPost, "/config/domains/foo.lan/ttl", strings.NewReader("ttl="+url.QueryEscape(tt.ttl)))
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			r.SetPathValue("name", "foo.lan")
+			w := httptest.NewRecorder()
+			handleDomainTTL(newConfigRef(cfg))(w, r)
+			if !tt.wantPush {
+				if w.Code != http.StatusSeeOther || len(pushed.LocalDomains) != 0 {
+					t.Fatalf("code %d, pushed %d domains; want a redirect with nothing staged", w.Code, len(pushed.LocalDomains))
+				}
+				return
+			}
+			if w.Code >= 400 {
+				t.Fatalf("HTTP %d: %s", w.Code, w.Body.String())
+			}
+			got := map[string]int{}
+			for _, d := range pushed.LocalDomains {
+				got[d.Name] = d.TTL
+			}
+			if got["foo.lan"] != tt.wantTTL || got["link.lan"] != tt.wantTTL || got["bar.lan"] != 7 {
+				t.Errorf("TTLs = %v, want foo and its link %d, bar 7", got, tt.wantTTL)
+			}
+		})
+	}
+}

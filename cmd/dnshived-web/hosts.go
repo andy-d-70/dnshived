@@ -508,7 +508,7 @@ var hostsTmpl = template.Must(template.New("hosts").Parse(`<!doctype html>
 <div class="pagehead"><h1>DHCP</h1></div>
 {{.Tabs}}
 <div class="listbar">
-<form method="get" action="/hosts">{{range .FilterHidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}<input type="search" name="q" value="{{.Q}}" placeholder="Search anything: name, MAC, address, scope…" aria-label="Search hosts"><select name="scope" class="js-combo" aria-label="Scope" onchange="this.form.submit()"><option value="">All scopes</option>{{$sc := .Scope}}{{range .Scopes}}<option value="{{.}}"{{if eq . $sc}} selected{{end}}>{{.}}</option>{{end}}</select></form>
+<form method="get" action="/hosts">{{range .FilterHidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">{{end}}<input type="search" name="q" value="{{.Q}}" placeholder="Name, MAC, address, scope…" aria-label="Search hosts"><select name="scope" class="js-combo" aria-label="Scope" onchange="this.form.submit()"><option value="">All scopes</option>{{$sc := .Scope}}{{range .Scopes}}<option value="{{.}}"{{if eq . $sc}} selected{{end}}>{{.}}</option>{{end}}</select></form>
 {{range .Chips}}<a class="lchip{{if .Active}} sel{{end}}" href="{{.URL}}">{{.Label}}</a>{{end}}
 <span class="grow"></span>
 <a class="lbtn" href="/simulator" title="Work out what a client would get in a scope, without sending anything">Client simulator</a>

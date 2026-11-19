@@ -5,7 +5,6 @@ package main
 
 import (
 	"fmt"
-	"html/template"
 	"net/http"
 	"strconv"
 	"strings"
@@ -67,56 +66,6 @@ func parseDomainHostLines(s string) ([]config.LocalDomainHost, error) {
 	return records, nil
 }
 
-// localDomainFormRow is the Local domains & hostnames section's own
-// per-domain display/edit row.
-type localDomainFormRow struct {
-	Name        string
-	TTL         int
-	TextareaID  string
-	RecordsText string
-	RecordCount int
-	SaveHref    string
-	DeleteHref  string
-	ForkHref    string
-	// ForkedFrom is "" for an independent domain, else the parent domain's own
-	// name.
-	ForkedFrom string
-	UnlinkHref string
-	Builder    template.HTML
-}
-
-// buildLocalDomainRows turns Cluster.LocalDomains into display rows,
-// sorted by name for deterministic, diff-friendly rendering.
-func buildLocalDomainRows(domains []config.LocalDomain, existing []dnsExistingRecord) []localDomainFormRow {
-	sorted := append([]config.LocalDomain(nil), domains...)
-	sortLocalDomains(sorted)
-	rows := make([]localDomainFormRow, len(sorted))
-	for i, d := range sorted {
-		textareaID := "domain_records_" + domainFormID(d.Name)
-		rows[i] = localDomainFormRow{
-			Name:        d.Name,
-			TTL:         d.TTL,
-			TextareaID:  textareaID,
-			RecordsText: formatDomainHostLines(d.Records),
-			RecordCount: len(d.Records),
-			SaveHref:    "/config/domains/" + d.Name + "/save",
-			DeleteHref:  "/config/domains/" + d.Name + "/delete",
-			ForkHref:    "/config/domains/" + d.Name + "/fork",
-			ForkedFrom:  d.ForkedFrom,
-			UnlinkHref:  "/config/domains/" + d.Name + "/unlink",
-			Builder:     dnsRecordBuilderHTML(textareaID, existing),
-		}
-	}
-	return rows
-}
-
-// domainFormID turns a domain name into something safe to embed directly
-// in an HTML id="" / JS identifier.
-func domainFormID(name string) string {
-	r := strings.NewReplacer(".", "_", "-", "_")
-	return r.Replace(name)
-}
-
 func sortLocalDomains(domains []config.LocalDomain) {
 	for i := 1; i < len(domains); i++ {
 		for j := i; j > 0 && domains[j-1].Name > domains[j].Name; j-- {
@@ -158,7 +107,7 @@ func handleLocalDomainAddPost(ref *configRef) http.HandlerFunc {
 			config.LocalDomain{Name: name, TTL: ttl})
 
 		user, _ := userFromContext(r)
-		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DNS")
+		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/domains", "back to the domains")
 	}
 }
 
@@ -208,7 +157,7 @@ func handleLocalDomainForkPost(ref *configRef) http.HandlerFunc {
 		payload.LocalDomains = append(append([]config.LocalDomain(nil), current.LocalDomains...), fork)
 
 		user, _ := userFromContext(r)
-		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DNS")
+		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/domains", "back to the domains")
 	}
 }
 
@@ -242,51 +191,7 @@ func handleLocalDomainUnlinkPost(ref *configRef) http.HandlerFunc {
 		payload.LocalDomains = domains
 
 		user, _ := userFromContext(r)
-		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DNS")
-	}
-}
-
-func handleLocalDomainSavePost(ref *configRef) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		cfg := ref.Load()
-		name := r.PathValue("name")
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-		ttl, _ := strconv.Atoi(r.PostForm.Get("ttl"))
-		records, err := parseDomainHostLines(r.PostForm.Get("records"))
-		if err != nil {
-			http.Error(w, "bad input: "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		current, _, _, err := currentEditableConfig(nodesIncludingSelf(cfg))
-		if err != nil {
-			http.Error(w, "could not read current config: "+err.Error(), http.StatusBadGateway)
-			return
-		}
-		found := false
-		domains := make([]config.LocalDomain, len(current.LocalDomains))
-		for i, d := range current.LocalDomains {
-			if d.Name == name {
-				d.TTL = ttl
-				d.Records = records
-				found = true
-			}
-			domains[i] = d
-		}
-		if !found {
-			http.Error(w, fmt.Sprintf("domain %q not found", name), http.StatusNotFound)
-			return
-		}
-		domains = config.PropagateForkedDomains(domains, name)
-		payload := clusterPushPayloadFrom(current)
-		payload.Scopes = current.Scopes
-		payload.LocalDomains = domains
-
-		user, _ := userFromContext(r)
-		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DNS")
+		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/domains", "back to the domains")
 	}
 }
 
@@ -313,6 +218,6 @@ func handleLocalDomainDeletePost(ref *configRef) http.HandlerFunc {
 		payload.LocalDomains = domains
 
 		user, _ := userFromContext(r)
-		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/dns#domains", "back to DNS")
+		pushCandidateAndRenderResult(w, cfg, payload, user, "/config/domains", "back to the domains")
 	}
 }

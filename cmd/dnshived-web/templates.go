@@ -162,7 +162,7 @@ type templateEditPageData struct {
 // sourced from Cluster.LocalDomains.
 func localDomainInsertHTML(textareaID string, domains []config.LocalDomain) template.HTML {
 	if len(domains) == 0 {
-		return template.HTML(`<p class="dim">no local domains configured yet — see <a href="/config/dns#domains">DNS &rarr; Local domains</a>.</p>`)
+		return template.HTML(`<p class="dim">no local domains configured yet — see <a href="/config/domains">DNS &rarr; Domains</a>.</p>`)
 	}
 	var b strings.Builder
 	b.WriteString(`<script>function domainInsert_` + textareaID + `(body){var ta=document.getElementById('` + textareaID + `');if(!ta)return;var have=ta.value.split("\n").filter(function(l){return l!=='';});var add=body.split("\n");add.forEach(function(line){if(line!=='' && have.indexOf(line)===-1){have.push(line);}});ta.value=have.join("\n");}</script>`)

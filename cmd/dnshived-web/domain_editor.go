@@ -520,6 +520,25 @@ func handleDomainRecordDelete(ref *configRef) http.HandlerFunc {
 	}
 }
 
+func handleDomainTTL(ref *configRef) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		mutateDomain(ref, w, r, name, func(d *config.LocalDomain) error {
+			v := strings.TrimSpace(r.PostForm.Get("ttl"))
+			ttl := 0
+			if v != "" {
+				n, err := strconv.Atoi(v)
+				if err != nil || n < 0 || n > 2147483647 {
+					return fmt.Errorf("the default TTL is a number of seconds, or empty for the DNS server default")
+				}
+				ttl = n
+			}
+			d.TTL = ttl
+			return nil
+		})
+	}
+}
+
 var domEditorTmpl = template.Must(template.New("domains").Parse(pagerBarDefineHTML + `<!doctype html>
 <title>dnshived-web — DNS domains</title>
 ` + styleHTML + `
@@ -576,7 +595,8 @@ var domEditorTmpl = template.Must(template.New("domains").Parse(pagerBarDefineHT
 {{template "pagerbar" .PagerBottom}}
 {{if not .Virtual}}
 <div class="dom-actions">
-{{if .Domain.ForkedFrom}}<form method="post" action="/config/domains/{{.Domain.Name}}/unlink" onsubmit="return confirm('Make {{.Domain.Name}} standalone? It keeps a copy of the records and is no longer updated from {{.Domain.ForkedFrom}}.')" style="display:inline"><button type="submit">Unlink (make standalone)</button></form>
+{{if not .Domain.ForkedFrom}}<form method="post" action="/config/domains/{{.Domain.Name}}/ttl" class="dom-ttl" style="display:inline"><label>Default TTL <input name="ttl" value="{{if .Domain.TTL}}{{.Domain.TTL}}{{end}}" placeholder="server default" size="9" inputmode="numeric" aria-label="Default TTL in seconds for this domain" title="Seconds; applies to records without their own TTL. Empty uses the DNS server default."></label> <button type="submit">Set</button></form>
+{{end}}{{if .Domain.ForkedFrom}}<form method="post" action="/config/domains/{{.Domain.Name}}/unlink" onsubmit="return confirm('Make {{.Domain.Name}} standalone? It keeps a copy of the records and is no longer updated from {{.Domain.ForkedFrom}}.')" style="display:inline"><button type="submit">Unlink (make standalone)</button></form>
 {{else}}<form method="post" action="/config/domains/{{.Domain.Name}}/fork" onsubmit="var n=prompt('Name of the new linked domain (it answers with the same records):','');if(!n)return false;this.new_name.value=n;return true" style="display:inline"><input type="hidden" name="new_name"><button type="submit">Link a new domain…</button></form>{{end}}
 <form method="post" action="/config/domains/{{.Domain.Name}}/delete" onsubmit="return confirm('Delete the domain {{.Domain.Name}} and all its records?')" style="display:inline"><button type="submit" class="btn-danger">Delete domain…</button></form>
 </div>
