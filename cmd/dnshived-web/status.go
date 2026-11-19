@@ -252,6 +252,21 @@ var (
 	settlingSince time.Time
 )
 
+// ServingNum is the leading count of the serving text, shown as the big
+// figure; ServingRest is the remainder with its leading space.
+func (d overviewData) ServingNum() string {
+	n, _, _ := strings.Cut(d.ServingText, " ")
+	return n
+}
+
+func (d overviewData) ServingRest() string {
+	_, rest, ok := strings.Cut(d.ServingText, " ")
+	if !ok {
+		return ""
+	}
+	return " " + rest
+}
+
 // shortVersion drops the build metadata after "+".
 func shortVersion(v string) string {
 	if i := strings.IndexByte(v, '+'); i > 0 {
@@ -1225,11 +1240,12 @@ setting once every node is reachable.</strong></p>
 
 <section class="card">
 <h2>Scopes <span class="info-ico" title="how many of the cluster's configured scopes currently have exactly one node authoritatively serving DHCP for them — by design, never two at once; a scope can be temporarily unserved during startup/failover/rebalancing without that being an outage. Disabled scopes are not counted as serving and are listed separately">ⓘ</span></h2>
-<p class="{{.ServingClass}} card-big">{{.ServingText}}</p>
+<p class="{{.ServingClass}} card-big"><span class="fig">{{.ServingNum}}</span>{{.ServingRest}}</p>
 <div class="meter {{.ServingMeter}}"><i style="width:{{.ServingPct}}%"></i></div>
 <table class="small kv-table fixed-table"><colgroup><col style="width:40%"><col style="width:60%"></colgroup>
 {{if .UnservedCount}}<tr><td>Not served</td><td class="warn">{{.UnservedCount}}</td></tr>{{end}}
 {{if .DisabledCount}}<tr><td>Paused (disabled)</td><td>{{.DisabledCount}}</td></tr>{{end}}
+{{if .ActiveTokens}}<tr><td>Tokens</td><td>{{.ActiveTokens}} active</td></tr>{{end}}
 {{range .ServingNodes}}<tr><td class="{{.Class}}">{{.Name}}</td><td><span class="meter mini"><i style="width:{{.Pct}}%"></i></span> {{.Count}} serving</td></tr>
 {{end}}</table>
 <p><a href="/scopes">Open the scope list →</a></p>

@@ -337,7 +337,9 @@ function dnshivedInitTabs(){
       a.className='tab-link';
       a.textContent=x[0];
       a.href=x[1];
-      strip.appendChild(a);
+      var before=null;
+      if(x[2]){ btns.forEach(function(b){ if(!before&&b.textContent===x[2]) before=b; }); }
+      strip.insertBefore(a,before);
     });
     host.insertBefore(strip,host.firstChild);
     host.classList.add('tabs-ready');
@@ -856,6 +858,17 @@ overflow:hidden;vertical-align:middle;margin-right:.4rem}
 .rseg label:last-child span{border-right:0}
 .rseg input:checked+span{background:var(--accent);color:var(--on-accent);font-weight:600}
 .rseg input:focus-visible+span{outline:2px solid var(--accent);outline-offset:-2px}
+.card-big .fig{font-size:1.6rem;line-height:1.1;margin-right:.1rem}
+.card-attn .card-list li::before{content:"\2716  ";color:var(--crit)}
+.card-attn .card-list li.dim::before{content:""}
+.count-badge{display:inline-block;min-width:1.7rem;padding:.05rem .5rem;border:1px solid var(--border);border-radius:999px;background:var(--panel);font-size:.8em;text-align:center;vertical-align:middle}
+.pend-card{margin:0 0 .9rem}
+.pend-card .card-list li:last-child{border-bottom:0}
+.pend-head{display:flex;align-items:center;gap:.6rem}
+.pend-head .grow{flex:1}
+.pend-body{margin-top:.4rem}
+.pend-body ul{margin:.2rem 0 0;padding-left:1.1rem}
+.actionbar button{margin-left:.4rem}
 .dot{display:inline-block;width:.6rem;height:.6rem;border-radius:50%;margin-right:.35rem;background:currentColor;vertical-align:baseline}
 .chip{display:inline-flex;align-items:center;gap:.25rem;padding:.05rem .55rem;border-radius:999px;border:1px solid var(--border);font-size:.86em;white-space:nowrap;background:var(--panel);font-weight:600}
 .chip.ok{background:color-mix(in srgb,var(--ok) 13%,transparent);border-color:transparent;color:var(--ok)}
@@ -882,6 +895,16 @@ func tabLinksHTML(items [][2]string, active string) string {
 	}
 	b.WriteString(`</div>`)
 	return b.String()
+}
+
+// logsTabs is the strip the Daemons page shows so it reads as a tab of Logs.
+func logsTabs(active string) string {
+	return tabLinksHTML([][2]string{
+		{"/logs", "General"},
+		{"/logs#tab-audit", "Audit"},
+		{"/daemons", "Daemons"},
+		{"/logs#daemons", "Daemon logs"},
+	}, active)
 }
 
 // securityTabs is the strip shared by the three pages of the Security group. The

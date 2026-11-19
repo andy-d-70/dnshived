@@ -492,16 +492,16 @@ func TestHandlePending_WithCandidateShowsDiffAndActions(t *testing.T) {
 	if !strings.Contains(body, "vlan_id: 100 → 200") {
 		t.Errorf("expected the scope field diff rendered, got:\n%s", body)
 	}
-	if !strings.Contains(body, "Commit") || !strings.Contains(body, "Discard all pending changes") {
+	if !strings.Contains(body, "Commit all 1 change(s)") || !strings.Contains(body, ">Discard all<") {
 		t.Errorf("expected Commit/Discard actions rendered, got:\n%s", body)
 	}
-	if !strings.Contains(body, "Discard this change") {
+	if !strings.Contains(body, "/pending/discard/scopes/") {
 		t.Errorf("expected a per-scope discard action, got:\n%s", body)
 	}
-	if !strings.Contains(body, `class="btn-success">Commit`) {
+	if !strings.Contains(body, `class="btn-success">Commit all`) {
 		t.Errorf("expected the Commit button to carry class=\"btn-success\", got:\n%s", body)
 	}
-	if strings.Count(body, `class="btn-danger">Discard`) < 2 {
+	if strings.Count(body, `class="btn-danger`) < 2 {
 		t.Errorf("expected both the \"Discard all\" and per-scope \"Discard this change\" buttons to carry class=\"btn-danger\", got:\n%s", body)
 	}
 }

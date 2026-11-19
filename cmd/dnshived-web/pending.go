@@ -454,6 +454,16 @@ type pendingPageData struct {
 	NodeOp *pendingNodeOp
 }
 
+// Count is the number of staged items: the node action, each cluster-wide
+// setting line and each changed scope.
+func (d pendingPageData) Count() int {
+	n := len(d.ClusterDiffs) + len(d.ScopeDiffs)
+	if d.NodeOp != nil {
+		n++
+	}
+	return n
+}
+
 var pendingTmpl = template.Must(template.New("pending").Parse(`<!doctype html>
 <title>dnshived-web — pending changes</title>
 ` + styleHTML + logModalScriptHTML + `
@@ -465,24 +475,16 @@ function submitNodeOpCommit(form, title, steps){
 }
 </script>
 ` + navHTML + `
-<h1>Pending changes</h1>
+<div class="pagehead"><h1>Pending changes{{if .Count}} <span class="count-badge">{{.Count}}</span>{{end}}</h1></div>
 
 {{if .Error}}<p class="crit">{{.Error}}</p>{{else}}
-<p class="dim">Every save on the config/scopes/DNS/DHCP editors and a scope's own
-edit page stages a change here first ("Palo Alto style" candidate config) — nothing
-reaches the running cluster until you Commit below. Onboard/replace/offboard
-actions on <a href="/config">Cluster Config</a> also stage here now, as a
-separate "Node action" below — they're a genuinely different shape (a one-shot
-RPC with real side effects on a whole other node, not a document field diff),
-so they get their own Commit/Discard rather than joining the table below, but
-nothing runs until you confirm it here either way.</p>
+<p class="dim" title="Every save on the config, scope, DNS and DHCP editors stages a change here first (a candidate config); nothing reaches the running cluster until you commit. Onboard, replace and offboard actions on Cluster settings stage here as a separate Node action: a one-shot action with side effects on a whole other node, not a field diff, so it has its own Commit and Discard.">Every change you save is staged here first; nothing reaches the running cluster until you commit.</p>
 
 {{if .NodeOp}}
 <h2>Node action</h2>
-<table border="1" cellpadding="4" cellspacing="0">
-<tr><th>Staged action</th><th>Staged by</th><th>Staged at</th></tr>
-<tr><td>{{.NodeOp.Describe}}</td><td>{{.NodeOp.StagedBy}}</td><td>{{.NodeOp.StagedAt.Format "15:04:05"}}</td></tr>
-</table>
+<section class="card pend-card">
+<p style="margin:0"><span class="chip warn">staged</span> {{.NodeOp.Describe}} <span class="dim">· by {{.NodeOp.StagedBy}} at {{.NodeOp.StagedAt.Format "15:04:05"}}</span></p>
+</section>
 {{if .NodeOp.LeavesZeroCoreNodes}}
 <p class="crit">⚠ This is the LAST remaining core node. Committing this will PERMANENTLY WIPE the entire cluster — every credential, every scope, gone, with nothing left to recover from. Download a recent backup from <a href="/backup">Config management</a> before you commit this.</p>
 <form method="post" action="/pending/nodeop/commit" style="display:inline" onsubmit="return document.getElementById('confirm_wipe').checked && confirm('This is the LAST core node — committing WIPES THE ENTIRE CLUSTER PERMANENTLY. Are you certain?') && submitNodeOpCommit(this, {{.NodeOp.DescribeJSON}}, {{.NodeOp.StepsJSON}})">
@@ -511,13 +513,15 @@ nothing runs until you confirm it here either way.</p>
 {{if not .NodeOp}}<p class="ok">No pending changes.</p>{{end}}
 {{if .HasCandidate}}<p class="dim">(a staged save exists but matches the running config exactly — nothing to commit; it'll be reused as the starting point the next time you edit something)</p>{{end}}
 {{else}}
-<p>Snapshot from node: <strong>{{.SourceNode}}</strong>.</p>
+<div class="banner warn actionbar">
+<strong>Nothing is applied until you commit.</strong><span class="banner-detail">Snapshot from {{.SourceNode}}</span><span class="grow"></span>
+<form method="post" action="/pending/discard" onsubmit="return confirm('This will discard EVERY pending change on every node. Continue?')" style="display:inline">
+<button type="submit" class="btn-danger">Discard all</button>
+</form>
 <form method="post" action="/pending/commit" onsubmit="return confirm('This will push every pending change to every configured node and restart the daemon where needed. Continue?')" style="display:inline">
-<button type="submit" class="btn-success">Commit — apply to the live cluster</button>
+<button type="submit" class="btn-success">Commit all {{.Count}} change(s)</button>
 </form>
-<form method="post" action="/pending/discard" onsubmit="return confirm('This will discard EVERY pending change on every node. Continue?')" style="display:inline;margin-left:1.5rem">
-<button type="submit" class="btn-danger">Discard all pending changes</button>
-</form>
+</div>
 
 {{if .RestartWarningFields}}
 <p class="warn">⚙ This change includes {{range $i, $f := .RestartWarningFields}}{{if $i}}, {{end}}<code>{{$f}}</code>{{end}} — committing it will restart the daemon on every node where that field changed. Each node is restarted one at a time, waiting for it to fully recover before moving to the next — expect a brief interruption on that node specifically, not the whole cluster at once.</p>
@@ -525,32 +529,27 @@ nothing runs until you confirm it here either way.</p>
 
 {{if .ClusterDiffs}}
 <h2>Cluster-wide settings</h2>
-<table border="1" cellpadding="4" cellspacing="0">
-<tr><th>Field</th><th>Change</th></tr>
-{{range .ClusterDiffs}}<tr><td>{{.Label}}</td><td>{{.Detail}}</td></tr>{{end}}
-</table>
+<section class="card pend-card"><ul class="card-list">
+{{range .ClusterDiffs}}<li><b>{{.Label}}</b>: {{.Detail}}</li>{{end}}
+</ul></section>
 <p class="dim">Edit on <a href="/config">cluster settings</a> or <a href="/config/dhcp">DHCP</a> or <a href="/config/dns">DNS</a>.</p>
 {{end}}
 
 {{if .ScopeDiffs}}
 <h2>Scopes</h2>
-<table border="1" cellpadding="4" cellspacing="0">
-<tr><th>Scope</th><th>Change</th><th></th></tr>
 {{range .ScopeDiffs}}
-<tr>
-  <td><a href="/scopes/{{.Name}}">{{.Name}}</a></td>
-  <td class="{{if eq .Kind "removed"}}crit{{else if eq .Kind "added"}}ok{{else}}warn{{end}}">
+<section class="card pend-card">
+<div class="pend-head"><b><a href="/scopes/{{.Name}}">{{.Name}}</a></b><span class="grow"></span><form method="post" action="/pending/discard/scopes/{{.Name}}" onsubmit="return confirm('Discard the pending change for {{.Name}} only? Every other pending change stays.')" style="display:inline"><button type="submit" class="btn-danger btn-sm">Discard</button></form></div>
+<div class="{{if eq .Kind "removed"}}crit{{else if eq .Kind "added"}}ok{{else}}warn{{end}} pend-body">
   {{if eq .Kind "added"}}new scope
   {{else if eq .Kind "removed"}}removed
   {{else}}<ul>{{range .Changes}}<li>{{.}}</li>{{end}}</ul>
   {{end}}
   {{if .ScopeDisabled}}<div class="warn" title="a disabled scope keeps its VLAN interface and node addresses but releases its VIP and VRRP, and no node relays DHCP or DNS for it">this scope will be DISABLED: DHCP and DNS stop on every node, probing off</div>{{end}}
   {{if .RenderedPreview}}<details><summary>{{if .ScopeDisabled}}rendered but not relayed while disabled (no client request reaches these lines){{else}}what will actually be rendered (this scope's own contribution to the shared central DHCP/DNS config){{end}}</summary><pre style="margin:.3rem 0;padding:.5rem;background:var(--panel);border:1px solid var(--border);overflow-x:auto">{{.RenderedPreview}}</pre></details>{{end}}
-  </td>
-  <td style="border-left:2px solid var(--border);padding-left:.8rem"><form method="post" action="/pending/discard/scopes/{{.Name}}" onsubmit="return confirm('Discard the pending change for {{.Name}} only? Every other pending change stays.')" style="display:inline"><button type="submit" class="btn-danger">Discard this change</button></form></td>
-</tr>
+</div>
+</section>
 {{end}}
-</table>
 {{end}}
 {{end}}
 {{end}}

@@ -584,7 +584,7 @@ func TestLogsTmpl_CarriesTheDaemonsTab(t *testing.T) {
 	if err := logsTmpl.Execute(&buf, logsPageData{}); err != nil {
 		t.Fatalf("logsTmpl.Execute failed: %v", err)
 	}
-	if !strings.Contains(buf.String(), `data-extra-tabs='[["Daemons","/daemons"]]'`) {
+	if !strings.Contains(buf.String(), `data-extra-tabs='[["Daemons","/daemons","Daemon logs"]]'`) {
 		t.Error("the Daemons page belongs under Logs now: expected it as a tab of the Logs page")
 	}
 	buf.Reset()

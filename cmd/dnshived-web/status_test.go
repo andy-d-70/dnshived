@@ -1618,7 +1618,7 @@ func TestStatusTmpl_HealthChecksCarryTheFormerDetails(t *testing.T) {
 			t.Errorf("the overview lacks %q", want)
 		}
 	}
-	for _, gone := range []string{"More cluster details", "card-details", "<td>Node IDs</td>", "<td>Tokens</td>"} {
+	for _, gone := range []string{"More cluster details", "card-details", "<td>Node IDs</td>"} {
 		if strings.Contains(out, gone) {
 			t.Errorf("the old details block must be gone, found %q", gone)
 		}
@@ -1777,5 +1777,20 @@ func TestProbeCell_ButtonSitsInItsOwnFixedPart(t *testing.T) {
 		if !strings.Contains(out[i:], "probe now") || !strings.Contains(out[i:], "detail") {
 			t.Errorf("detail and the button belong to the action part: %s", out)
 		}
+	}
+}
+
+func TestStatusTmpl_ScopesCardShowsTheBigFigureAndTokens(t *testing.T) {
+	var buf strings.Builder
+	d := overviewData{ClusterState: "STABLE", ServingText: "96 of 102 scope(s)", ActiveTokens: 41}
+	if err := statusTmpl.Execute(&buf, d); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `<span class="fig">96</span> of 102 scope(s)`) || !strings.Contains(out, "<td>Tokens</td><td>41 active</td>") {
+		t.Error("the Scopes card shows the leading count as a big figure and the active tokens")
+	}
+	if n, rest := (overviewData{ServingText: "none"}).ServingNum(), (overviewData{ServingText: "none"}).ServingRest(); n != "none" || rest != "" {
+		t.Errorf("a text without a space stays whole: %q %q", n, rest)
 	}
 }

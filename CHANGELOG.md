@@ -38,6 +38,7 @@
 
 **Fixed**
 
+- Web UI: Pending changes shows the number of staged changes, a commit bar and one card per group; the Daemons page is a tab of Logs between Audit and Daemon logs; Overview shows the serving count as a large figure with the active tokens, and the attention lines carry a mark.
 - Web UI, Security: the tabs are Users, API tokens, Mail & reset and Password policy; users are a table with role and status pills and a row menu, adding a user is a card with a role selector, and the password policy has its own tab. Maintenance: Export and Import share one tab.
 - Web UI, Overview: the banner shows how many nodes and probe hosts answer, the version and how long the cluster has been stable; the nodes table has a colour stripe, state pills and short versions; Cluster paths is a summary (the per-path rows are in its details); Health checks are lines with a mark and a tooltip.
 - Web UI: the menu bar's right side has a Theme button and an account menu with your name, Change password and Log out.

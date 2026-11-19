@@ -516,3 +516,13 @@ func TestNavHTML_HasThemeButtonAndAccountMenu(t *testing.T) {
 		}
 	}
 }
+
+func TestLogsTabs_TheDaemonsPageShowsTheLogsStrip(t *testing.T) {
+	out := logsTabs("/daemons")
+	if strings.Count(out, `aria-current="page"`) != 1 || !strings.Contains(out, `href="/daemons" aria-current="page"`) {
+		t.Errorf("the Daemons tab is the current one: %s", out)
+	}
+	if strings.Index(out, "General") > strings.Index(out, "Audit") || strings.Index(out, "Daemons") > strings.Index(out, "Daemon logs") {
+		t.Errorf("tab order is General, Audit, Daemons, Daemon logs: %s", out)
+	}
+}

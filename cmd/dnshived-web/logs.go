@@ -104,7 +104,7 @@ var logsTmpl = template.Must(template.New("logs").Parse(`<!doctype html>
 ` + navHTML + `
 <h1>Logs</h1>
 
-<div class="tab-host" data-extra-tabs='[["Daemons","/daemons"]]'>
+<div class="tab-host" data-extra-tabs='[["Daemons","/daemons","Daemon logs"]]'>
 <section class="tab-pane" id="tab-general" data-tab="General" data-tab-order="1" data-tab-default>
 <h2 id="logs">General logs</h2>
 <p>Node filter:

@@ -196,9 +196,9 @@ var daemonsTmpl = template.Must(template.New("daemons").Parse(`<!doctype html>
 <title>dnshived-web — daemons</title>
 ` + styleHTML + `
 ` + navHTML + `
-<h1>Daemons</h1>
-
-<div class="view-tabs"><a href="{{.BackHref}}">&larr; {{.BackText}}</a><span class="active">Daemons</span></div>
+<h1>Logs</h1>
+` + logsTabs("/daemons") + `
+{{if ne .BackHref "/logs"}}<p class="dim"><a href="{{.BackHref}}">&larr; {{.BackText}}</a></p>{{end}}
 <p>{{.Total}} unit(s)</p>
 <table border="1" cellpadding="4" cellspacing="0" data-stack>
 <tr><th>Node</th><th>Unit</th><th>State</th><th>Uptime</th><th>Version</th><th title="the ACTUAL live process's own user, not just what the unit is configured to run as">Running as</th><th title="the ACTUAL live process's own PID">PID</th><th></th></tr>
