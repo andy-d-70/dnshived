@@ -644,9 +644,6 @@ button.btn-sm,.row-menu>summary{min-height:36px}
 .card-grid>.card{overflow:auto;scrollbar-gutter:stable;min-height:0}
 @media (max-width:700px){.card-grid>.card{height:17rem}.card-grid>.card:nth-child(n+4){height:24rem}}
 .card-attn .card-list li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.attn-field{margin-top:.7rem;padding-top:.5rem;border-top:1px solid var(--border)}
-.attn-field h3{margin:0 0 .3rem;font-size:var(--fs-md)}
-@media (min-width:701px){.card-health{grid-column:span 2}}
 .kv-table.fixed-table td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card-wide .scrollbox{height:12rem;max-height:none}
 /* The scope list: fixed columns (a colgroup), one line per cell, a narrow window scrolls sideways. */
@@ -684,6 +681,7 @@ td.st{white-space:nowrap}
 .events li{padding:.3rem 0;overflow-wrap:anywhere}
 .ev-time{white-space:nowrap;margin-right:.3rem}
 .card-wide{margin:0 0 1rem}
+.card-grid>.card-wide{grid-column:1/-1;margin:0}
 .meter{display:block;height:.55rem;background:var(--border);border-radius:4px;overflow:hidden;margin:.35rem 0 .5rem}
 .meter>i{display:block;height:100%;background:var(--ok)}
 .meter.warn>i{background:var(--warn)}
@@ -691,7 +689,7 @@ td.st{white-space:nowrap}
 .meter.mini{display:inline-block;width:5rem;height:.5rem;margin:0 .4rem 0 0;vertical-align:middle}
 .scrollbox{max-height:12rem;overflow:auto}
 @media (max-width:1180px){.card-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media (max-width:700px){.card-grid{grid-template-columns:1fr}}
+@media (max-width:700px){.card-grid{grid-template-columns:1fr}.card-attn{order:-1}}
 /* tabs: one strip above a set of panes; script-built (dnshivedInitTabs) or plain links (tabLinksHTML). */
 .tabs{display:flex;gap:.2rem;border-bottom:1px solid var(--border);margin:0 0 1rem;overflow-x:auto;scrollbar-width:thin}
 .tabs button,.tabs a.tab-link{font:inherit;flex:0 0 auto;white-space:nowrap;background:none;border:0;

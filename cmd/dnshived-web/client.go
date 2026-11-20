@@ -927,6 +927,26 @@ func fetchDnsmasqLeases(node NodeConfig, scope string) ([]dnsmasqLease, error) {
 	return out.Leases, nil
 }
 
+type hostsViewScope struct {
+	Leases      []dnsmasqLease  `json:"leases"`
+	Neighbors   []scopeNeighbor `json:"neighbors"`
+	NeighborsOK bool            `json:"neighbors_ok"`
+}
+
+// fetchHostsView reads the leases and neighbour tables of many scopes of one
+// core in one call. It returns nil when the core cannot answer that (an older
+// version, an error); the caller then asks per scope.
+func fetchHostsView(node NodeConfig, scopes []string) map[string]hostsViewScope {
+	var out struct {
+		Scopes map[string]hostsViewScope `json:"scopes"`
+	}
+	status, err := doGet(bigDocHTTPClient, node, "/api/v1/hosts-view?scopes="+url.QueryEscape(strings.Join(scopes, ",")), &out)
+	if err != nil || status != http.StatusOK || out.Scopes == nil {
+		return nil
+	}
+	return out.Scopes
+}
+
 // fetchProbe calls GET /api/v1/probe/<scope> on an external probe host.
 func fetchProbe(node NodeConfig, scope string) (probeResult, error) {
 	var pr probeResult

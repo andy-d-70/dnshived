@@ -1185,7 +1185,7 @@ var statusTmpl = template.Must(template.New("status").Funcs(template.FuncMap{
 <title>dnshived-web — overview</title>
 ` + styleHTML + `
 ` + navHTML + `
-<h1>Overview</h1>
+<h1 class="ov-h1">Overview <button type="button" id="ov-arrange" class="ov-arrange" title="Choose which widgets to show, then move and resize them on the grid">Arrange</button></h1>
 
 
 {{if .Mismatch}}
@@ -1209,7 +1209,7 @@ setting once every node is reachable.</strong></p>
 <p class="banner {{.BannerClass}}"><strong>{{.BannerText}}</strong>{{with .BannerDetail}}<span class="banner-detail">{{.}}</span>{{end}}<span class="grow"></span>{{if .StableSince}}<span class="banner-right" title="stable since {{.StableSince}} (this web host's time)">stable for {{.StableFor}}</span>{{end}}</p>
 
 <div class="card-grid">
-<section class="card">
+<section class="card" data-w="nodes">
 <h2>Cluster nodes</h2>
 <table class="small fixed-table nodes-table" data-stack>
 <colgroup><col style="width:27%"><col style="width:25%"><col style="width:22%"><col style="width:26%"></colgroup>
@@ -1243,7 +1243,7 @@ setting once every node is reachable.</strong></p>
 </table>
 </section>
 
-<section class="card">
+<section class="card" data-w="scopes">
 <h2>Scopes <span class="info-ico" title="how many of the cluster's configured scopes currently have exactly one node authoritatively serving DHCP for them — by design, never two at once; a scope can be temporarily unserved during startup/failover/rebalancing without that being an outage. Disabled scopes are not counted as serving and are listed separately">ⓘ</span></h2>
 <p class="{{.ServingClass}} card-big"><span class="fig">{{.ServingNum}}</span>{{.ServingRest}}</p>
 <div class="meter {{.ServingMeter}}"><i style="width:{{.ServingPct}}%"></i></div>
@@ -1256,7 +1256,7 @@ setting once every node is reachable.</strong></p>
 <p><a href="/scopes">Open the scope list →</a></p>
 </section>
 
-<section class="card">
+<section class="card" data-w="probes">
 <h2>Probes <span class="info-ico" title="real DHCP/DNS validation performed from an external probe host, on each scope's own client-facing VLAN — the closest thing to 'does this actually work for a real client', not just 'does the cluster believe it's serving'">ⓘ</span></h2>
 <p class="{{.ProbeSummaryClass}} card-big">{{.ProbeSummary}}</p>
 {{with .ProbeFig}}{{if .Total}}<div class="meter {{.Meter}}"><i style="width:{{.Pct}}%"></i></div>
@@ -1272,26 +1272,8 @@ setting once every node is reachable.</strong></p>
 {{end}}<p><a href="/probes">Open the probe results →</a></p>
 </section>
 
-<section class="card">
-<h2>Cluster paths <span class="info-ico" title="each worker trunk's own alternate path to every other core role — continuously monitored, not actively used until a peer's primary (mgmt) path goes down">ⓘ</span></h2>
-<p class="{{.PathsSummaryClass}} card-big">{{.PathsSummaryText}}</p>
-{{if .VLANPaths}}<p class="dim">{{.VLANPaths}} VLAN path(s) run over the trunks.</p>{{end}}
-{{if .PathRows}}<p><a href="#" onclick="document.getElementById('paths-modal').showModal();return false;">Details →</a></p>{{end}}
-</section>
-
-<section class="card card-health">
-<h2>Health checks</h2>
-<ul class="card-list checks">
-<li class="{{.ClusterClass}}" title="the cluster's own quorum/failover state machine: STABLE means every serving decision has settled and held for the required settling window; DEGRADED/GETTING THERE/NOT CONVERGING mean scopes are still starting, rebalancing, or stuck — not necessarily an outage, but worth watching"><b>State</b> {{.ClusterState}}</li>
-<li class="{{.ConfigSaneClass}}" title="{{if .ConfigSaneTitle}}{{.ConfigSaneTitle}}{{else}}every node's own live-observed state (interfaces, sockets, ...) checked against what is configured; separate from State, which is FSM/quorum health only{{end}}"><b>Config sane</b> {{.ConfigSaneText}}</li>
-<li class="{{.InterfaceHealthClass}}" title="physical trunk carrier state (link up/down) per node; a link-down trunk force-closes DHCP for every scope on it"><b>Interfaces</b> {{.InterfaceHealthText}}</li>
-<li class="{{.TrunksClass}}" title="{{if .TrunksTitle}}{{.TrunksTitle}}{{else}}every configured trunk on every stable core: verified once that node has heard a topology beacon from another core on it, assumed while nothing has been heard{{end}}"><b>Trunks</b> {{.TrunksText}}</li>
-<li class="{{.ArbiterQuorumClass}}" title="every core node also runs its own arbiter instance; a witness grant needs 2 of these 3 to agree, so this is who is arbiter now, not a single node"><b>Arbiter quorum</b> {{.ArbiterQuorumText}}</li>
-<li class="{{if eq .Witness "healthy"}}ok{{else}}warn{{end}}" title="the time-limited token that authorizes a node to keep a scope's DHCP gate open — renewed continuously while healthy; a node that stops renewing (crash, network loss) has its gate close automatically once its current token expires, which is what actually prevents two nodes serving the same scope at once. Shown: witness state, then how many tokens are active"><b>Witness</b> {{.Witness}} · {{.ActiveTokens}} active</li>
-<li class="{{.DaemonSummaryClass}}" title="systemd unit health (dnshived itself, dnsmasq, keepalived, relays, ...) on every node; independent of State: a unit can be unhealthy while the cluster's own quorum logic stays fine, and vice versa"><b>Daemons</b> {{.DaemonSummary}} <a href="/daemons">details →</a></li>
-</ul>
-<div class="attn-field card-attn">
-<h3>Needs attention{{with .AttnCount}} <span class="dim">({{.}})</span>{{end}}</h3>
+<section class="card card-attn" data-w="attn">
+<h2>Needs attention{{with .AttnCount}} <span class="dim">({{.}})</span>{{end}}</h2>
 {{if or .ProbeIssues .DaemonIssues .Coherence .Unreachable}}
 <ul class="card-list">
 {{if .Unreachable}}<li class="crit">{{.Unreachable}} node(s) unreachable{{if .UnreachableNames}}: {{.UnreachableNames}}{{end}}</li>{{end}}
@@ -1305,11 +1287,28 @@ setting once every node is reachable.</strong></p>
 </ul>
 {{else}}
 <p class="ok">✔ Nothing needs attention.</p>
-{{end}}</div>
-</section>
-</div>
+{{end}}</section>
 
-<section class="card card-wide" id="events-card">
+<section class="card" data-w="paths">
+<h2>Cluster paths <span class="info-ico" title="each worker trunk's own alternate path to every other core role — continuously monitored, not actively used until a peer's primary (mgmt) path goes down">ⓘ</span></h2>
+<p class="{{.PathsSummaryClass}} card-big">{{.PathsSummaryText}}</p>
+{{if .VLANPaths}}<p class="dim">{{.VLANPaths}} VLAN path(s) run over the trunks.</p>{{end}}
+{{if .PathRows}}<p><a href="#" onclick="document.getElementById('paths-modal').showModal();return false;">Details →</a></p>{{end}}
+</section>
+
+<section class="card" data-w="health">
+<h2>Health checks</h2>
+<ul class="card-list checks">
+<li class="{{.ClusterClass}}" title="the cluster's own quorum/failover state machine: STABLE means every serving decision has settled and held for the required settling window; DEGRADED/GETTING THERE/NOT CONVERGING mean scopes are still starting, rebalancing, or stuck — not necessarily an outage, but worth watching"><b>State</b> {{.ClusterState}}</li>
+<li class="{{.ConfigSaneClass}}" title="{{if .ConfigSaneTitle}}{{.ConfigSaneTitle}}{{else}}every node's own live-observed state (interfaces, sockets, ...) checked against what is configured; separate from State, which is FSM/quorum health only{{end}}"><b>Config sane</b> {{.ConfigSaneText}}</li>
+<li class="{{.InterfaceHealthClass}}" title="physical trunk carrier state (link up/down) per node; a link-down trunk force-closes DHCP for every scope on it"><b>Interfaces</b> {{.InterfaceHealthText}}</li>
+<li class="{{.TrunksClass}}" title="{{if .TrunksTitle}}{{.TrunksTitle}}{{else}}every configured trunk on every stable core: verified once that node has heard a topology beacon from another core on it, assumed while nothing has been heard{{end}}"><b>Trunks</b> {{.TrunksText}}</li>
+<li class="{{.ArbiterQuorumClass}}" title="every core node also runs its own arbiter instance; a witness grant needs 2 of these 3 to agree, so this is who is arbiter now, not a single node"><b>Arbiter quorum</b> {{.ArbiterQuorumText}}</li>
+<li class="{{if eq .Witness "healthy"}}ok{{else}}warn{{end}}" title="the time-limited token that authorizes a node to keep a scope's DHCP gate open — renewed continuously while healthy; a node that stops renewing (crash, network loss) has its gate close automatically once its current token expires, which is what actually prevents two nodes serving the same scope at once. Shown: witness state, then how many tokens are active"><b>Witness</b> {{.Witness}} · {{.ActiveTokens}} active</li>
+<li class="{{.DaemonSummaryClass}}" title="systemd unit health (dnshived itself, dnsmasq, keepalived, relays, ...) on every node; independent of State: a unit can be unhealthy while the cluster's own quorum logic stays fine, and vice versa"><b>Daemons</b> {{.DaemonSummary}} <a href="/daemons">details →</a></li>
+</ul>
+</section>
+<section class="card card-wide" id="events-card" data-w="events">
 <h2>Recent events <a href="/logs" style="font-weight:400;font-size:.9em">open the logs →</a></h2>
 {{if .RecentEvents}}
 <div class="scrollbox"><ul class="card-list events" data-pager="5,10,25,50,all" data-pager-key="events">
@@ -1317,32 +1316,26 @@ setting once every node is reachable.</strong></p>
 {{end}}</ul></div>
 {{else}}<p class="dim">(no events yet)</p>{{end}}
 </section>
-<script>
-(function(){
-  var c=document.getElementById('events-card');if(!c)return;
-  function fit(){
-    var f=document.getElementById('appfoot'),fh=f?f.offsetHeight:0;
-    var top=c.getBoundingClientRect().top+window.scrollY;
-    var h=Math.max(180,window.innerHeight-(top-window.scrollY)-fh-20);
-    c.style.height=h+'px';
-  }
-  fit();window.addEventListener('resize',fit);document.addEventListener('dnshived-pager',fit);
-})();
-</script>
+</div>
+
 <script>
 (function(){
   var busy=false,every=10000;
   function sel(){var x=window.getSelection&&window.getSelection();return x&&String(x).length>0}
   function swap(doc,q){var a=document.querySelector(q),b=doc.querySelector(q);if(a&&b&&a.innerHTML!==b.innerHTML)a.innerHTML=b.innerHTML}
   function tick(){
-    if(busy||document.hidden||sel()||document.querySelector('dialog[open]'))return;
+    if(busy||document.hidden||sel()||document.querySelector('dialog[open],.card-grid.ov-edit'))return;
     busy=true;
     fetch(location.pathname+location.search,{credentials:'same-origin',headers:{'Accept':'text/html'}}).then(function(r){return r.ok&&!r.redirected?r.text():null}).then(function(t){
       if(!t)return;
       var doc=new DOMParser().parseFromString(t,'text/html');
-      swap(doc,'p.banner');swap(doc,'.card-grid');
-      var a=document.querySelector('#events-card ul.events'),b=doc.querySelector('#events-card ul.events');
-      if(a&&b&&a.innerHTML!==b.innerHTML){a.innerHTML=b.innerHTML;if(a._pgRender)a._pgRender()}
+      swap(doc,'p.banner');
+      [].forEach.call(document.querySelectorAll('[data-w]'),function(w){
+        var k=w.getAttribute('data-w'),n=doc.querySelector('[data-w="'+k+'"]');
+        if(!n)return;
+        if(k==='events'){var a=w.querySelector('ul.events'),b=n.querySelector('ul.events');if(a&&b&&a.innerHTML!==b.innerHTML){a.innerHTML=b.innerHTML;if(a._pgRender)a._pgRender()}}
+        else if(w.innerHTML!==n.innerHTML)w.innerHTML=n.innerHTML;
+      });
     }).catch(function(){}).then(function(){busy=false});
   }
   setInterval(tick,every);
@@ -1407,7 +1400,7 @@ setting once every node is reachable.</strong></p>
 {{end}}
 </dialog>
 {{end}}
-`))
+` + overviewRasterScriptHTML))
 
 // attnItem is one line of the Needs attention card.
 type attnItem struct{ Text, Title string }

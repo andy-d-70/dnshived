@@ -143,6 +143,7 @@ func main() {
 	mux.HandleFunc("POST /scopes/parked/remove", requirePermission(store, webauth.PermEditScopes, handleParkedRemove(ref)))
 	mux.HandleFunc("POST /scopes/{name}/reservations", requirePermission(store, webauth.PermEditScopes, promoteLeaseFormHandler(ref)))
 	mux.HandleFunc("POST /scopes/{name}/reservations/delete", requirePermission(store, webauth.PermEditScopes, deleteReservationFormHandler(ref)))
+	mux.HandleFunc("POST /scopes/{name}/reservations/change-mac", requirePermission(store, webauth.PermEditScopes, changeReservationMACFormHandler(ref)))
 	mux.HandleFunc("POST /scopes/{name}/leases/release", requirePermission(store, webauth.PermEditScopes, releaseLeaseFormHandler(ref)))
 	mux.HandleFunc("POST /paths/reset", requirePermission(store, webauth.PermEditConfig, handleReliabilityResetPost(ref)))
 	mux.HandleFunc("POST /scopes/{name}/config", requirePermission(store, webauth.PermEditScopes, handleScopeConfigPost(ref)))

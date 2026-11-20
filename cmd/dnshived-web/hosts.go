@@ -390,34 +390,62 @@ func fetchHostRows(scopes []scopeRow, cluster config.Cluster, nodes []NodeConfig
 		wg  sync.WaitGroup
 		out []hostRow
 	)
-	sem := make(chan struct{}, 8)
+	type served struct {
+		name string
+		sc   config.ScopeConfig
+	}
+	perNode := map[string][]served{}
 	for _, s := range scopes {
 		sc, ok := cfgScopes[s.Name]
 		if !ok || s.Disabled {
 			continue
 		}
-		node, served := byName[s.Worker]
-		if !served {
+		if _, ok := byName[s.Worker]; !ok {
 			rows := buildHostRows(s.Name, sc, nil, now)
-			mu.Lock()
 			out = append(out, rows...)
-			mu.Unlock()
 			continue
 		}
+		perNode[s.Worker] = append(perNode[s.Worker], served{s.Name, sc})
+	}
+	for worker, list := range perNode {
 		wg.Add(1)
-		sem <- struct{}{}
-		go func(name string, sc config.ScopeConfig, node NodeConfig) {
+		go func(node NodeConfig, list []served) {
 			defer wg.Done()
-			defer func() { <-sem }()
-			leases, _ := fetchDnsmasqLeases(node, name)
-			rows := buildHostRows(name, sc, leases, now)
-			if neigh, err := fetchNeighbors(node, name); err == nil {
-				rows = addUnknownStatic(rows, name, neigh, skipAddresses(cluster, sc, probeOctet))
+			names := make([]string, len(list))
+			for i, e := range list {
+				names[i] = e.name
 			}
-			mu.Lock()
-			out = append(out, rows...)
-			mu.Unlock()
-		}(s.Name, sc, node)
+			batch := fetchHostsView(node, names)
+			sem := make(chan struct{}, 8)
+			var inner sync.WaitGroup
+			for _, e := range list {
+				inner.Add(1)
+				sem <- struct{}{}
+				go func(e served) {
+					defer inner.Done()
+					defer func() { <-sem }()
+					var leases []dnsmasqLease
+					var neigh []scopeNeighbor
+					haveNeigh := false
+					if v, ok := batch[e.name]; ok {
+						leases, neigh, haveNeigh = v.Leases, v.Neighbors, v.NeighborsOK
+					} else {
+						leases, _ = fetchDnsmasqLeases(node, e.name)
+						var err error
+						neigh, err = fetchNeighbors(node, e.name)
+						haveNeigh = err == nil
+					}
+					rows := buildHostRows(e.name, e.sc, leases, now)
+					if haveNeigh {
+						rows = addUnknownStatic(rows, e.name, neigh, skipAddresses(cluster, e.sc, probeOctet))
+					}
+					mu.Lock()
+					out = append(out, rows...)
+					mu.Unlock()
+				}(e)
+			}
+			inner.Wait()
+		}(byName[worker], list)
 	}
 	wg.Wait()
 	return out

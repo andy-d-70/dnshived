@@ -825,6 +825,11 @@ var scopeDetailTmpl = template.Must(template.New("scope-detail").Parse(`<!doctyp
   <td>{{.IP}}</td>
   <td>{{if .Hostname}}{{.Hostname}}{{else}}—{{end}}</td>
   <td>
+  <form method="post" action="/scopes/{{$.Scope}}/reservations/change-mac" style="display:inline" title="Gives this reservation another MAC address and keeps its identity, address and names. Staged as a pending change.">
+  <input type="hidden" name="mac" value="{{.MAC}}">
+  <input name="new_mac" placeholder="new MAC" size="17" autocomplete="off" aria-label="new MAC address">
+  <button type="submit">Change MAC</button>
+  </form>
   <form method="post" action="/scopes/{{$.Scope}}/reservations/delete" style="display:inline" onsubmit="return confirm('Remove reservation {{.MAC}} from {{$.Scope}}? Stages the removal as a pending change on every configured node.')">
   <input type="hidden" name="mac" value="{{.MAC}}">
   <button type="submit">Delete</button>
@@ -1333,6 +1338,68 @@ func deleteReservationFormHandler(ref *configRef) http.HandlerFunc {
 			pushCandidateAndRenderResult(w, cfg, payload, user, "/hosts", "back to hosts")
 			return
 		}
+		pushCandidateAndRenderResult(w, cfg, payload, user, "/scopes/"+scope, "back to scope")
+	}
+}
+
+// changeReservationMAC returns sc's reservations with the one for oldMAC moved to newMAC. The
+// reservation keeps its address, names and client id, and gets an id when it had none so that
+// it stays the same reservation afterwards.
+func changeReservationMAC(sc config.ScopeConfig, oldMAC, newMAC string) ([]config.Reservation, error) {
+	hw, err := net.ParseMAC(strings.TrimSpace(newMAC))
+	if err != nil {
+		return nil, fmt.Errorf("%q is not a MAC address", newMAC)
+	}
+	newMAC = strings.ToLower(hw.String())
+	idx := -1
+	for i, r := range sc.Reservations {
+		if strings.EqualFold(r.MAC, newMAC) {
+			return nil, fmt.Errorf("%s is already reserved in this scope", newMAC)
+		}
+		if strings.EqualFold(r.MAC, oldMAC) {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		return nil, fmt.Errorf("no reservation for %s in this scope", oldMAC)
+	}
+	out := append([]config.Reservation{}, sc.Reservations...)
+	out[idx].MAC = newMAC
+	if out[idx].ID == "" {
+		out[idx].ID = config.NewReservationID()
+	}
+	return out, nil
+}
+
+// changeReservationMACFormHandler (POST /scopes/{name}/reservations/change-mac) stages a MAC change.
+func changeReservationMACFormHandler(ref *configRef) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cfg := ref.Load()
+		scope := r.PathValue("name")
+		c, _, _, err := currentEditableConfig(nodesIncludingSelf(cfg))
+		if err != nil {
+			http.Error(w, "fetch current config: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		sc, ok := c.Scopes[scope]
+		if !ok {
+			http.Error(w, "scope not present in cluster config: "+scope, http.StatusNotFound)
+			return
+		}
+		res, err := changeReservationMAC(sc, r.FormValue("mac"), r.FormValue("new_mac"))
+		if err != nil {
+			http.Error(w, "MAC not changed: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		newScopes := make(map[string]config.ScopeConfig, len(c.Scopes))
+		for name, s := range c.Scopes {
+			newScopes[name] = s
+		}
+		sc.Reservations = res
+		newScopes[scope] = sc
+		payload := clusterPushPayloadFrom(c)
+		payload.Scopes = newScopes
+		user, _ := userFromContext(r)
 		pushCandidateAndRenderResult(w, cfg, payload, user, "/scopes/"+scope, "back to scope")
 	}
 }
