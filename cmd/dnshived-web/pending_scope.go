@@ -267,8 +267,7 @@ var pendingConfirmTmpl = template.Must(template.New("pendingconfirm").Parse(`<!d
 <form method="post" action="/pending/{{.Action}}">
 <input type="hidden" name="back" value="/pending">
 <label style="display:block;margin:.6rem 0">Type <b>{{.Phrase}}</b> to confirm: <input type="text" name="confirm" autocomplete="off" required pattern="{{.Phrase}}" size="14"></label>
-<button type="submit" class="btn-danger">{{.Verb}} all {{.Total}} change(s)</button>
-<a href="/pending" class="btn">Cancel</a>
+<p class="form-actions"><a href="/pending" class="btn-cancel">Cancel</a><button type="submit" class="btn-danger">{{.Verb}} all {{.Total}} change(s)</button></p>
 </form>
 </section>
 {{end}}

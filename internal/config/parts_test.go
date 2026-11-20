@@ -159,7 +159,7 @@ func TestSaveLoadSplit_RoundTripAndLoadFallback(t *testing.T) {
 	if marshalDoc(t, got) != marshalDoc(t, c) {
 		t.Error("loaded split config differs from the saved one")
 	}
-	if err := Save(path, c); err != nil {
+	if err := saveSingle(path, c); err != nil {
 		t.Fatal(err)
 	}
 	c.PSK = "other"

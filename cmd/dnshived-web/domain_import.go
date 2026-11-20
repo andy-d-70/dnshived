@@ -263,8 +263,7 @@ var importTmpl = template.Must(template.New("import").Parse(`<!doctype html>
 </table></div>
 <form method="post" action="/config/domains/{{.Domain}}/import/stage" style="margin-top:.8rem">
 <input type="hidden" name="lines" value="{{.Lines}}">
-{{if .New}}<button type="submit" class="btn-success">Stage {{.New}} new record(s)</button>{{end}}
-<a href="/config/domains?d={{.Domain}}" style="margin-left:1rem">Cancel</a>
+<p class="form-actions"><a href="/config/domains?d={{.Domain}}" class="btn-cancel">Cancel</a>{{if .New}}<button type="submit" class="btn-success">Stage {{.New}} new record(s)</button>{{end}}</p>
 </form>
 `))
 

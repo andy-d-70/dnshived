@@ -17,6 +17,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"dnshived/internal/config"
@@ -129,6 +130,20 @@ func isLocalAddr(hostport string) bool {
 	return false
 }
 
+// selfIdentityTTL is how long this instance's own role and address are kept;
+// they change only when a node is replaced, and reading them costs a full
+// configuration download and parse from the local daemon.
+const selfIdentityTTL = 30 * time.Second
+
+var selfIdentityCache struct {
+	mu         sync.Mutex
+	key        string
+	at         time.Time
+	role, ctrl string
+}
+
+var fetchSelfConfig = fetchConfigDirect
+
 // selfNodeConfig answers "which core role is THIS dnshived-web instance
 // running on, and at what real address".
 func selfNodeConfig(cfg *WebConfig) (NodeConfig, bool) {
@@ -140,11 +155,22 @@ func selfNodeConfig(cfg *WebConfig) (NodeConfig, bool) {
 		}
 	}
 	token := nodesSharedToken(cfg)
+	key := port + "|" + token
+	selfIdentityCache.mu.Lock()
+	if selfIdentityCache.key == key && selfIdentityCache.role != "" && time.Since(selfIdentityCache.at) < selfIdentityTTL {
+		role, ctrl := selfIdentityCache.role, selfIdentityCache.ctrl
+		selfIdentityCache.mu.Unlock()
+		return NodeConfig{Name: role, Addr: ctrl, TLS: true, AdminToken: token, DisplayName: cfg.SelfDisplayName, Color: cfg.SelfColor}, true
+	}
+	selfIdentityCache.mu.Unlock()
 	local := NodeConfig{Addr: "127.0.0.1:" + port, TLS: true, AdminToken: token}
-	c, err := fetchConfigDirect(local)
+	c, err := fetchSelfConfig(local)
 	if err != nil || c.Role == "" || c.ControlAddr == "" {
 		return NodeConfig{}, false
 	}
+	selfIdentityCache.mu.Lock()
+	selfIdentityCache.key, selfIdentityCache.at, selfIdentityCache.role, selfIdentityCache.ctrl = key, time.Now(), c.Role, c.ControlAddr
+	selfIdentityCache.mu.Unlock()
 	return NodeConfig{Name: c.Role, Addr: c.ControlAddr, TLS: true, AdminToken: token, DisplayName: cfg.SelfDisplayName, Color: cfg.SelfColor}, true
 }
 

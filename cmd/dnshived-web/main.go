@@ -16,6 +16,7 @@ import (
 
 	"dnshived/internal/cliguard"
 	"dnshived/internal/instlock"
+	"dnshived/internal/labprofile"
 	"dnshived/internal/passpolicy"
 	"dnshived/internal/tlspin"
 	"dnshived/internal/webauth"
@@ -109,6 +110,7 @@ func main() {
 	selfNameFn = repl.selfName
 	newCatchUp(ref).run(context.Background())
 
+	labprofile.Start(func() string { return "/var/lib/dnshived" })
 	startPendingSummaryTicker(ref)
 	startVerifyCacheCleanup()
 	watchUsersFile(store, cfg.UsersFile, func() { go repl.pushAll() })

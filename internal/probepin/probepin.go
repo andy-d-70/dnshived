@@ -33,6 +33,7 @@ func Config(fp string) *tls.Config {
 	return &tls.Config{
 		MinVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: true,
+		ClientSessionCache: tls.NewLRUClientSessionCache(16),
 		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
 			if len(raw) == 0 {
 				return errors.New("probe presented no certificate")

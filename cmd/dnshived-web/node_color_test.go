@@ -5,13 +5,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"dnshived/internal/config"
 	"dnshived/internal/discovery"
 	"dnshived/internal/webauth"
 )
@@ -220,5 +223,81 @@ func TestStyleHTML_LinksTheNodeColours(t *testing.T) {
 		if !strings.Contains(styleHTML, cls) {
 			t.Errorf("styleHTML lacks %s", cls)
 		}
+	}
+}
+
+func TestStyleHTML_DialogsFollowTheTheme(t *testing.T) {
+	if !strings.Contains(styleHTML, "\ndialog{background:var(--panel);color:var(--text);") || !strings.Contains(styleHTML, "\ndialog::backdrop{") {
+		t.Error("an unstyled dialog falls back to the browser's white; the shared style must give every dialog the theme colours")
+	}
+}
+
+func resetSelfIdentity() {
+	selfIdentityCache.mu.Lock()
+	selfIdentityCache.key, selfIdentityCache.role, selfIdentityCache.ctrl = "", "", ""
+	selfIdentityCache.at = time.Time{}
+	selfIdentityCache.mu.Unlock()
+}
+
+func TestSelfNodeConfig_IsCachedAndStillFollowsTheWebConfig(t *testing.T) {
+	resetSelfIdentity()
+	defer resetSelfIdentity()
+	var fetches int
+	orig := fetchSelfConfig
+	defer func() { fetchSelfConfig = orig }()
+	ok := true
+	fetchSelfConfig = func(NodeConfig) (config.Cluster, error) {
+		fetches++
+		if !ok {
+			return config.Cluster{}, errors.New("down")
+		}
+		return config.Cluster{Role: "core-2", ControlAddr: "10.0.0.2:9443"}, nil
+	}
+	cfg := &WebConfig{Nodes: []NodeConfig{{Name: "core-1", Addr: "10.0.0.1:9443", AdminToken: "t"}}}
+
+	a, good := selfNodeConfig(cfg)
+	if !good || a.Name != "core-2" || a.Addr != "10.0.0.2:9443" {
+		t.Fatalf("%+v %v", a, good)
+	}
+	cfg.SelfDisplayName, cfg.SelfColor = "Rack", "#112233"
+	b, _ := selfNodeConfig(cfg)
+	if fetches != 1 {
+		t.Errorf("fetches = %d, want the second call served from the cache", fetches)
+	}
+	if b.DisplayName != "Rack" || b.Color != "#112233" {
+		t.Errorf("a cached identity must still carry the current nickname and colour: %+v", b)
+	}
+
+	selfIdentityCache.mu.Lock()
+	selfIdentityCache.at = time.Now().Add(-2 * selfIdentityTTL)
+	selfIdentityCache.mu.Unlock()
+	selfNodeConfig(cfg)
+	if fetches != 2 {
+		t.Errorf("fetches = %d, want a refetch after the time to live", fetches)
+	}
+
+	cfg.Nodes[0].Addr = "10.0.0.1:9555"
+	selfNodeConfig(cfg)
+	if fetches != 3 {
+		t.Errorf("fetches = %d, want a refetch when the daemon port changes", fetches)
+	}
+
+	resetSelfIdentity()
+	ok = false
+	if _, good := selfNodeConfig(cfg); good {
+		t.Error("an unreachable daemon is not ok")
+	}
+	ok = true
+	if _, good := selfNodeConfig(cfg); !good {
+		t.Error("a failure must not be cached")
+	}
+}
+
+func TestStyleHTML_TheSmallDotInFrontOfANodeNameKeepsItsSize(t *testing.T) {
+	if !strings.Contains(styleHTML, ".dot[class]::before{display:none}") {
+		t.Error("the numbered dot must not be drawn inside the small dot element, it overlaps the node name")
+	}
+	if !strings.Contains(styleHTML, ".dot.node-core-1,.dot.node-core-2,.dot.node-core-3,.dot.node-probe{background:var(--nd)") {
+		t.Error("the small dot must take the node colour now that node names are no longer coloured text")
 	}
 }

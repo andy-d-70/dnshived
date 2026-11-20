@@ -659,6 +659,8 @@ func coherenceWarningTitle(w string) string {
 		return "After a start a node compares its configuration with its peers before it starts scopes, and a node that was declared removed (the operator ran force-standalone on another node) stops serving. A hold from a start clears by itself once the peers agree or the catch-up has run; a membership hold needs the node to be re-adopted from Cluster Config. A node that serves an unverified configuration found no peer within 30 seconds."
 	case strings.HasPrefix(w, "OUTAGE RULES:"):
 		return "Write quorum, the stale-base check, configuration verification at start and the membership epoch are only enforced once every core runs the version that has them, so a rolling upgrade never blocks itself. Until then these nodes behave as before."
+	case strings.HasPrefix(w, "CONFIG STORAGE:"):
+		return "From this release on a node keeps its configuration split into a manifest and one part per domain and scope. A node on an older version cannot read that form: if its disk is copied to or from a split node, or the cluster is rolled back, it fails to start. Upgrade the node to the minimum version named here. The nodes still exchange the configuration as one JSON document, so the cluster itself keeps working."
 	case strings.HasPrefix(w, "CONFIG REVISION:"):
 		return "Every committed change raises the cluster's config revision. A node behind it missed a commit (it was down or unreachable) and is brought up to date by the web UI; a node at the same revision with different content was changed outside a commit and is left alone; a node that reports no revision runs an older version."
 	case strings.HasPrefix(w, "PARTITION:"):
@@ -714,6 +716,9 @@ func checkCoherence(rows []statusRow, tokens map[string]tokenInfo, observerName 
 	}
 
 	if w := versionMismatchWarning(rows); w != "" {
+		warnings = append(warnings, w)
+	}
+	if w := configStorageWarning(rows); w != "" {
 		warnings = append(warnings, w)
 	}
 

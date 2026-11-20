@@ -1723,7 +1723,7 @@ func TestStatusTmpl_CardTablesHaveFixedColumns(t *testing.T) {
 		t.Errorf("the two card tables (scopes, probes) need explicit column widths, found %d", got)
 	}
 	for _, want := range []string{
-		"@media (min-width:701px){.card-grid{grid-template-rows:17rem 24rem}}",
+		"@media (min-width:701px){.card-grid{grid-template-rows:19.5rem 24rem}}",
 		".card-grid>.card{overflow:auto;scrollbar-gutter:stable;min-height:0}",
 		".kv-table.fixed-table td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
 		".card-wide .scrollbox{height:12rem;max-height:none}",

@@ -321,3 +321,12 @@ management segment as the boundary:
 | Web UI credential leak on one node | same file on every node: treat as cluster-wide, as sensitive as the PSK |
 | Dual answer on the management VIP during re-election | accepted: no corruption risk for HTTPS admin traffic |
 | Falsified audit entries from a compromised node | not prevented; `node_id` is server-assigned |
+
+
+## Build toolchain
+
+The binaries embed the Go standard library, so the Go that builds a release decides which standard-library
+vulnerabilities it carries. Build releases with Go 1.26.11, 1.25.13 or newer and check them with
+`govulncheck ./...` (the CI does both). Go 1.24 and older no longer receive fixes; a scan of 0.9.8.10 built with
+1.24.4 listed 50 reachable vulnerabilities, a scan with 1.26.11 none. A distribution package built with the
+distribution's own Go is only as current as that Go.

@@ -216,11 +216,11 @@ func handleFooter(ref *configRef) http.HandlerFunc {
 
 const footerHTML = `
 <footer class="appfoot" id="appfoot" role="contentinfo" aria-label="Cluster status" data-cs="stale">
-  <span class="ft-title" id="ft-title" title="dnshived web interface">dnshived</span>
-  <span class="ft-upd" id="ft-upd" role="button" tabindex="0" title="update check"></span>
-  <span class="ft-state" id="ft-state" title="waiting for the first cluster reading"><span class="ft-hb" aria-hidden="true"><i class="hb"></i></span><span class="ft-st" id="ft-st">…</span></span>
-  <span class="ft-nodes" id="ft-nodes"></span>
-  <span class="ft-tele"><span class="w-dhcp" id="ft-dhcp"></span><span class="w-rev" id="ft-rev"></span><span class="w-ev" id="ft-ev"></span></span>
+  <span class="ft-title" id="ft-title" data-f="title" title="dnshived web interface. Right click the footer to choose, move and resize its fields.">dnshived</span>
+  <span class="ft-upd" id="ft-upd" data-f="upd" role="button" tabindex="0" title="update check"></span>
+  <span class="ft-state" id="ft-state" data-f="state" title="waiting for the first cluster reading"><span class="ft-hb" aria-hidden="true"><i class="hb"></i></span><span class="ft-st" id="ft-st">…</span></span>
+  <span class="ft-nodes" id="ft-nodes" data-f="nodes"></span>
+  <span class="w-dhcp" id="ft-dhcp" data-f="dhcp"></span><span class="w-rev" id="ft-rev" data-f="rev"></span><span class="w-ev" id="ft-ev" data-f="ev"></span>
 </footer>
 <dialog id="upd-dialog" class="upd-dialog">
   <p id="upd-text"></p>
@@ -298,16 +298,16 @@ const footerHTML = `
   poll();setInterval(poll,POLL);
   document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()});
 })();
-</script>`
+</script>` + footerLayoutScriptHTML
 
 const footerStyle = `
 html{scrollbar-gutter:stable}
 body{padding-bottom:calc(2.5em + 1.2rem)}
-.appfoot{--hb:var(--muted);position:fixed;left:0;right:0;bottom:0;z-index:40;display:grid;grid-template-columns:auto auto auto 1fr auto;align-items:center;column-gap:1.1em;
+.appfoot{--hb:var(--muted);position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;align-items:center;gap:1.1em;
 height:2.5em;padding:0 1.1em;background:var(--panel);border-top:1px solid var(--border);color:var(--muted);
 font-size:clamp(11px,.42vw + 7.2px,15px);line-height:1.3;white-space:nowrap;font-variant-numeric:tabular-nums}
 .appfoot::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:.9rem;background:var(--bg);pointer-events:none}
-.appfoot>*{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.appfoot>[data-f]{flex:0 0 auto;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .appfoot .ft-title{color:var(--text);font-weight:650}
 .appfoot .ft-upd{display:inline-block;width:10.5em;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--muted)}
 .appfoot .ft-upd[data-st="new"]{color:var(--accent);font-weight:600}
@@ -317,12 +317,11 @@ font-size:clamp(11px,.42vw + 7.2px,15px);line-height:1.3;white-space:nowrap;font
 .appfoot .ft-state{display:inline-flex;align-items:center;width:11.2em;overflow:visible;color:var(--muted);font-weight:600}
 .appfoot .ft-hb{flex:none;display:inline-flex;align-items:center;justify-content:center;width:1.9em;height:1.9em}
 .appfoot .ft-st{overflow:hidden;text-overflow:ellipsis;min-width:0}
-.appfoot .ft-nodes{display:flex;gap:1.2em;min-width:0}
-.appfoot .ft-node{display:inline-block;width:14.6em;overflow:hidden;text-overflow:ellipsis}
+.appfoot .ft-nodes{display:flex;gap:1.2em;flex:1 0 auto}
+.appfoot .ft-nodes.ft-fixed{flex:0 0 auto}
+.appfoot .ft-node{display:inline-block;width:15.4em;overflow:hidden;text-overflow:ellipsis}
 .appfoot .ft-node b{color:var(--text);font-weight:600;display:inline-block;width:4.6em;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom}
-.appfoot .ft-tele{display:flex;gap:1.1em;justify-content:flex-end}
-.appfoot .ft-tele span{display:inline-block;overflow:hidden;text-overflow:ellipsis}
-.appfoot .w-dhcp{width:11.5em}.appfoot .w-rev{width:6.2em}.appfoot .w-ev{width:16em}
+.appfoot .w-dhcp{display:inline-block;width:11.5em}.appfoot .w-rev{display:inline-block;width:6.2em}.appfoot .w-ev{display:inline-block;width:24em}
 .appfoot[data-cs="ok"]{--hb:var(--ok)}.appfoot[data-cs="warn"]{--hb:var(--warn)}.appfoot[data-cs="crit"]{--hb:var(--crit)}
 .appfoot[data-cs="ok"] .ft-state{color:var(--ok)}.appfoot[data-cs="warn"] .ft-state{color:var(--warn)}.appfoot[data-cs="crit"] .ft-state{color:var(--crit)}
 .hb{position:relative;display:inline-block;width:.7em;height:.7em}
@@ -337,6 +336,5 @@ font-size:clamp(11px,.42vw + 7.2px,15px);line-height:1.3;white-space:nowrap;font
 @keyframes hbfade{0%{opacity:1}50%{opacity:.35}100%{opacity:1}}
 @media (prefers-reduced-motion:reduce){.hb::before{animation:hbfade 2s ease-in-out infinite}.hb::after{animation:none;opacity:0}.appfoot[data-cs="stale"] .hb::before{animation:none}}
 @media (min-width:2000px){.appfoot .w-ev{width:26em}}
-@media (max-width:1500px){.appfoot .ld{display:none}.appfoot .ft-node{width:9.6em}}
-@media (max-width:1280px){.appfoot .w-ev,.appfoot .w-dhcp{display:none}}
-`
+@media (max-width:1850px){.appfoot .ld{display:none}.appfoot .ft-node{width:11em}}
+` + footerLayoutStyle

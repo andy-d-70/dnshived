@@ -281,3 +281,45 @@ func TestConfigStampHandler(t *testing.T) {
 		t.Errorf("the stamp must be a plain token: %q", a["config_stamp"])
 	}
 }
+
+func TestApplyConfigFormat_MigratesBothWaysAndTheStampFollows(t *testing.T) {
+	path := writeBaseConfig(t)
+	before, err := statStamp(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applyConfigFormat(path, "auto")
+	if config.StorageFormat(path) != config.StorageSplit {
+		t.Fatalf("storage = %s, want split after the start", config.StorageFormat(path))
+	}
+	s1, err := statStamp(path)
+	if err != nil {
+		t.Fatalf("the stamp must follow the manifest: %v", err)
+	}
+	if s1 == before {
+		t.Error("the stamp did not change with the storage")
+	}
+	c, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.LogLevel = "debug"
+	if err := config.Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	s2, _ := statStamp(path)
+	if s2 == s1 {
+		t.Error("a save of the split configuration must change the stamp, or every cache would stay stale")
+	}
+	applyConfigFormat(path, "split")
+	if config.StorageFormat(path) != config.StorageSplit {
+		t.Error("split stays split")
+	}
+	applyConfigFormat(path, "single")
+	if config.StorageFormat(path) != config.StorageSingle {
+		t.Errorf("storage = %s, want single after -config-format single", config.StorageFormat(path))
+	}
+	if back, err := config.Load(path); err != nil || back.LogLevel != "debug" {
+		t.Errorf("the change survived both moves: %v %v", err, back != nil && back.LogLevel == "debug")
+	}
+}

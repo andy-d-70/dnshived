@@ -57,8 +57,12 @@ If the node can't be offboarded through the cluster, do it by hand, in
 this order, so nothing is left running unmanaged:
 
 ```sh
-# 1. Remove every scope from this node's own cluster.json (keep everything
-#    else) and restart normally, so the scopes are torn down:
+# 1. Remove every scope from this node's own configuration (keep everything
+#    else) and restart normally, so the scopes are torn down. A node keeps its
+#    configuration split; to edit it by hand write it out as one file first
+#    (dnshived --config /etc/dnshived/cluster.json --print-config > cluster.json,
+#    edit, copy it to /etc/dnshived/cluster.json as the dnshived user): the file
+#    wins and is migrated again at the start.
 sudo systemctl restart dnshived
 sudo journalctl -u dnshived -n 100 | grep AGENT:DECOMMISSION
 ip -o link show | grep '@'          # no VLAN sub-interfaces left
@@ -67,7 +71,7 @@ ip -o link show | grep '@'          # no VLAN sub-interfaces left
 #    its own keepalived keeps announcing it until it is stopped):
 sudo systemctl stop dnshived dnshived-helper dnshived-web dnshived-keepalived-mgmt
 ip -o addr show | grep -F "<the management VIP>"   # nothing may be left
-sudo rm -f /etc/dnshived/cluster.json /etc/dnshived/webui-users.json /etc/dnshived/web.json
+sudo rm -rf /etc/dnshived/cluster.json /etc/dnshived/cluster.json.d /etc/dnshived/cluster.json.pre-split /etc/dnshived/webui-users.json /etc/dnshived/web.json
 sudo systemctl start dnshived
 ```
 
@@ -176,3 +180,24 @@ When a core that was away comes back, it sees the higher epoch, stops
 serving and shows `OUTAGE HOLD ... removed while away` on the Overview
 page. Re-adopt it from the standalone node (Cluster settings → Nodes,
 replace or onboard) so it takes over the standalone node's configuration and epoch.
+
+
+## Where the configuration lives, and the way back
+
+From 0.9.8.10 a node keeps its configuration in `/etc/dnshived/cluster.json.d/` (a manifest and one
+part per domain and scope), and the single `cluster.json` is gone; a copy of it from the moment of the
+migration stays as `cluster.json.pre-split`. Everything that used to read the file reads the same
+document through the daemon:
+
+```sh
+sudo dnshived --config /etc/dnshived/cluster.json --print-config        # the one JSON document
+sudo dnshived --config /etc/dnshived/cluster.json --check-config        # validates either format
+```
+
+Edit by hand: print the document to a file, edit it, put it at `/etc/dnshived/cluster.json` (owner
+`dnshived`, mode 0600) and restart. A single file next to the directory wins, and the start migrates it
+again. Go back to one file for good, for example before installing an older version, by starting the
+daemon once with `--config-format single` (a systemd drop-in with `ExecStart=` and
+`ExecStart=/usr/local/bin/dnshived --config /etc/dnshived/cluster.json --config-format single`), or
+by restoring `cluster.json.pre-split` and removing `cluster.json.d`. A node on a version older than
+0.9.8.10 cannot read the split directory; the cluster reports such a node.

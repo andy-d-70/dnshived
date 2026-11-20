@@ -634,7 +634,7 @@ var domEditorTmpl = template.Must(template.New("domains").Parse(pagerBarDefineHT
 <p class="dim">A zone file (A, AAAA, CNAME, PTR, MX, SRV, TXT, CAA) or the record lines of the text editor. You see what is new, a duplicate or in conflict before anything is staged.</p>
 <textarea name="text" id="imp-text" rows="12" style="width:100%" aria-label="Records to import"></textarea>
 <p><input type="file" id="imp-file" aria-label="Load a file"></p>
-<p style="margin-bottom:0"><button type="submit" class="btn-primary">Preview</button> <button type="button" id="imp-cancel">Cancel</button></p>
+<p class="form-actions"><button type="button" id="imp-cancel" class="btn-cancel">Cancel</button><button type="submit" class="btn-primary">Preview</button></p>
 </form></dialog>{{end}}
 {{if and (not .Virtual) (not .Linked)}}<dialog id="mail-dialog"><form method="post" action="/config/domains/{{.Domain.Name}}/mail" class="mailform">
 <h3 style="margin-top:0">Mail records for {{.Domain.Name}}</h3>
@@ -652,19 +652,19 @@ var domEditorTmpl = template.Must(template.New("domains").Parse(pagerBarDefineHT
 <label>Selector <input name="dkim_selector" size="14" placeholder="mail"></label>
 <label>Public key or the whole record <textarea name="dkim_key" rows="3" style="width:100%" placeholder="MIIBIjANBgkq… or v=DKIM1; k=rsa; p=…"></textarea></label></fieldset>
 <p class="dim">Long keys are stored as one value and served in 255-character parts, which resolvers join again.</p>
-<p style="margin-bottom:0"><button type="submit" class="btn-primary">Preview</button> <button type="button" id="mail-cancel">Cancel</button></p>
+<p class="form-actions"><button type="button" id="mail-cancel" class="btn-cancel">Cancel</button><button type="submit" class="btn-primary">Preview</button></p>
 </form></dialog>{{end}}
 {{if and (not .Virtual) (not .Linked) .Sets}}<dialog id="set-dialog"><form method="post" action="/config/domains/{{.Domain.Name}}/apply">
 <h3 style="margin-top:0">Apply a record set to {{.Domain.Name}}</h3>
 <p class="dim">The set's example domain becomes {{.Domain.Name}}. You see which records are new, duplicate or in conflict before anything is staged.</p>
 <select name="set" class="js-combo" aria-label="Record set">{{range .Sets}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select>
-<p style="margin-bottom:0"><button type="submit" class="btn-primary">Preview</button> <button type="button" id="set-cancel">Cancel</button></p>
+<p class="form-actions"><button type="button" id="set-cancel" class="btn-cancel">Cancel</button><button type="submit" class="btn-primary">Preview</button></p>
 </form></dialog>{{end}}
 <dialog id="rec-dialog"><form method="post" id="rec-form" action="/config/domains/{{.Domain.Name}}/records/edit">
 <h3 style="margin-top:0">Edit record</h3>
 <p class="dim">TYPE|NAME|VALUE… as in the text editor; add |ttl=N for a TTL.</p>
 <input type="hidden" name="old" id="rec-old"><input name="line" id="rec-line" style="width:100%" aria-label="Record line">
-<p style="margin-bottom:0"><button type="submit" class="btn-primary">Stage change</button> <button type="button" id="rec-cancel">Cancel</button></p>
+<p class="form-actions"><button type="button" id="rec-cancel" class="btn-cancel">Cancel</button><button type="submit" class="btn-primary">Stage change</button></p>
 </form></dialog>
 {{else}}<p class="dim">No domain yet. Add one on the left.</p>{{end}}
 </section>

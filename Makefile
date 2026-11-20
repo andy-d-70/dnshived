@@ -68,7 +68,7 @@ rpm:
 
 # Lab-only profiling build. It compiles the labprofile tool (a CPU/heap/goroutine
 # profile written on SIGWINCH, and only when /etc/dnshived/lab-profile.enable
-# exists) into the daemon and the DNS relay, and renames the packages so they
+# exists) into the daemon, the DNS relay and the web UI, and renames the packages so they
 # cannot be mistaken for a release. Never ship these; make release-guard
 # refuses them.
 .PHONY: lab-deb lab-rpm release-guard

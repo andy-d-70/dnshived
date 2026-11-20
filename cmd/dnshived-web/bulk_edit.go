@@ -398,8 +398,7 @@ var bulkPreviewTmpl = template.Must(template.New("bulk").Parse(`<!doctype html>
 <p class="dim">Staging only prepares the change; it goes live when you commit it on Pending changes.</p>
 <form method="post" action="/config/domains/{{.Name}}/bulk/stage">
 {{range .Hidden}}<input type="hidden" name="{{.Name}}" value="{{.Value}}">
-{{end}}<button type="submit" class="btn-primary"{{if not .Changes}} disabled{{end}}>Stage {{len .Changes}} change(s)</button>
-<a href="/config/domains?d={{.Name}}" class="btn">Cancel</a>
+{{end}}<p class="form-actions"><a href="/config/domains?d={{.Name}}" class="btn-cancel">Cancel</a><button type="submit" class="btn-primary"{{if not .Changes}} disabled{{end}}>Stage {{len .Changes}} change(s)</button></p>
 </form>
 </section>
 `))

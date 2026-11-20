@@ -23,6 +23,7 @@ core-2 teal, core-3 brown. The footer line shows the cluster state, per-core upt
   change on all nodes; nothing applies until you commit it on Pending
   changes, which shows a diff and warns if a change needs a restart.
   Scope changes hot-reload; see `docs/SCOPE_LIFECYCLE.md`.
+- **Column widths.** Drag the edge of a header cell in any list table to resize its columns; the next column gives way and the table keeps its width. The widths are kept in this browser, per page (`localStorage`, keys starting `dnshived-cols|`), so another browser or a cleared browser starts with the built-in widths. The button in the table header (or under the table) and a double click on a handle reset it.
 - **Node colour and nickname.** On Cluster settings, Nodes, the menu at the right
   of a node opens *Edit name and colour…*. The colour is a numbered dot (red 1,
   blue 2, white 3, purple for a probe host by default); tick *default colour* to

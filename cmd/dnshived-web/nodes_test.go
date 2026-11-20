@@ -979,6 +979,7 @@ func localPort(t *testing.T, srv *httptest.Server) string {
 }
 
 func TestSelfNodeConfig_QueriesTheLocalCoreDaemonOverLoopback(t *testing.T) {
+	resetSelfIdentity()
 	local := newLocalConfigServer(t, "core-3", "192.0.2.22:9443")
 	port := localPort(t, local)
 
@@ -1075,6 +1076,7 @@ func TestSelfNodeConfig_CarriesSelfDisplayName(t *testing.T) {
 // TestSelfNodeConfig_UnreachableReturnsNotOK confirms the best-effort
 // fallback.
 func TestSelfNodeConfig_UnreachableReturnsNotOK(t *testing.T) {
+	resetSelfIdentity()
 	cfg := &WebConfig{Nodes: []NodeConfig{{Name: "core-1", Addr: "192.168.9.9:1"}}}
 	if _, ok := selfNodeConfig(cfg); ok {
 		t.Error("selfNodeConfig ok = true, want false on an unreachable local daemon")

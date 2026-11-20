@@ -174,6 +174,8 @@ func main() {
 	forceStandalone := flag.Bool("force-standalone", false,
 		"make this node the only cluster member (console recovery when the other cores are gone; asks for confirmation, root only)")
 	checkConfig := flag.Bool("check-config", false, "validate config and exit")
+	printConfig := flag.Bool("print-config", false, "print the configuration as one JSON document and exit, whatever the storage format (single file or split directory); root or the dnshived user")
+	configFormat := flag.String("config-format", "auto", "how the configuration is stored: auto and split keep it as a manifest plus one part per domain and scope (a single cluster.json is migrated at start, keeping a copy as cluster.json.pre-split); single keeps one cluster.json (a split directory is turned back at start)")
 	emergencyCloseGates := flag.Bool("emergency-close-gates", false,
 		"close every configured scope's DHCP gate and exit — for ExecStopPost, not for manual use")
 	bootstrapAddr := flag.String("bootstrap-addr", ":80",
@@ -202,6 +204,22 @@ func main() {
 		os.Exit(0)
 	}
 
+	switch *configFormat {
+	case "auto", "split", "single":
+	default:
+		fmt.Fprintf(os.Stderr, "dnshived: -config-format must be auto, split or single, not %q\n", *configFormat)
+		os.Exit(2)
+	}
+	if *printConfig {
+		doc, err := config.Document(*cfgPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "print-config:", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(append(doc, '\n'))
+		os.Exit(0)
+	}
+
 	if *forceStandalone {
 		if err := runForceStandalone(*cfgPath, os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "force-standalone:", err)
@@ -226,6 +244,9 @@ func main() {
 			runBootstrapMode(*cfgPath, *bootstrapAddr, *bootstrapTLSAddr, *bootstrapDataDir, *bootstrapOTPPath)
 		}
 		log.Fatalf("config: %v", err)
+	}
+	if !*checkConfig && !*emergencyCloseGates {
+		applyConfigFormat(*cfgPath, *configFormat)
 	}
 	if err := loglevel.Set(cfg.LogLevel); err != nil {
 		loglevel.Warnf("[CONFIG:WARN] %v", err)
@@ -824,6 +845,7 @@ func main() {
 
 		return map[string]interface{}{
 			"config_formats":    config.ConfigFormats(),
+			"config_storage":    config.StorageFormat(*cfgPath),
 			"dhcp_active":       dhcpActive,
 			"dhcp_reserved":     dhcpReserved,
 			"node_id":           self.NodeID,
@@ -2178,4 +2200,24 @@ func setBeaconLinkUp(socket string) {
 	hc := helper.NewClient(socket)
 	topobeacon.LinkUp = hc.LinkUp
 	discovery.LinkUp = hc.LinkUp
+}
+
+// applyConfigFormat brings the storage of the live configuration in line with
+// -config-format. A failure leaves the storage as it was: the node keeps
+// running on the configuration it just loaded.
+func applyConfigFormat(path, mode string) {
+	switch mode {
+	case "single":
+		if moved, err := config.MigrateToSingle(path); err != nil {
+			loglevel.Warnf("[CONFIG] could not turn the split configuration back into one file: %v", err)
+		} else if moved {
+			loglevel.Infof("[CONFIG] the configuration is stored as one file again (%s)", path)
+		}
+	default:
+		if moved, err := config.MigrateToSplit(path); err != nil {
+			loglevel.Warnf("[CONFIG] could not move the configuration to the split format, it stays in %s: %v", path, err)
+		} else if moved {
+			loglevel.Infof("[CONFIG] the configuration is now stored split (%s.d, manifest and one part per domain and scope); the single file is kept as %s.pre-split", path, filepath.Base(path))
+		}
+	}
 }

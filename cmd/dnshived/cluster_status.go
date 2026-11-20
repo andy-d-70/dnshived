@@ -13,6 +13,7 @@ import (
 	"dnshived/internal/cluster"
 	"dnshived/internal/config"
 	"dnshived/internal/tlspin"
+	"dnshived/internal/transport"
 )
 
 // clusterStatusPeerTimeout bounds a single peer fetch.
@@ -21,7 +22,7 @@ const clusterStatusPeerTimeout = 5 * time.Second
 // clusterStatusHTTPClient is shared across every peer fetch.
 var clusterStatusHTTPClient = &http.Client{
 	Timeout:   clusterStatusPeerTimeout,
-	Transport: &http.Transport{TLSClientConfig: tlspin.Config()},
+	Transport: transport.Tune(&http.Transport{TLSClientConfig: tlspin.Config()}),
 	// A redirect means the address points at the wrong service (e.g. the
 	// web UI's port-443 redirect); report it instead of following it.
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },

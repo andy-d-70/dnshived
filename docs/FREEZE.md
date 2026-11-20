@@ -137,12 +137,20 @@ and `config_formats` (the configuration formats the daemon reads: `single`, and
 `split`, a `cluster.json.d/` directory with a manifest and one part per domain
 and scope; a daemon without the field reads only the single file).
 
-Split configuration format (read support in 0.9.8.10, nothing writes it yet): the
-manifest (`manifest.json`, `format` 1) lists the parts by kind, name and content
-hash; part kinds are `base`, `scope` and `domain`, and a kind a daemon does not
-know is skipped, so a later version can add kinds. A part is checked against its
-manifest hash when it is read. `cluster.json` stays authoritative while it exists;
-the split directory is read only when the single file is missing.
+Split configuration storage (0.9.8.10, new, same rules): from 0.9.8.10 a node keeps its
+configuration in `cluster.json.d/` and removes `cluster.json` after a verified migration at the first
+start (the daemon option `-config-format auto|split|single`, default `auto` = split; `single` turns a
+split directory back at the start). A one-time copy of the single file stays as
+`cluster.json.pre-split`. The manifest (`manifest.json`, `format` 1) lists the parts by kind, name and
+content hash; part kinds are `base`, `scope`, `domain` and `parked`, and a kind a daemon does not know is
+skipped, so a later version can add kinds. A part is checked against its manifest hash when it is read, and a
+read retried a few times meets a save in progress. A save writes only the parts whose hash changed and the
+manifest last. A single `cluster.json` that appears next to the directory (a hand edit, an adopt, the
+setup) wins until the next start migrates it again. The nodes exchange the configuration as one JSON
+document through the API, so the storage format of a node is private to it. `dnshived -print-config`
+prints that document for either format. `GET /api/v1/status` adds `config_storage` (`single` or `split`);
+the cluster reports a core node that does not list `split` in `config_formats` as too old
+(`config.MinSplitVersion`, 0.9.8.10). The change stamps (`/api/v1/config/stamp`) follow the manifest.
 
 Configuration import in 0.9.8.10 (new, same rules): `cluster.json` gains the optional
 `parked_scopes` (scopes kept but never built or served until moved to `scopes`;

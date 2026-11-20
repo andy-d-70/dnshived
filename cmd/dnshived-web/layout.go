@@ -533,7 +533,7 @@ function dnshivedCycleTheme(){
   try{ localStorage.setItem('dnshived-theme', next); }catch(e){}
   dnshivedApplyTheme(next);
 }
-</script>` + footerHTML + pagerScriptHTML + comboboxScriptHTML
+</script>` + footerHTML + pagerScriptHTML + comboboxScriptHTML + columnsScriptHTML
 
 // styleHTML is inserted right after <title> on every page (see its call
 // sites).
@@ -639,7 +639,7 @@ button.btn-sm,.row-menu>summary{min-height:36px}
 /* cards: the Overview grid and every later page built from cards. */
 .card-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.9rem;margin:0 0 1rem}
 /* The Overview keeps its shape whatever the content: fixed card heights, each card scrolls inside itself. */
-@media (min-width:701px){.card-grid{grid-template-rows:17rem 24rem}}
+@media (min-width:701px){.card-grid{grid-template-rows:19.5rem 24rem}}
 .card-grid>.card{overflow:auto;scrollbar-gutter:stable;min-height:0}
 @media (max-width:700px){.card-grid>.card{height:17rem}.card-grid>.card:nth-child(n+4){height:24rem}}
 .card-attn .card-list li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -778,6 +778,9 @@ border:0;border-radius:5px;background:transparent;color:var(--text);font:inherit
 /* btn-success for commit-shaped actions, btn-danger for discard/delete. */
 button.btn-success{background:var(--ok);border-color:var(--ok);color:var(--on-ok)}
 button.btn-danger{background:var(--crit);border-color:var(--crit);color:var(--on-crit)}
+button.btn-cancel,a.btn-cancel{display:inline-flex;align-items:center;justify-content:center;min-height:44px;font:inherit;padding:.35rem .75rem;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:5px;text-decoration:none;cursor:pointer}
+button.btn-cancel:hover,a.btn-cancel:hover{background:var(--head);opacity:1;text-decoration:none}
+.form-actions{display:flex;align-items:center;justify-content:flex-end;gap:1.2rem;margin:.8rem 0 0}
 /* btn-warn for disable (reversible, VIP released, VLAN stays). */
 button.btn-warn{background:var(--warn);border-color:var(--warn);color:var(--on-warn)}
 /* loading-dots: pure-CSS animated dots, static under prefers-reduced-motion. */
@@ -796,6 +799,9 @@ border-radius:6px;box-shadow:0 4px 10px rgba(0,0,0,.15)}
 .combo-item:hover,.combo-item-active{background:var(--accent);color:var(--on-accent)}
 .combo-empty,.combo-more{padding:.3rem .5rem;font-size:var(--fs-sm);color:var(--muted)}
 .combo-more{border-top:1px solid var(--border);cursor:default}
+/* every dialog follows the theme; the id rules below refine single ones. */
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:1rem 1.2rem;box-shadow:0 8px 28px rgba(0,0,0,.3)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
 /* log-modal: a small window over the page; dialog::backdrop and showModal() do the rest. */
 dialog#log-modal{background:var(--panel);color:var(--text);border:1px solid var(--border);
 border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.25);padding:1rem 1.2rem;
@@ -903,6 +909,8 @@ overflow:hidden;vertical-align:middle;margin-right:.4rem}
 .node-core-3::before{content:"3"}
 .node-probe::before{content:"P"}
 .mini-ep[class]::before,.rail-node[class]::before{display:none}
+.dot[class]::before{display:none}
+.dot.node-core-1,.dot.node-core-2,.dot.node-core-3,.dot.node-probe{background:var(--nd);border:1px solid var(--nd-ring)}
 .nodes-table td.nodecell::before{content:"";width:.8em;height:.8em;margin-right:.4em}
 
 .ndot{display:inline-flex;align-items:center;justify-content:center;width:1.5em;height:1.5em;border-radius:50%;background:var(--nd);color:var(--nd-fg);border:1.5px solid var(--nd-ring);font-size:.8em;font-weight:700;line-height:1;vertical-align:middle;margin-right:.45em;flex:none}
@@ -910,7 +918,7 @@ overflow:hidden;vertical-align:middle;margin-right:.4rem}
 .ndot.d2{--nd:var(--nd-2);--nd-fg:var(--nd-fg-2)}
 .ndot.d3{--nd:var(--nd-3);--nd-fg:var(--nd-fg-3)}
 .ndot.dp{--nd:var(--nd-p);--nd-fg:var(--nd-fg-p)}
-` + footerStyle + pagerStyle + listBarStyle + `</style>`
+` + footerStyle + pagerStyle + listBarStyle + columnsStyle + `</style>`
 
 func tabLinksHTML(items [][2]string, active string) string {
 	var b strings.Builder

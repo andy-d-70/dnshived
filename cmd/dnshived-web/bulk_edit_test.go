@@ -255,7 +255,7 @@ func TestHandleDomainTTL_RecordsFollow(t *testing.T) {
 	if pushed.LocalDomains[0].TTL != 500 || pushed.LocalDomains[0].Records[0].TTL != 0 {
 		t.Errorf("%+v", pushed.LocalDomains[0])
 	}
-	w = recordPost(t, handleDomainTTL(ref), "a.lan", "/x", "ttl=500")
+	recordPost(t, handleDomainTTL(ref), "a.lan", "/x", "ttl=500")
 	if pushed.LocalDomains[0].Records[0].TTL != 60 {
 		t.Errorf("without the option the record keeps its own TTL: %+v", pushed.LocalDomains[0].Records[0])
 	}

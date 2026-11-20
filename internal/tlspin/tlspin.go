@@ -140,5 +140,6 @@ func Config() *tls.Config {
 	return &tls.Config{
 		InsecureSkipVerify: true,
 		VerifyConnection:   verifyPeer,
+		ClientSessionCache: tls.NewLRUClientSessionCache(64),
 	}
 }

@@ -171,3 +171,21 @@ func TestFindings_StringOnFreshSaysSo(t *testing.T) {
 		t.Errorf("String() on empty Findings = %q, want \"no findings\"", got)
 	}
 }
+
+func TestDetectExisting_ASplitConfigurationIsNotFresh(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "cluster.json")
+	if err := os.MkdirAll(cfg+".d", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg+".d", "manifest.json"), []byte(`{"format":1,"parts":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := DetectExisting(Paths{ClusterConfigPath: cfg})
+	if f.Fresh() || f.ClusterConfigPath != cfg {
+		t.Errorf("a node whose configuration is stored split is configured, not fresh: %+v", f)
+	}
+	if f := DetectExisting(Paths{ClusterConfigPath: filepath.Join(dir, "none.json")}); !f.Fresh() {
+		t.Errorf("no file and no manifest is fresh: %+v", f)
+	}
+}

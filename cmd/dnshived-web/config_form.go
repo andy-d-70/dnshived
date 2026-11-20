@@ -221,7 +221,7 @@ necessarily already discovered.</p>
 <p><label>Display name <input type="text" name="display_name" id="nd-display" maxlength="64" placeholder="optional, blank = the real name"></label></p>
 <p><label>Colour <input type="color" name="color" id="nd-color"></label>
 <label style="margin-left:1rem"><input type="checkbox" name="color_default" value="1" id="nd-default"> default colour for this role</label></p>
-<p style="margin-bottom:0"><button type="submit" class="btn-primary">Save</button> <button type="button" id="nd-cancel">Cancel</button></p>
+<p class="form-actions"><button type="button" id="nd-cancel" class="btn-cancel">Cancel</button><button type="submit" class="btn-primary">Save</button></p>
 </form></dialog>
 <script>
 (function(){

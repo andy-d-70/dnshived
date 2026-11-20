@@ -278,6 +278,11 @@ func Assemble(m Manifest, read func(path string) ([]byte, error)) (*Cluster, err
 	c.Scopes = scopes
 	c.ParkedScopes = parked
 	c.LocalDomains = domains
+	// The manifest carries the revision of the last save; a base part written
+	// before it must not hold the revision back.
+	if m.Revision > c.ConfigRevision {
+		c.ConfigRevision = m.Revision
+	}
 	for _, ref := range m.Parts {
 		if ref.Kind == PartBase && shortHash(baseReplicated(c)) != ref.Hash {
 			return nil, errors.New("base part does not match the manifest")
@@ -354,8 +359,9 @@ func writeAtomic(path string, data []byte) error {
 }
 
 // SaveSplit writes the parts that differ from what the directory holds, then
-// the manifest last, and removes part files the manifest no longer lists. The
-// daemon does not call it yet.
+// the manifest last, and removes part files the manifest no longer lists. An
+// unchanged part is recognised by the hash the old manifest holds for it, so
+// the unchanged parts are not even read.
 func SaveSplit(dir string, c *Cluster) error {
 	if err := c.validate(); err != nil {
 		return err
@@ -364,8 +370,32 @@ func SaveSplit(dir string, c *Cluster) error {
 	if err != nil {
 		return err
 	}
+	known := map[string]string{}
+	if raw, err := readCapped(filepath.Join(dir, manifestFileName), maxManifestBytes); err == nil {
+		var old Manifest
+		if json.Unmarshal(raw, &old) == nil {
+			for _, ref := range old.Parts {
+				if rel, err := PartPath(ref.Kind, ref.Name); err == nil {
+					known[rel] = ref.Hash
+				}
+			}
+		}
+	}
+	// Only a domain part's stored bytes are fully covered by its hash. The base
+	// part also holds the revision and the node's own fields, a scope part its node
+	// address, and neither is hashed, so those parts are compared byte for byte.
+	isDomainPart := func(rel string) bool { return strings.HasPrefix(rel, "domains/") }
+	newHash := map[string]string{}
+	for _, ref := range m.Parts {
+		if rel, err := PartPath(ref.Kind, ref.Name); err == nil {
+			newHash[rel] = ref.Hash
+		}
+	}
 	for p, data := range files {
 		full := filepath.Join(dir, filepath.FromSlash(p))
+		if isDomainPart(p) && known[p] != "" && known[p] == newHash[p] && fileExists(full) {
+			continue
+		}
 		if old, err := readCapped(full, maxPartBytes); err == nil && string(old) == string(data) {
 			continue
 		}

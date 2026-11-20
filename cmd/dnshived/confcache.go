@@ -29,6 +29,7 @@ type fileStamp struct {
 }
 
 func statStamp(path string) (fileStamp, error) {
+	path = config.StampPath(path)
 	fi, err := os.Stat(path)
 	if err != nil {
 		return fileStamp{}, err

@@ -6,6 +6,8 @@ package probepin
 import (
 	"net/http"
 	"sync/atomic"
+
+	"dnshived/internal/transport"
 )
 
 // Router sends a request for a pinned host:port to that host's own transport, and every other request to Next.
@@ -28,7 +30,7 @@ func (r *Router) RoundTrip(req *http.Request) (*http.Response, error) {
 func (r *Router) SetPins(pins map[string]string) {
 	m := make(map[string]http.RoundTripper, len(pins))
 	for addr, fp := range pins {
-		m[addr] = &http.Transport{TLSClientConfig: Config(fp)}
+		m[addr] = transport.Tune(&http.Transport{TLSClientConfig: Config(fp)})
 	}
 	if old := r.pins.Swap(&m); old != nil {
 		for _, rt := range *old {

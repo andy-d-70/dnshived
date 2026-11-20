@@ -24,7 +24,7 @@ hand-edited cluster.json, binary upgrade, manual restart
   2. ConstructPlane()              build what is configured
 ```
 
-Writing `cluster.json` by hand changes nothing until a restart. Both
+Writing `cluster.json` by hand (a node keeps its configuration split from 0.9.8.10; print it with `dnshived --print-config`, see the cookbook) changes nothing until a restart. Both
 paths use the same idempotent primitives (`createInterface`,
 `deleteInterface`), and both log the same markers. Cluster-wide fields
 (`Platform`, `MgmtVIP`, PSK, tokens, TLS) are not scope changes; the

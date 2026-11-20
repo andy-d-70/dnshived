@@ -576,7 +576,7 @@ dialog#res-dialog input[readonly]{opacity:.7}
 <label>DHCP client identifier (option 61, hex bytes like 01:aa:bb:cc:dd:ee:ff; empty = match by MAC only)<input name="client_id" id="res-cid" pattern="[0-9A-Fa-f:]*"></label>
 <label>Extra DNS names (comma separated, up to 8)<input name="names" id="res-names"></label>
 <p class="dim" id="res-note"></p>
-<p style="margin-bottom:0"><button type="submit" class="btn-primary">Stage reservation</button> <button type="button" id="res-cancel">Cancel</button></p>
+<p class="form-actions"><button type="button" id="res-cancel" class="btn-cancel">Cancel</button><button type="submit" class="btn-primary">Stage reservation</button></p>
 </form></dialog>
 <script>
 (function(){

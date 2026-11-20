@@ -1061,7 +1061,7 @@ func Load(path string) (*Cluster, error) {
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			if _, serr := os.Stat(filepath.Join(SplitDir(path), manifestFileName)); serr == nil {
-				return LoadSplit(SplitDir(path))
+				return loadSplitRetry(SplitDir(path))
 			}
 		}
 		return nil, fmt.Errorf("read cluster config %s: %w", path, err)
@@ -1085,10 +1085,19 @@ func Load(path string) (*Cluster, error) {
 	return &c, nil
 }
 
-// Save validates c and writes it to path atomically (temp file + rename,
-// so a process dying mid-write never leaves a corrupt or partial file on
-// disk).
+// Save validates c and writes it to path atomically. When the configuration at
+// path is stored split (see MigrateToSplit) only the parts that changed are
+// written, the manifest last; otherwise the single file is replaced through a
+// temp file and a rename, so a process dying mid-write never leaves a corrupt
+// or partial file on disk.
 func Save(path string, c *Cluster) error {
+	if splitActive(path) {
+		return SaveSplit(SplitDir(path), c)
+	}
+	return saveSingle(path, c)
+}
+
+func saveSingle(path string, c *Cluster) error {
 	if err := c.validate(); err != nil {
 		return err
 	}

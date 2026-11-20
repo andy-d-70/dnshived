@@ -18,6 +18,7 @@ import (
 
 	"dnshived/internal/discovery"
 	"dnshived/internal/tlspin"
+	"dnshived/internal/transport"
 )
 
 // errNodeBelievedOffline is the synthetic error fetchAllNodes returns for
@@ -25,7 +26,7 @@ import (
 // (reachability.go).
 var errNodeBelievedOffline = errors.New("node offline (per cluster peer reachability)")
 
-var rawClusterTransport = &http.Transport{TLSClientConfig: tlspin.Config()}
+var rawClusterTransport = transport.Tune(&http.Transport{TLSClientConfig: tlspin.Config()})
 
 // clusterTransport wraps the raw transport above with the
 // shared node-reachability belief (reachability.go).
@@ -60,16 +61,18 @@ func (rt reachabilityRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 
 // nodeStatus mirrors the subset of /api/v1/status's fields this UI needs.
 type nodeStatus struct {
-	NodeID      string   `json:"node_id"`
-	Hostname    string   `json:"hostname"`
-	Role        string   `json:"role"`
-	ClusterID   string   `json:"cluster_id"`
-	State       string   `json:"state"`
-	Epoch       uint64   `json:"epoch"`
-	Generation  uint64   `json:"generation"`
-	Incarnation uint64   `json:"incarnation"`
-	Healthy     bool     `json:"healthy"`
-	Serving     []string `json:"serving"`
+	// ConfigStorage is the format the node keeps its configuration in (absent on an older daemon).
+	ConfigStorage string   `json:"config_storage"`
+	NodeID        string   `json:"node_id"`
+	Hostname      string   `json:"hostname"`
+	Role          string   `json:"role"`
+	ClusterID     string   `json:"cluster_id"`
+	State         string   `json:"state"`
+	Epoch         uint64   `json:"epoch"`
+	Generation    uint64   `json:"generation"`
+	Incarnation   uint64   `json:"incarnation"`
+	Healthy       bool     `json:"healthy"`
+	Serving       []string `json:"serving"`
 	// DHCPActive and DHCPReserved are absent on a daemon without them.
 	DHCPActive   *int `json:"dhcp_active,omitempty"`
 	DHCPReserved *int `json:"dhcp_reserved,omitempty"`

@@ -72,7 +72,7 @@ func (f Findings) String() string {
 func DetectExisting(paths Paths) Findings {
 	var f Findings
 
-	if fileExists(paths.ClusterConfigPath) {
+	if fileExists(paths.ClusterConfigPath) || (paths.ClusterConfigPath != "" && fileExists(paths.ClusterConfigPath+".d/manifest.json")) {
 		f.ClusterConfigPath = paths.ClusterConfigPath
 	}
 	if fileExists(paths.ProbeConfigPath) {
