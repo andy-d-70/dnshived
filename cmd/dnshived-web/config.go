@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"dnshived/internal/config"
@@ -85,7 +86,72 @@ type configPushPayload struct {
 // /api/v1/config (admin-gated on the daemon side — this returns PSK and
 // token values in cleartext).
 func fetchConfig(node NodeConfig) (config.Cluster, error) {
-	return fetchConfigWithClient(httpClient, node)
+	stamp, _ := fetchStamps(node)
+	if stamp == "" {
+		return fetchConfigWithClient(httpClient, node)
+	}
+	e := configCacheEntry(node.Addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.stamp == stamp {
+		return e.cfg.Clone(), nil
+	}
+	c, size, err := fetchConfigSized(bigDocHTTPClient, node)
+	if err != nil {
+		return c, err
+	}
+	cacheBytes.Add(int64(-e.size))
+	e.stamp, e.cfg, e.size = "", config.Cluster{}, 0
+	if cacheBytes.Add(int64(size)) <= cacheBudget {
+		e.stamp, e.cfg, e.size = stamp, c, size
+	} else {
+		cacheBytes.Add(int64(-size))
+	}
+	return c.Clone(), nil
+}
+
+// cacheBudget bounds the JSON size of the configurations and candidates the
+// web UI keeps decoded, over all nodes: a decoded document takes several times
+// its JSON size, and the nodes this runs on can be small. A document that does
+// not fit is simply fetched again on the next call.
+var cacheBudget int64 = 32 << 20
+
+var cacheBytes atomic.Int64
+
+// A node's configuration is downloaded and decoded again only when the
+// daemon's change stamp for it moved. Decoding a large document is the biggest
+// cost of a page; every caller gets its own deep copy, so one that changes what
+// it received cannot disturb another or the cache.
+type cachedConfig struct {
+	mu    sync.Mutex
+	stamp string
+	cfg   config.Cluster
+	size  int
+}
+
+var configCaches sync.Map
+
+func configCacheEntry(addr string) *cachedConfig {
+	if e, ok := configCaches.Load(addr); ok {
+		return e.(*cachedConfig)
+	}
+	e, _ := configCaches.LoadOrStore(addr, &cachedConfig{})
+	return e.(*cachedConfig)
+}
+
+// fetchStamps asks a node for the tokens that change with its configuration and
+// with its staged candidate; both are empty when the node cannot say (an older
+// daemon, an error, no such file), in which case nothing is cached.
+func fetchStamps(node NodeConfig) (cfg, cand string) {
+	var st struct {
+		Config    string `json:"config_stamp"`
+		Candidate string `json:"candidate_stamp"`
+	}
+	status, err := doGet(httpClient, node, "/api/v1/config/stamp", &st)
+	if err != nil || status != http.StatusOK {
+		return "", ""
+	}
+	return st.Config, st.Candidate
 }
 
 // fetchConfigDirect is fetchConfig via directHTTPClient — bypasses the
@@ -95,27 +161,36 @@ func fetchConfigDirect(node NodeConfig) (config.Cluster, error) {
 }
 
 func fetchConfigWithClient(cl *http.Client, node NodeConfig) (config.Cluster, error) {
+	c, _, err := fetchConfigSized(cl, node)
+	return c, err
+}
+
+func fetchConfigSized(cl *http.Client, node NodeConfig) (config.Cluster, int, error) {
 	var c config.Cluster
 	req, err := http.NewRequest(http.MethodGet, node.baseURL()+"/api/v1/config", nil)
 	if err != nil {
-		return c, err
+		return c, 0, err
 	}
 	if node.AdminToken != "" {
 		req.Header.Set("Authorization", "Bearer "+node.AdminToken)
 	}
 	resp, err := cl.Do(req)
 	if err != nil {
-		return c, err
+		return c, 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return c, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+		return c, 0, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&c); err != nil {
-		return c, err
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256<<20))
+	if err != nil {
+		return c, 0, err
 	}
-	return c, nil
+	if err := json.Unmarshal(body, &c); err != nil {
+		return c, 0, err
+	}
+	return c, len(body), nil
 }
 
 // firstReachableConfig fetches from the first node that answers — the

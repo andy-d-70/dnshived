@@ -334,6 +334,11 @@ var clusterSnapshotHTTPClient = &http.Client{Timeout: 10 * time.Second, Transpor
 // client.
 var coordinatorPushClient = &http.Client{Timeout: 30 * time.Second, Transport: clusterTransport}
 
+// bigDocHTTPClient carries the calls whose body is the whole configuration or
+// the staged candidate, which grow with the cluster; the plain httpClient's 5
+// seconds are too short for a document of many megabytes.
+var bigDocHTTPClient = &http.Client{Timeout: 90 * time.Second, Transport: clusterTransport}
+
 // directHTTPClient bypasses the shared reachability belief cache entirely
 // (the pin router, not the reachability-wrapped one httpClient uses).
 var directHTTPClient = &http.Client{Timeout: 5 * time.Second, Transport: probePinTransport}
@@ -1019,7 +1024,7 @@ func pushConfig(node NodeConfig, payload []byte) (status int, respBody []byte, e
 	if node.AdminToken != "" {
 		req.Header.Set("Authorization", "Bearer "+node.AdminToken)
 	}
-	resp, err := httpClient.Do(req)
+	resp, err := bigDocHTTPClient.Do(req)
 	if err != nil {
 		return 0, nil, err
 	}

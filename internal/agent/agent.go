@@ -406,7 +406,17 @@ type Agent struct {
 	// (VIP/VRRPID/AdvertIntMS/VRRPVersion across every scope).
 	vrrpConfigSig string
 
-	coreDNSConfigHash  string
+	coreDNSConfigHash string
+	// dnsRenderVer counts changes of everything the central DNS config is rendered
+	// from; dnsRender keeps the last result for that version, so an unchanged
+	// configuration is not rendered again on every reconcile pass.
+	dnsRenderVer atomic.Uint64
+	dnsRender    struct {
+		mu         sync.Mutex
+		ver        uint64
+		text, hash string
+		ok         bool
+	}
 	coreDHCPConfigHash string
 	relayConfigHash    string
 	dnsRelayConfigHash string
@@ -764,10 +774,12 @@ func (a *Agent) SetTLS(useTLS bool) {
 
 func (a *Agent) SetGlobalDNSRecords(recs []config.DNSRecord) {
 	a.globalDNSRecords = recs
+	a.dnsRenderVer.Add(1)
 }
 
 func (a *Agent) SetLocalDomains(domains []config.LocalDomain) {
 	a.localDomains = domains
+	a.dnsRenderVer.Add(1)
 }
 
 func (a *Agent) SetDefaultDHCPOptions(opts []string) {
@@ -778,6 +790,7 @@ func (a *Agent) SetDefaultDHCPOptions(opts []string) {
 // forwarders (config.Cluster.ScopeDefaults.Upstream).
 func (a *Agent) SetCentralDNSUpstream(upstream []string) {
 	a.centralDNSUpstream = upstream
+	a.dnsRenderVer.Add(1)
 }
 
 func (a *Agent) SetNodeIPSuffixes(suffixes map[string]string) {
@@ -790,6 +803,7 @@ func (a *Agent) SetVRRPUnicast(on *bool) {
 
 func (a *Agent) SetCoreDNSAddress(address string) {
 	a.coreDNSAddress = address
+	a.dnsRenderVer.Add(1)
 }
 
 func (a *Agent) SetCoreDHCPAddress(address string) {
@@ -1154,6 +1168,7 @@ func (a *Agent) ScopeBeaconSnapshot() []topobeacon.ScopeStatus {
 
 func (a *Agent) SetCoreDNSQueryLogging(enabled bool) {
 	a.coreDNSQueryLogging = enabled
+	a.dnsRenderVer.Add(1)
 }
 
 // agentAccess is the access list as the agent hands it to the relay renderers.
@@ -2149,8 +2164,22 @@ func (a *Agent) constructCoreDNSPlane() bool {
 	return true
 }
 
-func (a *Agent) applyCoreDNSConfig() (restarted, throttled bool, err error) {
-	text, err := dnscentralrender.Render(config.Cluster{
+// renderCentralDNS is dnscentralrender.Render, replaceable in tests.
+var renderCentralDNS = dnscentralrender.Render
+
+// renderCoreDNSConfig returns the central DNS config and its hash, rendered
+// again only when one of its inputs changed since the last call. The version is
+// read before rendering, so a change made meanwhile is seen on the next call.
+func (a *Agent) renderCoreDNSConfig() (text, hash string, err error) {
+	ver := a.dnsRenderVer.Load()
+	a.dnsRender.mu.Lock()
+	if a.dnsRender.ok && a.dnsRender.ver == ver {
+		text, hash = a.dnsRender.text, a.dnsRender.hash
+		a.dnsRender.mu.Unlock()
+		return text, hash, nil
+	}
+	a.dnsRender.mu.Unlock()
+	text, err = renderCentralDNS(config.Cluster{
 		Scopes:              a.allScopes(),
 		GlobalDNSRecords:    a.globalDNSRecords,
 		LocalDomains:        a.localDomains,
@@ -2158,9 +2187,20 @@ func (a *Agent) applyCoreDNSConfig() (restarted, throttled bool, err error) {
 		CoreDNSQueryLogging: a.coreDNSQueryLogging,
 	}, a.coreDNSAddress, a.dataDir)
 	if err != nil {
+		return "", "", err
+	}
+	hash = contentHash(text)
+	a.dnsRender.mu.Lock()
+	a.dnsRender.ver, a.dnsRender.text, a.dnsRender.hash, a.dnsRender.ok = ver, text, hash, true
+	a.dnsRender.mu.Unlock()
+	return text, hash, nil
+}
+
+func (a *Agent) applyCoreDNSConfig() (restarted, throttled bool, err error) {
+	text, hash, err := a.renderCoreDNSConfig()
+	if err != nil {
 		return false, false, fmt.Errorf("render dnsmasq.central config: %w", err)
 	}
-	hash := contentHash(text)
 
 	a.mu.Lock()
 	changed := a.coreDNSConfigHash != hash

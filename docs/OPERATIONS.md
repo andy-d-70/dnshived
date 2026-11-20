@@ -424,3 +424,22 @@ dnshived --check-config --config /etc/dnshived/cluster.json
 
 Checks schema, required fields, VLAN/VRRP/VIP collisions, TLS files,
 PSK, token roles and log level, and reports all problems at once.
+
+
+## Sizing
+
+Measured on three cores with 2 vCPUs each, two of them with 1 GB of RAM and one with 2 GB, and 102 scopes
+(`tools/loadgen.py` stages the synthetic data and removes it again):
+
+| Configuration | Size | Daemon idle CPU | Pages | Notes |
+|---|---|---|---|---|
+| empty (102 scopes) | 25 KB | 8 to 12% of a core | 40 to 200 ms | |
+| 2,550 reservations, 10,000 records | 1.7 MB | about 10% | 40 to 200 ms | |
+| 6,120 reservations, 45,000 records | 6.2 MB | 4 to 7% | 20 to 170 ms | daemon 125 to 150 MB, web 100 to 130 MB RSS |
+| 10,200 reservations, 100,000 records | 13 MB | 6 to 16% | 25 to 370 ms | daemon about 300 MB, web 200 to 315 MB RSS; a 1 GB node uses swap |
+
+Addresses are answered from memory at every size (a lookup took 0 ms with 118,000 host records). What a large
+configuration costs is memory and the work after a change: dnsmasq is restarted for the central DNS and needs about a
+minute of CPU to read 100,000 records, a commit of a 7 MB configuration takes about 7 seconds, a daemon restart about 18
+seconds. Plan 2 GB of RAM per core for more than about 5,000 reservations or 50,000 records; the web UI also keeps decoded
+copies of the configuration (at most 32 MiB of JSON in total).

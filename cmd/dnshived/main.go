@@ -834,8 +834,7 @@ func main() {
 		visible, unreachable := observer.PeerVisibility()
 
 		fresh := currentConfig.Load()
-		scopesHash := fresh.ScopesHash()
-		configHash, configHashV2 := fresh.ConfigDocumentHashes()
+		scopesHash, configHash, configHashV2 := statusHashes(fresh)
 		configuredScopes := fresh.ScopeNames()
 		iotScopes := fresh.IoTScopeNames()
 		disabledScopes := fresh.DisabledScopeNames()
@@ -1205,7 +1204,7 @@ func main() {
 	mux.HandleFunc("GET /api/v1/config/stamp", authMw.RequireAdmin(configStampHandler(func() string { return *cfgPath }, func() string { return dataDir(currentConfig.Load()) })))
 
 	mux.HandleFunc("GET /api/v1/probe-config", authMw.RequireProbeOrReadonly(func(w http.ResponseWriter, r *http.Request) {
-		current, err := config.Load(*cfgPath)
+		current, err := loadConfigShared(*cfgPath)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load current config: " + err.Error()})
 			return

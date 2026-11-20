@@ -53,7 +53,7 @@ var escaper = strings.NewReplacer("~", "~0", "/", "~1", "[", "~2", "]", "~3")
 
 // MaxDocBytes bounds the documents that are compared field by field; a larger
 // one is left to whole-document handling.
-const MaxDocBytes = 64 << 20
+const MaxDocBytes = 8 << 20
 
 // ErrTooLarge is returned for a document above MaxDocBytes.
 var ErrTooLarge = errors.New("document too large for a field-level comparison")

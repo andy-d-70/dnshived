@@ -147,3 +147,54 @@ func candidateGetHandler(dir func() string, cache *responseCache) http.HandlerFu
 		w.Write(body)
 	}
 }
+
+// parsedConfig keeps the configuration at one path, parsed once per version
+// of its files, for handlers that only read it.
+var parsedConfig struct {
+	mu    sync.Mutex
+	path  string
+	stamp fileStamp
+	cfg   *config.Cluster
+}
+
+// loadConfigShared returns the configuration at path like config.Load, without
+// reading and parsing it again while the file (or the manifest of the split
+// directory) is unchanged. The result is shared: callers must not modify it.
+func loadConfigShared(path string) (*config.Cluster, error) {
+	stamp, serr := statStamp(path)
+	parsedConfig.mu.Lock()
+	defer parsedConfig.mu.Unlock()
+	if serr == nil && parsedConfig.cfg != nil && parsedConfig.path == path && parsedConfig.stamp == stamp {
+		return parsedConfig.cfg, nil
+	}
+	c, err := config.Load(path)
+	if err != nil {
+		return nil, err
+	}
+	if serr == nil {
+		parsedConfig.path, parsedConfig.stamp, parsedConfig.cfg = path, stamp, c
+	}
+	return c, nil
+}
+
+// hashCache keeps the hashes the status answer reports for one configuration
+// object. currentConfig is replaced as a whole and never modified in place, so
+// the pointer identifies a version; hashing the whole document on every status
+// call (the web UI and every peer ask every few seconds) grows with its size.
+var hashCache struct {
+	mu                   sync.Mutex
+	cfg                  *config.Cluster
+	scopes, hash1, hash2 string
+}
+
+func statusHashes(c *config.Cluster) (scopes, v1, v2 string) {
+	hashCache.mu.Lock()
+	defer hashCache.mu.Unlock()
+	if hashCache.cfg == c && c != nil {
+		return hashCache.scopes, hashCache.hash1, hashCache.hash2
+	}
+	scopes = c.ScopesHash()
+	v1, v2 = c.ConfigDocumentHashes()
+	hashCache.cfg, hashCache.scopes, hashCache.hash1, hashCache.hash2 = c, scopes, v1, v2
+	return scopes, v1, v2
+}

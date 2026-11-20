@@ -47,3 +47,12 @@ them outside a development host. `make release-guard` (`tools/release-guard.sh`)
 scans packages and binaries for the tool and must pass before every release.
 
 - `gen-oui.py`: regenerates the manufacturer table behind the Hosts page icons from the public IEEE MA-L list (`tools/gen-oui.py oui.csv > cmd/dnshived-web/oui_table.go`).
+
+
+## loadgen.py
+
+`tools/loadgen.py` stages synthetic reservations (with host names and extra DNS names) and local domains with
+records on a core node, to test how a cluster behaves with a large configuration. Run it as root on a core, once per
+core (`sudo python3 - apply --domains 100 --hosts 100 --reservations 25 < tools/loadgen.py`), then commit from the web UI
+(the author is `loadtest`, so the commit asks for the typed confirmation). `clear` stages the removal and `count`
+reports what is in the live configuration. Synthetic data is recognised by its names, so no snapshot is needed.

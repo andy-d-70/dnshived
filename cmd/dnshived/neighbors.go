@@ -36,8 +36,46 @@ func neighborProbeAllowed(scope string, now time.Time) bool {
 	return true
 }
 
+type neighborViewEntry struct {
+	at      time.Time
+	iface   string
+	network netip.Prefix
+	local   netip.Addr
+	ok      bool
+}
+
+// neighborViewTTL bounds how long a scope's interface view is reused. Reading it
+// walks the kernel's whole interface table, and a hosts page asks once per scope.
+const neighborViewTTL = 10 * time.Second
+
+var neighborViews struct {
+	mu sync.Mutex
+	m  map[string]neighborViewEntry
+}
+
+var neighborNow = time.Now
+
 // scopeNeighborView names the interface of a scope on this node, its network and an address of this node on it.
 func scopeNeighborView(sc config.ScopeConfig) (iface string, network netip.Prefix, local netip.Addr, ok bool) {
+	key := sc.Parent + "|" + strconv.Itoa(sc.VLANID) + "|" + sc.VIP
+	now := neighborNow()
+	neighborViews.mu.Lock()
+	e, hit := neighborViews.m[key]
+	neighborViews.mu.Unlock()
+	if hit && now.Sub(e.at) < neighborViewTTL {
+		return e.iface, e.network, e.local, e.ok
+	}
+	iface, network, local, ok = readScopeNeighborView(sc)
+	neighborViews.mu.Lock()
+	if neighborViews.m == nil || len(neighborViews.m) > 4096 {
+		neighborViews.m = map[string]neighborViewEntry{}
+	}
+	neighborViews.m[key] = neighborViewEntry{at: now, iface: iface, network: network, local: local, ok: ok}
+	neighborViews.mu.Unlock()
+	return iface, network, local, ok
+}
+
+func readScopeNeighborView(sc config.ScopeConfig) (iface string, network netip.Prefix, local netip.Addr, ok bool) {
 	if sc.Parent == "" || sc.VLANID == 0 || sc.VIP == "" {
 		return "", netip.Prefix{}, netip.Addr{}, false
 	}

@@ -46,6 +46,8 @@ func TestHandleBackup_IncludesSelfsOwnBackups(t *testing.T) {
 			fmt.Fprintf(w, `{"role":"core-3","control_addr":%q}`, srv.Listener.Addr().String())
 		case "/api/v1/backups":
 			json.NewEncoder(w).Encode(backups)
+		case "/api/v1/config/stamp":
+			w.WriteHeader(http.StatusNotFound)
 		default:
 			t.Errorf("unexpected path %q", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)

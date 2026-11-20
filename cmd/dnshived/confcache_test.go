@@ -323,3 +323,64 @@ func TestApplyConfigFormat_MigratesBothWaysAndTheStampFollows(t *testing.T) {
 		t.Errorf("the change survived both moves: %v %v", err, back != nil && back.LogLevel == "debug")
 	}
 }
+
+func TestLoadConfigShared_ParsesOncePerVersionOfTheFiles(t *testing.T) {
+	path := writeBaseConfig(t)
+	parsedConfig.mu.Lock()
+	parsedConfig.cfg = nil
+	parsedConfig.mu.Unlock()
+
+	a, err := loadConfigShared(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := loadConfigShared(path)
+	if err != nil || a != b {
+		t.Fatalf("an unchanged file must be answered from the cache (same pointer %v, err %v)", a == b, err)
+	}
+
+	c, _ := config.Load(path)
+	c.LogLevel = "debug"
+	if err := config.Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	d, err := loadConfigShared(path)
+	if err != nil || d == a || d.LogLevel != "debug" {
+		t.Fatalf("a saved change must be read again (new pointer %v, level %q, err %v)", d != a, d.LogLevel, err)
+	}
+
+	applyConfigFormat(path, "auto")
+	e, err := loadConfigShared(path)
+	if err != nil || e.LogLevel != "debug" {
+		t.Fatalf("the migration to the split storage must keep working: %v", err)
+	}
+	c2, _ := config.Load(path)
+	c2.LogLevel = "warn"
+	config.Save(path, c2)
+	f, err := loadConfigShared(path)
+	if err != nil || f.LogLevel != "warn" {
+		t.Fatalf("a save of the split configuration must be noticed (level %q, err %v)", f.LogLevel, err)
+	}
+	if _, err := loadConfigShared(path + ".missing"); err == nil {
+		t.Error("a missing configuration is an error, not a cached success")
+	}
+}
+
+func TestStatusHashes_FollowTheConfigurationObject(t *testing.T) {
+	path := writeBaseConfig(t)
+	a, _ := config.Load(path)
+	s1, h1, h2 := statusHashes(a)
+	if s1 != a.ScopesHash() || h1 != a.ConfigDocumentHash() || h2 != a.ConfigDocumentHashV2() {
+		t.Fatal("the cached hashes must equal the computed ones")
+	}
+	if s1b, h1b, h2b := statusHashes(a); s1b != s1 || h1b != h1 || h2b != h2 {
+		t.Error("the same object gives the same answer")
+	}
+	b, _ := config.Load(path)
+	b.LogLevel = "debug"
+	b.GlobalDNSRecords = []config.DNSRecord{{Name: "x.lan.", Type: "A", Value: "10.0.0.9"}}
+	_, _, h2c := statusHashes(b)
+	if h2c == h2 || h2c != b.ConfigDocumentHashV2() {
+		t.Error("another configuration object is hashed on its own")
+	}
+}

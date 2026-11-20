@@ -102,4 +102,5 @@ func (a *Agent) publishScopes(newScopes map[string]config.ScopeConfig) {
 		cp[k] = v
 	}
 	a.scopes.Store(&cp)
+	a.dnsRenderVer.Add(1)
 }

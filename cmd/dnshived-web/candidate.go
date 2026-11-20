@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -30,27 +31,86 @@ type candidateResponse struct {
 // fetchCandidateResponse reads one node's staged candidate with its author
 // journal.
 func fetchCandidateResponse(node NodeConfig) (candidateResponse, error) {
+	_, stamp := fetchStamps(node)
+	if stamp == "" {
+		return fetchCandidateResponseFresh(node)
+	}
+	e := candidateCacheEntry(node.Addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.stamp == stamp {
+		return cloneCandidateResponse(e.resp), nil
+	}
+	cr, size, err := fetchCandidateSized(node)
+	if err != nil {
+		return cr, err
+	}
+	e.stamp, e.resp, e.size = "", candidateResponse{}, 0
+	cacheBytes.Add(int64(-e.sizeWas))
+	e.sizeWas = 0
+	if cacheBytes.Add(int64(size)) <= cacheBudget {
+		e.stamp, e.resp, e.size, e.sizeWas = stamp, cr, size, size
+	} else {
+		cacheBytes.Add(int64(-size))
+	}
+	return cloneCandidateResponse(cr), nil
+}
+
+type cachedCandidate struct {
+	mu      sync.Mutex
+	stamp   string
+	resp    candidateResponse
+	size    int
+	sizeWas int
+}
+
+var candidateCaches sync.Map
+
+func candidateCacheEntry(addr string) *cachedCandidate {
+	if e, ok := candidateCaches.Load(addr); ok {
+		return e.(*cachedCandidate)
+	}
+	e, _ := candidateCaches.LoadOrStore(addr, &cachedCandidate{})
+	return e.(*cachedCandidate)
+}
+
+func cloneCandidateResponse(cr candidateResponse) candidateResponse {
+	cr.Candidate = cr.Candidate.Clone()
+	cr.Authors = maps.Clone(cr.Authors)
+	return cr
+}
+
+func fetchCandidateResponseFresh(node NodeConfig) (candidateResponse, error) {
+	cr, _, err := fetchCandidateSized(node)
+	return cr, err
+}
+
+func fetchCandidateSized(node NodeConfig) (candidateResponse, int, error) {
 	req, err := http.NewRequest(http.MethodGet, node.baseURL()+"/api/v1/candidate", nil)
 	if err != nil {
-		return candidateResponse{}, err
+		return candidateResponse{}, 0, err
 	}
 	if node.AdminToken != "" {
 		req.Header.Set("Authorization", "Bearer "+node.AdminToken)
 	}
-	resp, err := httpClient.Do(req)
+	resp, err := bigDocHTTPClient.Do(req)
 	if err != nil {
-		return candidateResponse{}, err
+		return candidateResponse{}, 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return candidateResponse{}, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+		return candidateResponse{}, 0, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 256<<20))
+	if err != nil {
+		return candidateResponse{}, 0, err
 	}
 	var cr candidateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
-		return candidateResponse{}, err
+	if err := json.Unmarshal(raw, &cr); err != nil {
+		return candidateResponse{}, 0, err
 	}
-	return cr, nil
+	return cr, len(raw), nil
 }
 
 // fetchCandidate reads one node's staged, not-yet-applied candidate —
