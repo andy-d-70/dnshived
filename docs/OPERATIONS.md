@@ -26,7 +26,7 @@ core-2 teal, core-3 brown. The footer line shows the cluster state, per-core upt
 - **Node colour and nickname.** On Cluster settings, Nodes, the menu at the right
   of a node opens *Edit name and colour…*. The colour is a numbered dot (red 1,
   blue 2, white 3, purple for a probe host by default); tick *default colour* to
-  go back to the default. Both are cosmetic, are kept in `web.json` of every web
+  go back to the default. The dot marks the node on every page that shows a node name. Both are cosmetic, are kept in `web.json` of every web
   instance and never change a node's identity.
 - **Bulk edit in the domains editor.** Tick records (the header box takes the
   shown page; "Select all" takes every record of the current search) and choose

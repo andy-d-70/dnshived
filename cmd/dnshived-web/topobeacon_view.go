@@ -173,22 +173,22 @@ func topoBeaconGraphSVG(rows []statusRow, missingRoles []string) template.HTML {
 		if !ok {
 			continue
 		}
-		fill := `var(--` + role + `)`
+		fill, class, ring, text := `var(--nd)`, ` class="node-`+role+`"`, ` stroke="var(--nd-ring)" stroke-width="1.5"`, `var(--text)`
 		label := role
 		if missing[role] {
-			fill = "#4B5563"
+			fill, class, ring, text = "#4B5563", "", "", "#4B5563"
 			label += " (missing)"
 		}
 		b = append(b, []byte(fmt.Sprintf(
-			`<circle cx="%d" cy="%d" r="11" fill="%s"/>`,
-			pos[0], pos[1], fill))...)
+			`<circle%s cx="%d" cy="%d" r="11" fill="%s"%s/>`,
+			class, pos[0], pos[1], fill, ring))...)
 		ly := pos[1] + 24
 		if pos[1] < 100 {
 			ly = pos[1] - 16
 		}
 		b = append(b, []byte(fmt.Sprintf(
 			`<text x="%d" y="%d" text-anchor="middle" font-size="11" fill="%s">%s</text>`,
-			pos[0], ly, fill, template.HTMLEscapeString(label)))...)
+			pos[0], ly, text, template.HTMLEscapeString(label)))...)
 	}
 	b = append(b, []byte(`</svg>`)...)
 	return template.HTML(b)

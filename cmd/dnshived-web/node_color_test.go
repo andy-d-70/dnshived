@@ -183,3 +183,42 @@ func TestConfigForm_NodesTableHasTheMenuAndTheDot(t *testing.T) {
 		t.Error("Replace is missing although a node was discovered")
 	}
 }
+
+func TestNodeColorsCSS(t *testing.T) {
+	cfg := &WebConfig{
+		Nodes: []NodeConfig{
+			{Name: "core-1", Addr: "10.0.0.1:9443", Color: "#FF0000"},
+			{Name: "core-2", Addr: "10.0.0.2:9443"},
+			{Name: "core-3", Addr: "10.0.0.3:9443", Color: "red;} body{display:none"},
+		},
+		ProbeHosts: []NodeConfig{{Name: "p", Addr: "10.0.0.9:9444"}, {Name: "q", Addr: "10.0.0.8:9444", Color: "#00ff00"}},
+	}
+	css := nodeColorsCSS(cfg)
+	for _, want := range []string{".node-core-1{--nd:#ff0000;--nd-fg:#ffffff;--ns:#ff0000}", ".scope-chip.serve-1{border-left-color:#ff0000", ".node-probe{--nd:#00ff00;--nd-fg:#1b1f24;--ns:#00ff00}"} {
+		if !strings.Contains(css, want) {
+			t.Errorf("css lacks %q:\n%s", want, css)
+		}
+	}
+	if strings.Contains(css, "core-2") || strings.Contains(css, "core-3") || strings.Contains(css, "display:none") {
+		t.Errorf("only valid custom colours of set nodes may appear:\n%s", css)
+	}
+	if got := nodeColorsCSS(&WebConfig{}); got != "" {
+		t.Errorf("no colours, no rules: %q", got)
+	}
+	rec := httptest.NewRecorder()
+	handleNodeColorsCSS(newConfigRef(cfg))(rec, httptest.NewRequest(http.MethodGet, "/node-colors.css", nil))
+	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/css") || rec.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Errorf("%d %v", rec.Code, rec.Header())
+	}
+}
+
+func TestStyleHTML_LinksTheNodeColours(t *testing.T) {
+	if !strings.Contains(styleHTML, `href="/node-colors.css"`) {
+		t.Error("every page must link the generated node colours")
+	}
+	for _, cls := range []string{".node-core-1::before", ".node-core-3::before", ".node-probe::before", ".mini-ep[class]::before", ".nodes-table td.nodecell::before"} {
+		if !strings.Contains(styleHTML, cls) {
+			t.Errorf("styleHTML lacks %s", cls)
+		}
+	}
+}

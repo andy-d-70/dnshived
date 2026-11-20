@@ -537,7 +537,7 @@ function dnshivedCycleTheme(){
 
 // styleHTML is inserted right after <title> on every page (see its call
 // sites).
-const styleHTML = `<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+const styleHTML = `<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/node-colors.css">
 <script>(function(){try{var t=localStorage.getItem('dnshived-theme');if(t==='glowing'||t==='dark'){document.documentElement.setAttribute('data-theme',t);}}catch(e){}})();</script>
 <style>
 :root{
@@ -661,7 +661,7 @@ button.btn-sm,.row-menu>summary{min-height:36px}
 .banner-detail,.banner-right{color:var(--muted);font-size:var(--fs-sm)}
 .banner.ok strong{color:var(--ok)}
 .banner.ok{border-left-color:var(--ok)}
-.nodes-table td.nodecell{border-left:4px solid currentColor}
+.nodes-table td.nodecell{border-left:4px solid var(--ns)}
 .nodes-table .nodename{color:var(--text)}
 .checks li{display:flex;gap:.45rem;align-items:baseline}
 .checks li::before{flex:none;width:1.1em;text-align:center}
@@ -893,10 +893,17 @@ overflow:hidden;vertical-align:middle;margin-right:.4rem}
 .chip.dim{color:var(--muted)}
 .offpref{display:inline-block;margin-left:.3rem;padding:0 .4rem;border:1px solid var(--warn);border-radius:999px;color:var(--warn);font-size:.8em;white-space:nowrap}
 .pc-act .probe-now-form button.btn-sm{background:var(--panel);color:var(--text);border:1px solid var(--border);font-weight:600}
-.node-core-1{color:var(--core-1)}
-.node-core-2{color:var(--core-2)}
-.node-core-3{color:var(--core-3)}
-.node-probe{color:var(--worker-probe)}
+.node-core-1{--nd:var(--nd-1);--nd-fg:var(--nd-fg-1);--ns:var(--nd-1)}
+.node-core-2{--nd:var(--nd-2);--nd-fg:var(--nd-fg-2);--ns:var(--nd-2)}
+.node-core-3{--nd:var(--nd-3);--nd-fg:var(--nd-fg-3);--ns:var(--nd-ring)}
+.node-probe{--nd:var(--nd-p);--nd-fg:var(--nd-fg-p);--ns:var(--nd-p)}
+.node-core-1::before,.node-core-2::before,.node-core-3::before,.node-probe::before{display:inline-flex;align-items:center;justify-content:center;width:1.5em;height:1.5em;border-radius:50%;background:var(--nd);color:var(--nd-fg);border:1.5px solid var(--nd-ring);font-size:.8em;font-weight:700;line-height:1;vertical-align:middle;margin-right:.45em;text-decoration:none}
+.node-core-1::before{content:"1"}
+.node-core-2::before{content:"2"}
+.node-core-3::before{content:"3"}
+.node-probe::before{content:"P"}
+.mini-ep[class]::before,.rail-node[class]::before{display:none}
+.nodes-table td.nodecell::before{content:"";width:.8em;height:.8em;margin-right:.4em}
 
 .ndot{display:inline-flex;align-items:center;justify-content:center;width:1.5em;height:1.5em;border-radius:50%;background:var(--nd);color:var(--nd-fg);border:1.5px solid var(--nd-ring);font-size:.8em;font-weight:700;line-height:1;vertical-align:middle;margin-right:.45em;flex:none}
 .ndot.d1{--nd:var(--nd-1);--nd-fg:var(--nd-fg-1)}

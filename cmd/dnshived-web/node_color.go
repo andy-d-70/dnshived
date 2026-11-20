@@ -64,7 +64,7 @@ func dotTextColor(color string) string {
 	r, _ := strconv.ParseUint(color[1:3], 16, 8)
 	g, _ := strconv.ParseUint(color[3:5], 16, 8)
 	b, _ := strconv.ParseUint(color[5:7], 16, 8)
-	if (299*r+587*g+114*b)/1000 > 150 {
+	if (299*r+587*g+114*b)/1000 > 128 {
 		return "#1b1f24"
 	}
 	return "#ffffff"

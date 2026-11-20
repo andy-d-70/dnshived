@@ -201,12 +201,12 @@ func TestStyleHTML_DefinesAllThreeThemes(t *testing.T) {
 }
 
 func TestStyleHTML_SemanticColorsAreTokensNotLiterals(t *testing.T) {
-	for _, tok := range []string{"--ok", "--warn", "--crit", "--core-1", "--core-2", "--core-3", "--worker-probe", "--tint-1", "--tint-2", "--tint-3", "--tint-crit", "--nav-h"} {
+	for _, tok := range []string{"--ok", "--warn", "--crit", "--nd-1", "--nd-2", "--nd-3", "--nd-p", "--nd-ring", "--tint-crit", "--nav-h"} {
 		if !strings.Contains(styleHTML, tok+":") {
 			t.Errorf("expected styleHTML to define token %s", tok)
 		}
 	}
-	for _, literal := range []string{".ok{color:#", ".warn{color:#", ".crit{color:#", ".node-core-1{color:#", ".node-core-2{color:#", ".node-core-3{color:#", ".node-probe{color:#"} {
+	for _, literal := range []string{".ok{color:#", ".warn{color:#", ".crit{color:#", ".node-core-1{color:", ".node-core-2{color:", ".node-core-3{color:", ".node-probe{color:"} {
 		if strings.Contains(styleHTML, literal) {
 			t.Errorf("expected %s to be gone (replaced by a var(...) reference) — a hardcoded literal here would never respond to a theme switch", literal)
 		}
@@ -217,8 +217,8 @@ func TestOtherPagesOwnCSS_UseThemeTokensNotLiterals(t *testing.T) {
 	if strings.Contains(topologyStyleHTML, "#c00") || strings.Contains(topologyStyleHTML, "#06c") || strings.Contains(topologyStyleHTML, "#c0392b") || strings.Contains(topologyStyleHTML, "#fdf2f1") {
 		t.Error("expected topologyStyleHTML's scope-chip colors to be var(...) tokens, not hardcoded hex literals")
 	}
-	if !strings.Contains(topologyStyleHTML, "var(--core-1)") || !strings.Contains(topologyStyleHTML, "var(--tint-1)") {
-		t.Error("expected topologyStyleHTML's scope-chip colors to reference the shared core/tint tokens")
+	if !strings.Contains(topologyStyleHTML, "var(--nd-1)") || !strings.Contains(topologyStyleHTML, "var(--tint-crit)") {
+		t.Error("expected topologyStyleHTML's scope-chip colors to reference the shared node/tint tokens")
 	}
 	if strings.Contains(scopeEditorStyleHTML, "#c0392b") {
 		t.Error("expected scopeEditorStyleHTML's field-invalid outline to be var(--crit), not a hardcoded literal")

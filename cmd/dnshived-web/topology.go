@@ -636,9 +636,9 @@ const topologyStyleHTML = `<style>
 /* sticky just below the sticky nav. */
 .topo-rail{display:flex;flex-direction:column;gap:.6rem;position:sticky;top:calc(var(--nav-h) + 1rem)}
 .rail-node{display:flex;align-items:center;gap:.5rem;padding:.5rem .7rem;background:var(--panel);
-border:1px solid var(--border);border-left:4px solid currentColor;border-radius:6px;font-size:var(--fs-sm)}
+border:1px solid var(--border);border-left:4px solid var(--ns);border-radius:6px;font-size:var(--fs-sm)}
 .rail-node .dot{display:inline-block;width:.55rem;height:.55rem;border-radius:50%;
-background:currentColor;flex:none}
+background:var(--nd);border:1px solid var(--nd-ring);flex:none}
 .topo-canvas{display:flex;flex-direction:column;gap:1.4rem;min-width:0}
 .iface-branch{position:relative;padding-left:1.2rem}
 .iface-branch::before{content:"";position:absolute;top:1.7rem;bottom:.1rem;left:0;width:2px;
@@ -651,16 +651,16 @@ border-radius:8px;background:var(--panel);padding:.5rem .7rem .5rem .6rem;min-wi
 .scope-chip:hover{border-color:var(--accent);text-decoration:none}
 .scope-chip::before{content:"";position:absolute;top:50%;left:-1.2rem;width:1.2rem;height:2px;
 background:var(--border)}
-.scope-chip.serve-1{border-left-color:var(--core-1);background:var(--tint-1)}
-.scope-chip.serve-2{border-left-color:var(--core-2);background:var(--tint-2)}
-.scope-chip.serve-3{border-left-color:var(--core-3);background:var(--tint-3)}
+.scope-chip.serve-1{border-left-color:var(--nd-1);background:color-mix(in srgb,var(--nd-1) 12%,var(--panel))}
+.scope-chip.serve-2{border-left-color:var(--nd-2);background:color-mix(in srgb,var(--nd-2) 12%,var(--panel))}
+.scope-chip.serve-3{border-left-color:var(--nd-ring);background:var(--panel)}
 .scope-chip.serve-none{border-left-color:var(--crit);background:var(--tint-crit)}
 .scope-chip.has-error{outline:2px solid var(--crit);outline-offset:-1px}
 .scope-chip .chip-name{font-weight:600}
 .scope-chip .chip-vlan{font-size:var(--fs-xs)}
 .scope-chip .chip-err{float:right;color:var(--crit);font-weight:700;font-size:var(--fs-md);line-height:1}
 .mini-eps{display:flex;gap:.3rem;margin-top:.45rem}
-.mini-ep{display:inline-block;width:1.1rem;height:.3rem;border-radius:2px;background:currentColor}
+.mini-ep{display:inline-block;width:1.1rem;height:.3rem;border-radius:2px;background:var(--ns)}
 .topo-summary{display:flex;align-items:center;gap:.6rem;background:var(--panel);border:1px solid var(--border);
 border-radius:8px;padding:.6rem .9rem;margin:0 0 1.1rem;font-size:var(--fs-md)}
 .topo-summary strong{font-size:var(--fs-xl)}

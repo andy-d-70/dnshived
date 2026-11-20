@@ -1207,7 +1207,7 @@ setting once every node is reachable.</strong></p>
 <section class="card">
 <h2>Cluster nodes</h2>
 <table class="small fixed-table nodes-table" data-stack>
-<colgroup><col style="width:21%"><col style="width:29%"><col style="width:24%"><col style="width:26%"></colgroup>
+<colgroup><col style="width:27%"><col style="width:25%"><col style="width:22%"><col style="width:26%"></colgroup>
 <tr><th>Name</th><th>State</th><th>Version</th><th>Info</th></tr>
 {{range .Rows}}
 <tr>

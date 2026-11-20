@@ -135,7 +135,7 @@ func TestTopoBeaconGraphSVG_RendersRealInterfaceNamesAndAllThreeNodes(t *testing
 	}
 	svg := string(topoBeaconGraphSVG(rows, nil))
 
-	for _, want := range []string{"<svg", "ens19", "eth1", "core-1", "core-2", "core-3", "var(--core-1)", "var(--core-2)", "var(--core-3)"} {
+	for _, want := range []string{"<svg", "ens19", "eth1", "core-1", "core-2", "core-3", `class="node-core-1"`, `class="node-core-2"`, `class="node-core-3"`} {
 		if !strings.Contains(svg, want) {
 			t.Errorf("rendered SVG missing %q:\n%s", want, svg)
 		}
@@ -194,14 +194,14 @@ func TestTopoBeaconGraphSVG_MissingRoleRendersDarkGrey(t *testing.T) {
 	if !strings.Contains(svg, `fill="#4B5563"`) {
 		t.Errorf("missing role core-1 did not render dark grey:\n%s", svg)
 	}
-	if strings.Contains(svg, "var(--core-1)") {
+	if strings.Contains(svg, `class="node-core-1"`) {
 		t.Errorf("missing role core-1 still rendered its normal identity color:\n%s", svg)
 	}
 	if !strings.Contains(svg, "core-1 (missing)") {
 		t.Errorf("missing role core-1's label was not marked missing:\n%s", svg)
 	}
 	// core-2/core-3 are NOT missing here — must keep their real identity colors.
-	if !strings.Contains(svg, "var(--core-2)") || !strings.Contains(svg, "var(--core-3)") {
+	if !strings.Contains(svg, `class="node-core-2"`) || !strings.Contains(svg, `class="node-core-3"`) {
 		t.Errorf("non-missing roles lost their normal identity color:\n%s", svg)
 	}
 }
