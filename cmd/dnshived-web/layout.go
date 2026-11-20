@@ -548,6 +548,7 @@ const styleHTML = `<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 --on-accent:#fff;--on-ok:#fff;--on-warn:#fff;--on-crit:#fff;
 --core-1:#6d3fd1;--core-2:#0b7f8f;--core-3:#8a5a2b;--worker-probe:#080;
 --tint-1:#f3eefc;--tint-2:#ebf6f7;--tint-3:#f7f0e8;--tint-crit:#fdeceb;
+--nd-1:#d6455d;--nd-2:#2f9fd8;--nd-3:#ffffff;--nd-p:#7c3aed;--nd-fg-1:#fff;--nd-fg-2:#fff;--nd-fg-3:#1b1f24;--nd-fg-p:#fff;--nd-ring:rgba(0,0,0,.55);
 /* --nav-h is the sticky nav's height; other sticky elements offset below it. */
 --nav-h:4.8rem;
 }
@@ -558,6 +559,7 @@ const styleHTML = `<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 --on-accent:#fff;--on-ok:#fff;--on-warn:#fff;--on-crit:#fff;
 --core-1:#6d3fd1;--core-2:#0b7f8f;--core-3:#8a5a2b;--worker-probe:#006b27;
 --tint-1:#e3d8fa;--tint-2:#cdeaee;--tint-3:#eadccb;--tint-crit:#ffd6d0;
+--nd-1:#c8283f;--nd-2:#1f8fcf;--nd-3:#ffffff;--nd-p:#6d28d9;--nd-fg-1:#fff;--nd-fg-2:#fff;--nd-fg-3:#0b1220;--nd-fg-p:#fff;--nd-ring:rgba(0,0,0,.6);
 }
 :root[data-theme="dark"]{
 --bg:#0f1318;--panel:#171c23;--border:#2a323d;--text:#e7ebf0;--muted:#8f9bab;
@@ -566,6 +568,7 @@ const styleHTML = `<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 --on-accent:#0b1220;--on-ok:#0b1220;--on-warn:#0b1220;--on-crit:#0b1220;
 --core-1:#b794ff;--core-2:#4fd1e0;--core-3:#d4a373;--worker-probe:#3ddc84;
 --tint-1:rgba(183,148,255,.14);--tint-2:rgba(79,209,224,.14);--tint-3:rgba(212,163,115,.14);--tint-crit:rgba(255,107,107,.14);
+--nd-1:#ff7a8c;--nd-2:#5fc2f2;--nd-3:#f4f6f8;--nd-p:#a78bfa;--nd-fg-1:#0b1220;--nd-fg-2:#0b1220;--nd-fg-3:#0b1220;--nd-fg-p:#0b1220;--nd-ring:rgba(255,255,255,.55);
 }
 *{box-sizing:border-box}
 html{font-size:14.5px}
@@ -894,6 +897,12 @@ overflow:hidden;vertical-align:middle;margin-right:.4rem}
 .node-core-2{color:var(--core-2)}
 .node-core-3{color:var(--core-3)}
 .node-probe{color:var(--worker-probe)}
+
+.ndot{display:inline-flex;align-items:center;justify-content:center;width:1.5em;height:1.5em;border-radius:50%;background:var(--nd);color:var(--nd-fg);border:1.5px solid var(--nd-ring);font-size:.8em;font-weight:700;line-height:1;vertical-align:middle;margin-right:.45em;flex:none}
+.ndot.d1{--nd:var(--nd-1);--nd-fg:var(--nd-fg-1)}
+.ndot.d2{--nd:var(--nd-2);--nd-fg:var(--nd-fg-2)}
+.ndot.d3{--nd:var(--nd-3);--nd-fg:var(--nd-fg-3)}
+.ndot.dp{--nd:var(--nd-p);--nd-fg:var(--nd-fg-p)}
 ` + footerStyle + pagerStyle + listBarStyle + `</style>`
 
 func tabLinksHTML(items [][2]string, active string) string {

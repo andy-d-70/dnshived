@@ -17,6 +17,8 @@ type NodeConfig struct {
 	TLS         bool   `json:"tls"`         // use https:// when true
 	AdminToken  string `json:"admin_token"` // Bearer token, admin role, for POST endpoints
 	DisplayName string `json:"display_name,omitempty"`
+	// Color is a custom #rrggbb for the node's dot; empty uses the theme's default for its role.
+	Color string `json:"color,omitempty"`
 
 	// TLSPort and TLSFingerprint are set for a probe host that has been pinned; a pinned probe is
 	// reached only over HTTPS on TLSPort, and only with the certificate whose fingerprint is TLSFingerprint.
@@ -74,6 +76,8 @@ type WebConfig struct {
 
 	// SelfDisplayName is this instance's OWN cosmetic nickname.
 	SelfDisplayName string `json:"self_display_name,omitempty"`
+	// SelfColor is this instance's own custom dot colour.
+	SelfColor string `json:"self_color,omitempty"`
 }
 
 func loadWebConfig(path string) (*WebConfig, error) {

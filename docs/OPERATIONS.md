@@ -23,6 +23,11 @@ core-2 teal, core-3 brown. The footer line shows the cluster state, per-core upt
   change on all nodes; nothing applies until you commit it on Pending
   changes, which shows a diff and warns if a change needs a restart.
   Scope changes hot-reload; see `docs/SCOPE_LIFECYCLE.md`.
+- **Node colour and nickname.** On Cluster settings, Nodes, the menu at the right
+  of a node opens *Edit name and colour…*. The colour is a numbered dot (red 1,
+  blue 2, white 3, purple for a probe host by default); tick *default colour* to
+  go back to the default. Both are cosmetic, are kept in `web.json` of every web
+  instance and never change a node's identity.
 - **Bulk edit in the domains editor.** Tick records (the header box takes the
   shown page; "Select all" takes every record of the current search) and choose
   an action in the bar above the list: set a TTL, follow the domain's TTL,

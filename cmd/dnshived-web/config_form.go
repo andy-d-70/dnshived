@@ -113,32 +113,33 @@ plain reload can't — see cache_max_bytes' own tooltip for why).</p>
 <section class="tab-pane" id="tab-nodes" data-tab="Nodes" data-tab-order="1">
 <h2>Cluster nodes</h2>
 <div class="table-wrap"><table border="1" cellpadding="4" data-stack>
-<tr><th>Name</th><th>Display name</th><th>Address</th><th>Rename</th><th>Offboard</th></tr>
+<tr><th>Name</th><th>Display name</th><th>Address</th><th style="width:3.5rem"></th></tr>
 {{range .AllNodes}}
 <tr>
-  <td>{{.Name}}</td>
+  <td><span class="ndot {{.DotClass}}"{{with .DotStyle}} style="{{.}}"{{end}}>{{.DotLabel}}</span>{{.Name}}</td>
   <td>{{.DisplayName}}</td>
   <td>{{.Addr}}</td>
-  <td><form method="post" action="/nodes/rename" style="display:inline">
-    <input type="hidden" name="addr" value="{{.Addr}}">
-    <input type="text" name="display_name" value="{{.DisplayName}}" placeholder="optional, blank = {{.Name}}">
-    <button type="submit">Save</button>
-  </form></td>
-  <td><form method="post" action="/nodes/offboard" style="display:inline" onsubmit="return confirm('Stage offboarding {{.Name}} ({{.Addr}}) as a pending change? Nothing happens to {{.Name}} until you review and Commit it from Pending changes.')">
-    <input type="hidden" name="role" value="{{.Name}}">
-    <button type="submit">Offboard</button>
-  </form></td>
+  <td style="text-align:center"><details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.Name}}">&#9776;</summary><div class="row-menu-list" role="menu">
+    <button type="button" role="menuitem" class="node-edit" data-addr="{{.Addr}}" data-name="{{.Name}}" data-display="{{.DisplayName}}" data-color="{{.ColorValue}}" data-custom="{{if .HasColor}}1{{end}}">Edit name and colour…</button>
+    <a role="menuitem" href="/logs?node={{.Name}}">Logs</a>
+    <a role="menuitem" href="/daemons">Daemons</a>
+    {{if $.Discovered}}<a role="menuitem" href="#discovered">Replace…</a>{{end}}
+    <form method="post" action="/nodes/offboard" onsubmit="return confirm('Stage offboarding {{.Name}} ({{.Addr}}) as a pending change? Nothing happens to {{.Name}} until you review and Commit it from Pending changes.')">
+      <input type="hidden" name="role" value="{{.Name}}">
+      <button type="submit" role="menuitem" class="danger">Offboard…</button>
+    </form>
+  </div></details></td>
 </tr>
 {{end}}
 {{range .MissingRoles}}
 <tr>
   <td class="dim">{{.}}</td>
-  <td colspan="4" class="warn">not configured — offboarded or never onboarded. See "Discovered on the network" below to onboard or replace it.</td>
+  <td colspan="3" class="warn">not configured — offboarded or never onboarded. See "Discovered on the network" below to onboard or replace it.</td>
 </tr>
 {{end}}
 </table></div>
-<p class="dim">The display name is cosmetic: it is shown instead of the real name
-wherever nodes are listed and never changes a node's identity. Offboard, replace
+<p class="dim">The display name and the colour are cosmetic: they never change a
+node's identity. Offboard, replace
 and onboard-as-probe stage a pending node action; review and commit (or discard)
 it from <a href="/pending">Pending changes</a>. The core roles are fixed (core-1,
 core-2, core-3): a dead core node is replaced under its existing role from the
@@ -214,6 +215,34 @@ necessarily already discovered.</p>
 </section>
 </div>
 
+<dialog id="node-dialog"><form method="post" action="/nodes/rename">
+<h3 style="margin-top:0">Edit <span id="nd-title"></span></h3>
+<input type="hidden" name="addr" id="nd-addr">
+<p><label>Display name <input type="text" name="display_name" id="nd-display" maxlength="64" placeholder="optional, blank = the real name"></label></p>
+<p><label>Colour <input type="color" name="color" id="nd-color"></label>
+<label style="margin-left:1rem"><input type="checkbox" name="color_default" value="1" id="nd-default"> default colour for this role</label></p>
+<p style="margin-bottom:0"><button type="submit" class="btn-primary">Save</button> <button type="button" id="nd-cancel">Cancel</button></p>
+</form></dialog>
+<script>
+(function(){
+var dlg=document.getElementById('node-dialog');
+if(!dlg||!dlg.showModal)return;
+var def=document.getElementById('nd-default'),col=document.getElementById('nd-color');
+function sync(){col.disabled=def.checked}
+def.addEventListener('change',sync);
+col.addEventListener('input',function(){def.checked=false;sync()});
+document.querySelectorAll('.node-edit').forEach(function(b){b.addEventListener('click',function(){
+ document.getElementById('nd-title').textContent=b.getAttribute('data-name');
+ document.getElementById('nd-addr').value=b.getAttribute('data-addr');
+ document.getElementById('nd-display').value=b.getAttribute('data-display');
+ col.value=b.getAttribute('data-color');
+ def.checked=b.getAttribute('data-custom')!=='1';sync();
+ dlg.showModal();
+})});
+document.getElementById('nd-cancel').addEventListener('click',function(){dlg.close()});
+})();
+</script>
+` + rowMenuScriptHTML + `
 <dialog id="log-modal">
 <h3 id="log-modal-title" style="margin-top:0"></h3>
 <div class="table-wrap"><pre id="log-modal-body" style="margin:0"></pre></div>

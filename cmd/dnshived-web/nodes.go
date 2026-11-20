@@ -145,7 +145,7 @@ func selfNodeConfig(cfg *WebConfig) (NodeConfig, bool) {
 	if err != nil || c.Role == "" || c.ControlAddr == "" {
 		return NodeConfig{}, false
 	}
-	return NodeConfig{Name: c.Role, Addr: c.ControlAddr, TLS: true, AdminToken: token, DisplayName: cfg.SelfDisplayName}, true
+	return NodeConfig{Name: c.Role, Addr: c.ControlAddr, TLS: true, AdminToken: token, DisplayName: cfg.SelfDisplayName, Color: cfg.SelfColor}, true
 }
 
 // nodesIncludingSelf is cfg.Nodes plus this instance's own entry
@@ -257,6 +257,24 @@ func probeHostDisplayNames(hosts []NodeConfig) map[string]string {
 	m := make(map[string]string, len(hosts))
 	for _, h := range hosts {
 		m[h.Addr] = h.DisplayName
+	}
+	return m
+}
+
+func probeHostColors(hosts []NodeConfig) map[string]string {
+	m := make(map[string]string, len(hosts))
+	for _, h := range hosts {
+		m[h.Addr] = h.ColorValue()
+	}
+	return m
+}
+
+func probeHostDotStyles(hosts []NodeConfig) map[string]template.CSS {
+	m := make(map[string]template.CSS, len(hosts))
+	for _, h := range hosts {
+		if st := h.DotStyle(); st != "" {
+			m[h.Addr] = st
+		}
 	}
 	return m
 }
@@ -480,7 +498,7 @@ func pushProbeSelfDecommission(n NodeConfig) string {
 
 // applyProbeChangeRemote calls path (either /internal/nodes/probe/add or
 // /internal/nodes/probe/remove) on a sibling dnshived-web instance.
-func applyProbeChangeRemote(n NodeConfig, cfg *WebConfig, path string, entry NodeConfig, token string) error {
+func applyProbeChangeRemote(n NodeConfig, cfg *WebConfig, path string, entry any, token string) error {
 	body, err := json.Marshal(entry)
 	if err != nil {
 		return err
@@ -955,8 +973,21 @@ func renameNodeFormHandler(cfgPath string, ref *configRef) http.HandlerFunc {
 			back = "/probes"
 		}
 
+		var color *string
+		if r.PostForm.Get("color_default") == "1" {
+			empty := ""
+			color = &empty
+		} else if vals, ok := r.PostForm["color"]; ok && len(vals) > 0 {
+			c := strings.TrimSpace(vals[0])
+			if c != "" && !validNodeColor(c) {
+				renderNodesError(w, cfg, "the colour must be given as #rrggbb", back)
+				return
+			}
+			color = &c
+		}
+
 		newCfg := *cfg
-		found := applyRename(&newCfg, addr, displayName)
+		found := applyNodeAppearance(&newCfg, addr, displayName, color)
 		if !found {
 			// Not in cfg.Nodes/cfg.ProbeHosts at all — check whether the target IS
 			// this instance itself before giving up.
@@ -965,6 +996,9 @@ func renameNodeFormHandler(cfgPath string, ref *configRef) http.HandlerFunc {
 				return
 			}
 			newCfg.SelfDisplayName = displayName
+			if color != nil {
+				newCfg.SelfColor = *color
+			}
 		}
 		if err := saveWebConfig(cfgPath, &newCfg); err != nil {
 			renderNodesError(w, cfg, "saving local web.json failed: "+err.Error(), back)
@@ -974,13 +1008,13 @@ func renameNodeFormHandler(cfgPath string, ref *configRef) http.HandlerFunc {
 
 		var fanoutErrs []string
 		for _, n := range siblingNodes(cfg) {
-			if err := applyProbeChangeRemote(n, cfg, "/internal/nodes/rename", NodeConfig{Addr: addr, DisplayName: displayName}, nodesSharedToken(cfg)); err != nil {
+			if err := applyProbeChangeRemote(n, cfg, "/internal/nodes/rename", renameRequest{Addr: addr, DisplayName: displayName, Color: color}, nodesSharedToken(cfg)); err != nil {
 				fanoutErrs = append(fanoutErrs, n.Name+": "+err.Error())
 			}
 		}
 
 		for _, n := range cfg.Nodes {
-			pushAudit(n, user.Name, "node.rename", fmt.Sprintf("set display name for %s to %q", addr, displayName))
+			pushAudit(n, user.Name, "node.rename", fmt.Sprintf("set display name for %s to %q%s", addr, displayName, colorAuditText(color)))
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -1006,10 +1040,40 @@ func isProbeHostAddr(cfg *WebConfig, addr string) bool {
 // applyRename sets cfg.Nodes/cfg.ProbeHosts to freshly-built slices with
 // DisplayName set on whichever entry matches addr.
 func applyRename(cfg *WebConfig, addr, displayName string) bool {
+	return applyNodeAppearance(cfg, addr, displayName, nil)
+}
+
+// renameRequest is the fan-out body of a rename; a nil Color leaves the colour
+// as it is, which is what a sibling on an older version sends.
+type renameRequest struct {
+	Addr        string  `json:"addr"`
+	DisplayName string  `json:"display_name"`
+	Color       *string `json:"color,omitempty"`
+}
+
+func colorAuditText(color *string) string {
+	switch {
+	case color == nil:
+		return ""
+	case *color == "":
+		return ", colour back to the default"
+	}
+	return ", colour " + *color
+}
+
+// applyNodeAppearance sets the display name and, when color is not nil, the
+// custom colour on whichever entry matches addr.
+func applyNodeAppearance(cfg *WebConfig, addr, displayName string, color *string) bool {
+	set := func(n *NodeConfig) {
+		n.DisplayName = displayName
+		if color != nil {
+			n.Color = *color
+		}
+	}
 	for i, n := range cfg.Nodes {
 		if n.Addr == addr {
 			nodes := append([]NodeConfig{}, cfg.Nodes...)
-			nodes[i].DisplayName = displayName
+			set(&nodes[i])
 			cfg.Nodes = nodes
 			return true
 		}
@@ -1017,7 +1081,7 @@ func applyRename(cfg *WebConfig, addr, displayName string) bool {
 	for i, h := range cfg.ProbeHosts {
 		if h.Addr == addr {
 			hosts := append([]NodeConfig{}, cfg.ProbeHosts...)
-			hosts[i].DisplayName = displayName
+			set(&hosts[i])
 			cfg.ProbeHosts = hosts
 			return true
 		}
@@ -1102,13 +1166,21 @@ func applyRenameHandler(cfgPath string, ref *configRef) http.HandlerFunc {
 			writeJSONWeb(w, http.StatusUnauthorized, map[string]string{"error": "invalid or missing token"})
 			return
 		}
-		var entry NodeConfig
-		if err := json.NewDecoder(r.Body).Decode(&entry); err != nil || entry.Addr == "" {
+		var entry renameRequest
+		if err := json.NewDecoder(r.Body).Decode(&entry); err != nil || entry.Addr == "" || (entry.Color != nil && *entry.Color != "" && !validNodeColor(*entry.Color)) {
 			writeJSONWeb(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
 		newCfg := *cfg
-		if !applyRename(&newCfg, entry.Addr, entry.DisplayName) {
+		found := applyNodeAppearance(&newCfg, entry.Addr, entry.DisplayName, entry.Color)
+		if !found && isLocalAddr(entry.Addr) {
+			newCfg.SelfDisplayName = entry.DisplayName
+			if entry.Color != nil {
+				newCfg.SelfColor = *entry.Color
+			}
+			found = true
+		}
+		if !found {
 			writeJSONWeb(w, http.StatusOK, map[string]bool{"ok": true}) // no matching node here — idempotent, not an error
 			return
 		}

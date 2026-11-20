@@ -713,7 +713,7 @@ shown in orange as pending.</p>
 <tr><th>Name</th><th>Display name</th><th>Address</th><th>State</th><th>Scopes</th><th>Rename</th><th></th></tr>
 {{range .ProbeParallelRows}}
 <tr>
-  <td>{{.Name}}</td>
+  <td><span class="ndot dp"{{with index $.ProbeHostDotStyles .Addr}} style="{{.}}"{{end}}>P</span>{{.Name}}</td>
   <td>{{index $.ProbeHostDisplayNames .Addr}}</td>
   <td>{{.Addr}}</td>
   <td>{{if not .Reachable}}<span class="crit">unreachable{{if .Err}} — {{.Err}}{{end}}</span>
@@ -722,6 +722,7 @@ shown in orange as pending.</p>
   <td><form method="post" action="/nodes/rename" style="display:inline">
     <input type="hidden" name="addr" value="{{.Addr}}">
     <input type="text" name="display_name" value="{{index $.ProbeHostDisplayNames .Addr}}" placeholder="optional, blank = {{.Name}}">
+    <input type="color" name="color" value="{{index $.ProbeHostColors .Addr}}" aria-label="Colour" oninput="this.form.color_default.checked=false"><label title="Use the default colour"><input type="checkbox" name="color_default" value="1"{{if not (index $.ProbeHostDotStyles .Addr)}} checked{{end}}> default</label>
     <button type="submit">Save</button>
   </form></td>
   <td><form method="post" action="/nodes/probe/remove" style="display:inline"><input type="hidden" name="addr" value="{{.Addr}}"><button type="submit">Remove</button></form></td>
@@ -1032,6 +1033,8 @@ type probeManagementData struct {
 	ProbeParallelRows     []probeParallelRow
 	AllProbeHostsParallel bool
 	ProbeHostDisplayNames map[string]string
+	ProbeHostColors       map[string]string
+	ProbeHostDotStyles    map[string]template.CSS
 
 	DefaultDNSChecksText string
 	GlobalDNSNames       []dnsCheckOption
@@ -1157,6 +1160,8 @@ func buildProbeManagementData(c config.Cluster, node NodeConfig, probeHosts []No
 		ProbeParallelRows:     rows,
 		AllProbeHostsParallel: allProbeHostsParallel(rows),
 		ProbeHostDisplayNames: probeHostDisplayNames(probeHosts),
+		ProbeHostColors:       probeHostColors(probeHosts),
+		ProbeHostDotStyles:    probeHostDotStyles(probeHosts),
 		DefaultDNSChecksText:  dns.DefaultDNSChecksText,
 		GlobalDNSNames:        dns.GlobalDNSNames,
 		ProbeIntervalMS:       c.ProbeIntervalMS,
