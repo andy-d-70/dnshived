@@ -23,6 +23,16 @@ core-2 teal, core-3 brown. The footer line shows the cluster state, per-core upt
   change on all nodes; nothing applies until you commit it on Pending
   changes, which shows a diff and warns if a change needs a restart.
   Scope changes hot-reload; see `docs/SCOPE_LIFECYCLE.md`.
+- **Bulk edit in the domains editor.** Tick records (the header box takes the
+  shown page; "Select all" takes every record of the current search) and choose
+  an action in the bar above the list: set a TTL, follow the domain's TTL,
+  include in or exclude from probe checks, set one value (only for A, AAAA,
+  CNAME, PTR and TXT records), move or copy to another standalone domain, or
+  delete. An overview lists what changes before anything is staged; a duplicate,
+  a CNAME beside other data or an invalid result refuses the whole action with
+  the reason. The Default TTL form has "records follow it", which clears every
+  record's own TTL in that domain. Linked domains and the DHCP names list are
+  read-only here.
 - **Pending changes record who changed what.** When other admins have changes
   staged, Pending changes lists each admin's changes and offers *Commit my
   changes* and *Discard my changes*; the others' changes stay staged.

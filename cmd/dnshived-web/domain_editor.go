@@ -69,7 +69,11 @@ type domEditorData struct {
 	Sets         []Template
 	AddName      string
 	AddType      string
+	BulkTargets  []string
+	BulkActions  []bulkOption
 }
+
+type bulkOption struct{ Value, Label string }
 
 func domHostLabel(host string) string {
 	host = strings.TrimSpace(host)
@@ -278,6 +282,16 @@ func buildDomEditor(cluster config.Cluster, pending bool, q url.Values) domEdito
 		keep.Set("sort", sortKey)
 		if desc {
 			keep.Set("dir", "desc")
+		}
+	}
+	if !virtual && cur.ForkedFrom == "" {
+		for _, d := range domains {
+			if d.Name != cur.Name && d.ForkedFrom == "" {
+				data.BulkTargets = append(data.BulkTargets, d.Name)
+			}
+		}
+		for _, k := range []string{"ttl", "ttlclear", "probe-on", "probe-off", "value", "move", "copy", "delete"} {
+			data.BulkActions = append(data.BulkActions, bulkOption{k, bulkActions[k]})
 		}
 	}
 	data.Chips = listChips("/config/domains", "", keep, data.Show, []chipDef{{"", "All", len(all)}, {"static", "Static", len(static)}, {"dhcp", "DHCP names", len(dynRows)}})
@@ -534,6 +548,11 @@ func handleDomainTTL(ref *configRef) http.HandlerFunc {
 				ttl = n
 			}
 			d.TTL = ttl
+			if r.PostForm.Get("follow") == "1" {
+				for i := range d.Records {
+					d.Records[i].TTL = 0
+				}
+			}
 			return nil
 		})
 	}
@@ -579,23 +598,32 @@ var domEditorTmpl = template.Must(template.New("domains").Parse(pagerBarDefineHT
 {{if not .Virtual}}{{if not .Linked}}<button type="button" class="btn quiet sm" id="imp-open" title="Paste or load a zone file or record lines; you see what is new first">Import…</button><button type="button" class="btn quiet sm" id="mail-open" title="Build SPF, DMARC and DKIM records for this domain; you see what is new first">Mail records…</button>{{if .Sets}}<button type="button" class="btn quiet sm" id="set-open" title="Add the records of a record set to this domain; you see collisions first">Apply a record set…</button>{{end}}{{end}}<a class="lbtn" href="/config/domains/{{.Domain.Name}}/export" title="Download the records as a zone file">Export</a>{{end}}
 </div>
 {{template "pagerbar" .PagerTop}}
+{{if .BulkActions}}<style>.bulkbar{display:flex;align-items:center;gap:.5rem;min-height:2.4rem;margin:.2rem 0}</style><form method="post" action="/config/domains/{{.Domain.Name}}/bulk" id="bulk-form" class="bulkbar" data-total="{{.Total}}" data-shown="{{len .Rows}}">
+<span id="bulk-count" class="dim">Select records to change several at once.</span>
+<span id="bulk-ctl" style="display:none"><select name="action" id="bulk-action" class="js-combo" aria-label="Bulk action">{{range .BulkActions}}<option value="{{.Value}}">{{.Label}}</option>{{end}}</select>
+<input name="ttl" id="bulk-ttl" placeholder="seconds" size="8" inputmode="numeric" aria-label="TTL in seconds" style="display:none">
+<input name="value" id="bulk-value" placeholder="new value" size="24" aria-label="New value" style="display:none">
+<span id="bulk-target-wrap" style="display:none"><select name="target" id="bulk-target" class="js-combo" aria-label="Target domain">{{range .BulkTargets}}<option>{{.}}</option>{{end}}</select></span>
+<input type="hidden" name="q" value="{{.Q}}"><input type="hidden" name="show" value="{{.Show}}"><input type="hidden" name="all" id="bulk-all" value="">
+<button type="submit" class="btn-primary sm">Preview…</button> <a href="#" id="bulk-allmatch" style="display:none"></a></span></form>{{end}}
 <div class="table-wrap"><table class="list-table dom-table" border="1" cellpadding="4">
-<colgroup><col style="width:22%"><col style="width:7%"><col><col style="width:7%"><col style="width:3.5rem"></colgroup>
-<tr>{{range .Headers}}<th aria-sort="{{.AriaSort}}"><a href="{{.URL}}" style="color:inherit;text-decoration:none">{{.Label}}<span style="display:inline-block;width:1em">{{.Arrow}}</span></a></th>{{end}}<th></th></tr>
+<colgroup><col style="width:2.2rem"><col style="width:22%"><col style="width:7%"><col><col style="width:7%"><col style="width:3.5rem"></colgroup>
+<tr><th>{{if .BulkActions}}<input type="checkbox" id="sel-all" aria-label="Select the shown records">{{end}}</th>{{range .Headers}}<th aria-sort="{{.AriaSort}}"><a href="{{.URL}}" style="color:inherit;text-decoration:none">{{.Label}}<span style="display:inline-block;width:1em">{{.Arrow}}</span></a></th>{{end}}<th></th></tr>
 {{range .Rows}}<tr>
+<td style="text-align:center">{{if and .Line $.BulkActions}}<input type="checkbox" class="sel" name="line" value="{{.Line}}" form="bulk-form" aria-label="Select {{.Host}} {{.Type}}">{{end}}</td>
 <td class="mono">{{.Host}}{{if .Dynamic}} <span class="chip" title="{{.Title}}">DHCP</span>{{end}}</td><td>{{.Type}}</td><td class="mono" title="{{.Value}}">{{.Value}}</td><td>{{.TTL}}</td>
 <td style="width:3rem;text-align:center">{{if .Line}}{{if not $.Linked}}<details class="row-menu"><summary aria-haspopup="menu" title="actions">&#9776;</summary><div class="row-menu-list" role="menu">
 <button type="button" role="menuitem" class="rec-edit" data-line="{{.Line}}">Edit…</button>
 {{if or (eq .Type "A") (eq .Type "AAAA") (eq .Type "CNAME")}}<form method="post" action="/config/domains/{{$.Domain.Name}}/template" onsubmit="var n=prompt('Name of the record set made from {{.Host}} (its records, service records and aliases):','{{.Host}}');if(!n)return false;this.set_name.value=n;return true"><input type="hidden" name="host" value="{{.Host}}"><input type="hidden" name="set_name"><button type="submit" role="menuitem">Make a record set…</button></form>{{end}}
 <form method="post" action="/config/domains/{{$.Domain.Name}}/records/delete" onsubmit="return confirm('Delete this record?')"><input type="hidden" name="line" value="{{.Line}}"><button type="submit" role="menuitem" class="danger">Delete…</button></form>
 </div></details>{{end}}{{end}}</td></tr>
-{{else}}<tr><td colspan="5" class="dim">{{if or .Q .Show}}No record matches.{{else}}No records yet. Add one above.{{end}}</td></tr>
+{{else}}<tr><td colspan="6" class="dim">{{if or .Q .Show}}No record matches.{{else}}No records yet. Add one above.{{end}}</td></tr>
 {{end}}
 </table></div>
 {{template "pagerbar" .PagerBottom}}
 {{if not .Virtual}}
 <div class="dom-actions">
-{{if not .Domain.ForkedFrom}}<form method="post" action="/config/domains/{{.Domain.Name}}/ttl" class="dom-ttl" style="display:inline"><label>Default TTL <input name="ttl" value="{{if .Domain.TTL}}{{.Domain.TTL}}{{end}}" placeholder="server default" size="9" inputmode="numeric" aria-label="Default TTL in seconds for this domain" title="Seconds; applies to records without their own TTL. Empty uses the DNS server default."></label> <button type="submit">Set</button></form>
+{{if not .Domain.ForkedFrom}}<form method="post" action="/config/domains/{{.Domain.Name}}/ttl" class="dom-ttl" style="display:inline"><label>Default TTL <input name="ttl" value="{{if .Domain.TTL}}{{.Domain.TTL}}{{end}}" placeholder="server default" size="9" inputmode="numeric" aria-label="Default TTL in seconds for this domain" title="Seconds; applies to records without their own TTL. Empty uses the DNS server default."></label> <label title="Clear the TTL of every record in this domain so all follow the default"><input type="checkbox" name="follow" value="1"> records follow it</label> <button type="submit">Set</button></form>
 {{end}}{{if .Domain.ForkedFrom}}<form method="post" action="/config/domains/{{.Domain.Name}}/unlink" onsubmit="return confirm('Make {{.Domain.Name}} standalone? It keeps a copy of the records and is no longer updated from {{.Domain.ForkedFrom}}.')" style="display:inline"><button type="submit">Unlink (make standalone)</button></form>
 {{else}}<form method="post" action="/config/domains/{{.Domain.Name}}/fork" onsubmit="var n=prompt('Name of the new linked domain (it answers with the same records):','');if(!n)return false;this.new_name.value=n;return true" style="display:inline"><input type="hidden" name="new_name"><button type="submit">Link a new domain…</button></form>{{end}}
 <form method="post" action="/config/domains/{{.Domain.Name}}/delete" onsubmit="return confirm('Delete the domain {{.Domain.Name}} and all its records?')" style="display:inline"><button type="submit" class="btn-danger">Delete domain…</button></form>
@@ -666,6 +694,31 @@ var mo=document.getElementById('mail-open'),md=document.getElementById('mail-dia
 if(mo&&md){mo.addEventListener('click',function(){md.showModal()});document.getElementById('mail-cancel').addEventListener('click',function(){md.close()})}
 var so=document.getElementById('set-open'),sd=document.getElementById('set-dialog');
 if(so&&sd){so.addEventListener('click',function(){sd.showModal()});document.getElementById('set-cancel').addEventListener('click',function(){sd.close()})}
+var bf=document.getElementById('bulk-form');
+if(bf){
+ var boxes=function(){return Array.prototype.slice.call(document.querySelectorAll('input.sel'))};
+ var cnt=document.getElementById('bulk-count'),ctl=document.getElementById('bulk-ctl'),act=document.getElementById('bulk-action'),
+  tt=document.getElementById('bulk-ttl'),vv=document.getElementById('bulk-value'),tg=document.getElementById('bulk-target-wrap'),
+  al=document.getElementById('bulk-all'),am=document.getElementById('bulk-allmatch'),sa=document.getElementById('sel-all'),
+  total=parseInt(bf.getAttribute('data-total'),10)||0;
+ var upd=function(){
+  var n=boxes().filter(function(b){return b.checked}).length,all=al.value==='1';
+  ctl.style.display=(n||all)?'inline':'none';
+  cnt.textContent=all?('All '+total+' matching records selected'):(n?(n+' selected'):'Select records to change several at once.');
+  cnt.className=n||all?'':'dim';
+  var a=act.value;
+  tt.style.display=a==='ttl'?'':'none';vv.style.display=a==='value'?'':'none';tg.style.display=(a==='move'||a==='copy')?'':'none';
+  var every=n>0&&n===boxes().length;
+  if(every&&total>n&&!all){am.style.display='';am.textContent='Select all '+total+' matching';}
+  else if(all){am.style.display='';am.textContent='Select only the shown records';}
+  else am.style.display='none';
+ };
+ boxes().forEach(function(b){b.addEventListener('change',function(){al.value='';upd()})});
+ if(sa)sa.addEventListener('change',function(){boxes().forEach(function(b){b.checked=sa.checked});al.value='';upd()});
+ act.addEventListener('change',upd);act.addEventListener('input',upd);
+ am.addEventListener('click',function(e){e.preventDefault();if(al.value==='1'){al.value='';}else{al.value='1';}upd()});
+ upd();
+}
 var c=document.getElementById('rec-cancel');if(c&&dlg)c.addEventListener('click',function(){dlg.close()});
 })();
 </script>
