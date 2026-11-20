@@ -7,8 +7,8 @@ package main
 // list-table columns.
 const columnsStyle = `
 .col-grip{position:absolute;top:0;right:0;width:9px;height:100%;cursor:col-resize;touch-action:none;z-index:3}
-.col-grip::after{content:"";position:absolute;top:20%;bottom:20%;right:4px;width:2px;border-radius:1px;background:var(--accent);opacity:0;transition:opacity .15s}
-th:hover>.col-grip::after,.col-grip.on::after{opacity:.9}
+.col-grip::after{content:"";position:absolute;top:20%;bottom:20%;right:4px;width:2px;border-radius:1px;background:var(--muted);opacity:.4;transition:opacity .15s,background .15s}
+th:hover>.col-grip::after,.col-grip.on::after{opacity:.95;background:var(--accent)}
 body.col-resizing,body.col-resizing *{cursor:col-resize!important;user-select:none!important}
 th.col-dragging{opacity:.55;background:var(--head)}
 .col-drop{position:fixed;width:3px;margin-left:-2px;border-radius:2px;background:var(--accent);z-index:70;pointer-events:none}

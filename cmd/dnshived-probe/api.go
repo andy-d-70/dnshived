@@ -121,6 +121,14 @@ func startAPIServer(cfg *ProbeConfig, cfgPath string, store *resultStore, tracke
 		json.NewEncoder(w).Encode(map[string]interface{}{"manual_probes": watchResults.list(cfg.manualProbeList())})
 	})
 
+	// GET /api/v1/probe-results answers every stored result at once, so a page
+	// needs one call per probe host and not one per scope. A scope without a
+	// stored result is absent here; the single-scope endpoint answers it as pending.
+	mux.HandleFunc("GET /api/v1/probe-results", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"results": store.all()})
+	})
+
 	mux.HandleFunc("/api/v1/probe/{scope}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		scope := r.PathValue("scope")

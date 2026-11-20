@@ -10,8 +10,8 @@ const footerLayoutStyle = `
 .appfoot [data-f].ft-dragging{position:relative;z-index:6;background:var(--head);box-shadow:0 2px 8px rgba(0,0,0,.3);border-radius:4px;opacity:.9;cursor:grabbing}
 .appfoot .ft-grips{position:absolute;inset:0;pointer-events:none}
 .appfoot .ft-grip{position:absolute;top:0;width:9px;height:100%;margin-left:-5px;cursor:col-resize;pointer-events:auto;touch-action:none}
-.appfoot .ft-grip::after{content:"";position:absolute;top:22%;bottom:22%;left:4px;width:2px;border-radius:1px;background:var(--accent);opacity:0;transition:opacity .15s}
-.appfoot .ft-grip:hover::after,.appfoot .ft-grip.on::after{opacity:.9}
+.appfoot .ft-grip::after{content:"";position:absolute;top:22%;bottom:22%;left:4px;width:2px;border-radius:1px;background:var(--muted);opacity:.45;transition:opacity .15s,background .15s}
+.appfoot .ft-grip:hover::after,.appfoot .ft-grip.on::after{opacity:.95;background:var(--accent)}
 .appfoot .ft-drop{position:absolute;top:12%;bottom:12%;width:3px;margin-left:-2px;border-radius:2px;background:var(--accent);pointer-events:none}
 .ft-menu{position:fixed;z-index:90;min-width:15.5rem;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.3);padding:.4rem;font-size:13.5px;line-height:1.3}
 .ft-menu-h{font-weight:650;color:var(--muted);padding:.2rem .5rem .35rem;font-size:.85em;text-transform:uppercase;letter-spacing:.04em}

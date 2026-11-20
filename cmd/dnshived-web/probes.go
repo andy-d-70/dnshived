@@ -445,24 +445,43 @@ func fetchProbeResults(scopeNames []string, probeHosts []NodeConfig) []probeFetc
 		scope, worker string
 		node          NodeConfig
 	}
+	batch := make([]map[string]probeResult, len(probeHosts))
+	var bg sync.WaitGroup
+	for i, node := range probeHosts {
+		bg.Add(1)
+		go func(i int, node NodeConfig) {
+			defer bg.Done()
+			batch[i] = fetchProbeBatch(node)
+		}(i, node)
+	}
+	bg.Wait()
 	var jobs []job
+	var results []probeFetch
 	for _, sc := range scopeNames {
-		for _, node := range probeHosts {
-			jobs = append(jobs, job{scope: sc, worker: node.Name, node: node})
+		for i, node := range probeHosts {
+			if batch[i] == nil {
+				jobs = append(jobs, job{scope: sc, worker: node.Name, node: node})
+				continue
+			}
+			pr, ok := batch[i][sc]
+			if !ok {
+				pr = probeResult{Scope: sc, Pending: true}
+			}
+			results = append(results, probeFetch{scope: sc, worker: node.Name, pr: pr})
 		}
 	}
-	results := make([]probeFetch, len(jobs))
+	perScope := make([]probeFetch, len(jobs))
 	var wg sync.WaitGroup
 	for i, j := range jobs {
 		wg.Add(1)
 		go func(i int, j job) {
 			defer wg.Done()
 			pr, err := fetchProbe(j.node, j.scope)
-			results[i] = probeFetch{scope: j.scope, worker: j.worker, pr: pr, err: err}
+			perScope[i] = probeFetch{scope: j.scope, worker: j.worker, pr: pr, err: err}
 		}(i, j)
 	}
 	wg.Wait()
-	return results
+	return append(results, perScope...)
 }
 
 // classifyProbeResults is checkProbeHostIssues' own classification logic,

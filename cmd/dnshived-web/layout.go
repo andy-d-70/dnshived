@@ -640,10 +640,13 @@ button.btn-sm,.row-menu>summary{min-height:36px}
 /* cards: the Overview grid and every later page built from cards. */
 .card-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.9rem;margin:0 0 1rem}
 /* The Overview keeps its shape whatever the content: fixed card heights, each card scrolls inside itself. */
-@media (min-width:701px){.card-grid{grid-template-rows:19.5rem 24rem}}
+@media (min-width:701px){.card-grid{grid-template-rows:21rem 24rem}}
 .card-grid>.card{overflow:auto;scrollbar-gutter:stable;min-height:0}
 @media (max-width:700px){.card-grid>.card{height:17rem}.card-grid>.card:nth-child(n+4){height:24rem}}
 .card-attn .card-list li{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.attn-field{margin-top:.7rem;padding-top:.5rem;border-top:1px solid var(--border)}
+.attn-field h3{margin:0 0 .3rem;font-size:var(--fs-md)}
+@media (min-width:701px){.card-health{grid-column:span 2}}
 .kv-table.fixed-table td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .card-wide .scrollbox{height:12rem;max-height:none}
 /* The scope list: fixed columns (a colgroup), one line per cell, a narrow window scrolls sideways. */
@@ -688,7 +691,7 @@ td.st{white-space:nowrap}
 .meter.mini{display:inline-block;width:5rem;height:.5rem;margin:0 .4rem 0 0;vertical-align:middle}
 .scrollbox{max-height:12rem;overflow:auto}
 @media (max-width:1180px){.card-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media (max-width:700px){.card-grid{grid-template-columns:1fr}.card-attn{order:-1}}
+@media (max-width:700px){.card-grid{grid-template-columns:1fr}}
 /* tabs: one strip above a set of panes; script-built (dnshivedInitTabs) or plain links (tabLinksHTML). */
 .tabs{display:flex;gap:.2rem;border-bottom:1px solid var(--border);margin:0 0 1rem;overflow-x:auto;scrollbar-width:thin}
 .tabs button,.tabs a.tab-link{font:inherit;flex:0 0 auto;white-space:nowrap;background:none;border:0;

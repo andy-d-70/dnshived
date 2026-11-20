@@ -937,6 +937,20 @@ func fetchProbe(node NodeConfig, scope string) (probeResult, error) {
 	return pr, nil
 }
 
+// fetchProbeBatch reads every stored result of one probe host in one call. It
+// returns nil when the host cannot answer that (an older version, an error), and
+// the caller then asks per scope.
+func fetchProbeBatch(node NodeConfig) map[string]probeResult {
+	var out struct {
+		Results map[string]probeResult `json:"results"`
+	}
+	status, err := doGet(httpClient, node, "/api/v1/probe-results", &out)
+	if err != nil || status != http.StatusOK || out.Results == nil {
+		return nil
+	}
+	return out.Results
+}
+
 // fetchSystem calls GET /api/v1/system — no server-side rate limit.
 func fetchSystem(node NodeConfig) (systemInfo, error) {
 	var si systemInfo

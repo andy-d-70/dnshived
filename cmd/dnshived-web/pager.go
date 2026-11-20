@@ -62,7 +62,7 @@ const pagerScriptHTML = `<script>
       }else if(t.hasAttribute('data-d')){page+=+t.getAttribute('data-d')}
       render();
     })});
-    render();
+    el._pgRender=render;render();
   }
   function start(){[].forEach.call(document.querySelectorAll('[data-pager]'),init)}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();

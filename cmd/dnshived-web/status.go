@@ -1272,8 +1272,26 @@ setting once every node is reachable.</strong></p>
 {{end}}<p><a href="/probes">Open the probe results →</a></p>
 </section>
 
-<section class="card card-attn">
-<h2>Needs attention{{with .AttnCount}} <span class="dim">({{.}})</span>{{end}}</h2>
+<section class="card">
+<h2>Cluster paths <span class="info-ico" title="each worker trunk's own alternate path to every other core role — continuously monitored, not actively used until a peer's primary (mgmt) path goes down">ⓘ</span></h2>
+<p class="{{.PathsSummaryClass}} card-big">{{.PathsSummaryText}}</p>
+{{if .VLANPaths}}<p class="dim">{{.VLANPaths}} VLAN path(s) run over the trunks.</p>{{end}}
+{{if .PathRows}}<p><a href="#" onclick="document.getElementById('paths-modal').showModal();return false;">Details →</a></p>{{end}}
+</section>
+
+<section class="card card-health">
+<h2>Health checks</h2>
+<ul class="card-list checks">
+<li class="{{.ClusterClass}}" title="the cluster's own quorum/failover state machine: STABLE means every serving decision has settled and held for the required settling window; DEGRADED/GETTING THERE/NOT CONVERGING mean scopes are still starting, rebalancing, or stuck — not necessarily an outage, but worth watching"><b>State</b> {{.ClusterState}}</li>
+<li class="{{.ConfigSaneClass}}" title="{{if .ConfigSaneTitle}}{{.ConfigSaneTitle}}{{else}}every node's own live-observed state (interfaces, sockets, ...) checked against what is configured; separate from State, which is FSM/quorum health only{{end}}"><b>Config sane</b> {{.ConfigSaneText}}</li>
+<li class="{{.InterfaceHealthClass}}" title="physical trunk carrier state (link up/down) per node; a link-down trunk force-closes DHCP for every scope on it"><b>Interfaces</b> {{.InterfaceHealthText}}</li>
+<li class="{{.TrunksClass}}" title="{{if .TrunksTitle}}{{.TrunksTitle}}{{else}}every configured trunk on every stable core: verified once that node has heard a topology beacon from another core on it, assumed while nothing has been heard{{end}}"><b>Trunks</b> {{.TrunksText}}</li>
+<li class="{{.ArbiterQuorumClass}}" title="every core node also runs its own arbiter instance; a witness grant needs 2 of these 3 to agree, so this is who is arbiter now, not a single node"><b>Arbiter quorum</b> {{.ArbiterQuorumText}}</li>
+<li class="{{if eq .Witness "healthy"}}ok{{else}}warn{{end}}" title="the time-limited token that authorizes a node to keep a scope's DHCP gate open — renewed continuously while healthy; a node that stops renewing (crash, network loss) has its gate close automatically once its current token expires, which is what actually prevents two nodes serving the same scope at once. Shown: witness state, then how many tokens are active"><b>Witness</b> {{.Witness}} · {{.ActiveTokens}} active</li>
+<li class="{{.DaemonSummaryClass}}" title="systemd unit health (dnshived itself, dnsmasq, keepalived, relays, ...) on every node; independent of State: a unit can be unhealthy while the cluster's own quorum logic stays fine, and vice versa"><b>Daemons</b> {{.DaemonSummary}} <a href="/daemons">details →</a></li>
+</ul>
+<div class="attn-field card-attn">
+<h3>Needs attention{{with .AttnCount}} <span class="dim">({{.}})</span>{{end}}</h3>
 {{if or .ProbeIssues .DaemonIssues .Coherence .Unreachable}}
 <ul class="card-list">
 {{if .Unreachable}}<li class="crit">{{.Unreachable}} node(s) unreachable{{if .UnreachableNames}}: {{.UnreachableNames}}{{end}}</li>{{end}}
@@ -1287,26 +1305,7 @@ setting once every node is reachable.</strong></p>
 </ul>
 {{else}}
 <p class="ok">✔ Nothing needs attention.</p>
-{{end}}</section>
-
-<section class="card">
-<h2>Cluster paths <span class="info-ico" title="each worker trunk's own alternate path to every other core role — continuously monitored, not actively used until a peer's primary (mgmt) path goes down">ⓘ</span></h2>
-<p class="{{.PathsSummaryClass}} card-big">{{.PathsSummaryText}}</p>
-{{if .VLANPaths}}<p class="dim">{{.VLANPaths}} VLAN path(s) run over the trunks.</p>{{end}}
-{{if .PathRows}}<p><a href="#" onclick="document.getElementById('paths-modal').showModal();return false;">Details →</a></p>{{end}}
-</section>
-
-<section class="card">
-<h2>Health checks</h2>
-<ul class="card-list checks">
-<li class="{{.ClusterClass}}" title="the cluster's own quorum/failover state machine: STABLE means every serving decision has settled and held for the required settling window; DEGRADED/GETTING THERE/NOT CONVERGING mean scopes are still starting, rebalancing, or stuck — not necessarily an outage, but worth watching"><b>State</b> {{.ClusterState}}</li>
-<li class="{{.ConfigSaneClass}}" title="{{if .ConfigSaneTitle}}{{.ConfigSaneTitle}}{{else}}every node's own live-observed state (interfaces, sockets, ...) checked against what is configured; separate from State, which is FSM/quorum health only{{end}}"><b>Config sane</b> {{.ConfigSaneText}}</li>
-<li class="{{.InterfaceHealthClass}}" title="physical trunk carrier state (link up/down) per node; a link-down trunk force-closes DHCP for every scope on it"><b>Interfaces</b> {{.InterfaceHealthText}}</li>
-<li class="{{.TrunksClass}}" title="{{if .TrunksTitle}}{{.TrunksTitle}}{{else}}every configured trunk on every stable core: verified once that node has heard a topology beacon from another core on it, assumed while nothing has been heard{{end}}"><b>Trunks</b> {{.TrunksText}}</li>
-<li class="{{.ArbiterQuorumClass}}" title="every core node also runs its own arbiter instance; a witness grant needs 2 of these 3 to agree, so this is who is arbiter now, not a single node"><b>Arbiter quorum</b> {{.ArbiterQuorumText}}</li>
-<li class="{{if eq .Witness "healthy"}}ok{{else}}warn{{end}}" title="the time-limited token that authorizes a node to keep a scope's DHCP gate open — renewed continuously while healthy; a node that stops renewing (crash, network loss) has its gate close automatically once its current token expires, which is what actually prevents two nodes serving the same scope at once. Shown: witness state, then how many tokens are active"><b>Witness</b> {{.Witness}} · {{.ActiveTokens}} active</li>
-<li class="{{.DaemonSummaryClass}}" title="systemd unit health (dnshived itself, dnsmasq, keepalived, relays, ...) on every node; independent of State: a unit can be unhealthy while the cluster's own quorum logic stays fine, and vice versa"><b>Daemons</b> {{.DaemonSummary}} <a href="/daemons">details →</a></li>
-</ul>
+{{end}}</div>
 </section>
 </div>
 
@@ -1328,6 +1327,25 @@ setting once every node is reachable.</strong></p>
     c.style.height=h+'px';
   }
   fit();window.addEventListener('resize',fit);document.addEventListener('dnshived-pager',fit);
+})();
+</script>
+<script>
+(function(){
+  var busy=false,every=10000;
+  function sel(){var x=window.getSelection&&window.getSelection();return x&&String(x).length>0}
+  function swap(doc,q){var a=document.querySelector(q),b=doc.querySelector(q);if(a&&b&&a.innerHTML!==b.innerHTML)a.innerHTML=b.innerHTML}
+  function tick(){
+    if(busy||document.hidden||sel()||document.querySelector('dialog[open]'))return;
+    busy=true;
+    fetch(location.pathname+location.search,{credentials:'same-origin',headers:{'Accept':'text/html'}}).then(function(r){return r.ok&&!r.redirected?r.text():null}).then(function(t){
+      if(!t)return;
+      var doc=new DOMParser().parseFromString(t,'text/html');
+      swap(doc,'p.banner');swap(doc,'.card-grid');
+      var a=document.querySelector('#events-card ul.events'),b=doc.querySelector('#events-card ul.events');
+      if(a&&b&&a.innerHTML!==b.innerHTML){a.innerHTML=b.innerHTML;if(a._pgRender)a._pgRender()}
+    }).catch(function(){}).then(function(){busy=false});
+  }
+  setInterval(tick,every);
 })();
 </script>
 

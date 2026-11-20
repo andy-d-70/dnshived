@@ -5,6 +5,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -2108,5 +2109,40 @@ func TestValidateReservations_DuplicateHostnamesStayValid(t *testing.T) {
 	old := []Reservation{{MAC: "aa:bb:cc:00:00:02", IP: "10.0.0.6", Hostname: "nas"}, {MAC: "aa:bb:cc:00:00:03", IP: "10.0.0.7", Hostname: "nas"}}
 	if err := validateReservations(old, "scope"); err != nil {
 		t.Fatalf("a config that was valid before extra names must stay valid: %v", err)
+	}
+}
+
+func TestReservationID_ValidationAndKey(t *testing.T) {
+	base := func(ids ...string) []Reservation {
+		var out []Reservation
+		for i, id := range ids {
+			out = append(out, Reservation{MAC: fmt.Sprintf("aa:bb:cc:00:00:%02x", i+1), IP: fmt.Sprintf("10.0.0.%d", 50+i), ID: id})
+		}
+		return out
+	}
+	tests := []struct {
+		name string
+		ids  []string
+		ok   bool
+	}{
+		{"none", []string{"", ""}, true},
+		{"generated", []string{NewReservationID(), NewReservationID()}, true},
+		{"bad characters", []string{"R_1"}, false},
+		{"too long", []string{strings.Repeat("a", 41)}, false},
+		{"duplicate", []string{"r-1", "r-1"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateReservations(base(tt.ids...), "scope x")
+			if (err == nil) != tt.ok {
+				t.Fatalf("ok=%v err=%v", tt.ok, err)
+			}
+		})
+	}
+	if ReservationKey(Reservation{MAC: "aa:bb:cc:00:00:01"}) != "aa:bb:cc:00:00:01" || ReservationKey(Reservation{MAC: "x", ID: "r-1"}) != "id:r-1" {
+		t.Error("key is the id when set, the MAC otherwise")
+	}
+	if a, b := NewReservationID(), NewReservationID(); a == b {
+		t.Error("ids must differ")
 	}
 }

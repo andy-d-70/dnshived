@@ -270,3 +270,18 @@ func TestNodeIPIsPerNodeAndIgnored(t *testing.T) {
 		t.Fatalf("changes = %v", got)
 	}
 }
+
+func TestReservations_FollowTheirIDWhenTheMACChanges(t *testing.T) {
+	mk := func(mac1 string) config.Cluster {
+		c := base()
+		c.Scopes = map[string]config.ScopeConfig{"office": {Reservations: []config.Reservation{
+			{MAC: mac1, IP: "10.0.0.50", ID: "r-1"},
+			{MAC: "aa:bb:cc:00:00:02", IP: "10.0.0.51"},
+		}}}
+		return c
+	}
+	changes := Changes(tree(t, mk("aa:bb:cc:00:00:01")), tree(t, mk("aa:bb:cc:00:00:99")))
+	if len(changes) != 1 || strings.Contains(changes[0], "00:02") {
+		t.Fatalf("a MAC change of a reservation with an id is one change of that reservation: %v", changes)
+	}
+}

@@ -24,9 +24,9 @@ var rules = map[string]rule{
 	"local_domains[].records":       {key: field("host", "type"), atomic: true},
 	"global_dns_records":            {key: field("name", "type"), atomic: true},
 	"scopes.{}.dns_records":         {key: field("name", "type"), atomic: true},
-	"scopes.{}.reservations":        {key: field("mac"), atomic: true},
+	"scopes.{}.reservations":        {key: reservationKey, atomic: true},
 	"parked_scopes.{}.dns_records":  {key: field("name", "type"), atomic: true},
-	"parked_scopes.{}.reservations": {key: field("mac"), atomic: true},
+	"parked_scopes.{}.reservations": {key: reservationKey, atomic: true},
 	"api_tokens":                    {key: field("name"), atomic: true},
 	"default_dns_checks":            {key: field("name", "type"), atomic: true},
 }
@@ -36,6 +36,15 @@ var ignoredTop = map[string]bool{
 	"config_revision_origin": true, "membership_epoch": true, "outage_rules_active": true,
 	"access_list_active": true, "cluster_id": true, "node_id": true, "role": true,
 	"control_addr": true, "bind_addr": true, "data_dir": true, "peers": true,
+}
+
+// reservationKey identifies a reservation by its id when it has one, otherwise by its MAC address.
+func reservationKey(m map[string]any) string {
+	if id, _ := m["id"].(string); id != "" {
+		return "id:" + id
+	}
+	mac, _ := m["mac"].(string)
+	return mac
 }
 
 func field(names ...string) func(map[string]any) string {

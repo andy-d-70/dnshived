@@ -6,6 +6,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -243,6 +244,28 @@ type Reservation struct {
 	ClientID string `json:"client_id,omitempty"`
 	// Names are extra DNS names for the reservation's address.
 	Names []string `json:"names,omitempty"`
+	// ID names the reservation independent of its MAC address, which can change (a replaced NIC, a randomised
+	// address). New reservations get one; older ones have none and are identified by their MAC.
+	ID string `json:"id,omitempty"`
+}
+
+var reservationIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
+
+// NewReservationID returns a random reservation id.
+func NewReservationID() string {
+	b := make([]byte, 6)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return "r-" + hex.EncodeToString(b)
+}
+
+// ReservationKey identifies a reservation of a scope: its id when it has one, otherwise its MAC address.
+func ReservationKey(r Reservation) string {
+	if r.ID != "" {
+		return "id:" + r.ID
+	}
+	return r.MAC
 }
 
 // MaxReservationNames bounds the extra names of one reservation.
@@ -583,6 +606,7 @@ var reservationHostnameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]*$`)
 func validateReservations(reservations []Reservation, errPrefix string) error {
 	seen := make(map[string]bool, len(reservations))
 	owner := make(map[string]int, len(reservations))
+	seenID := make(map[string]bool)
 	hostOwner := make(map[string]int, len(reservations))
 	for i, res := range reservations {
 		if res.Hostname != "" {
@@ -601,6 +625,15 @@ func validateReservations(reservations []Reservation, errPrefix string) error {
 		}
 		if res.ClientID != "" && !reservationClientIDRe.MatchString(res.ClientID) {
 			return fmt.Errorf("%s: reservations[%d]: client_id %q must be up to 32 lowercase hex bytes like 01:aa:bb", errPrefix, i, res.ClientID)
+		}
+		if res.ID != "" && !reservationIDRe.MatchString(res.ID) {
+			return fmt.Errorf("%s: reservations[%d]: id %q must be 1 to 40 lowercase letters, digits or hyphens", errPrefix, i, res.ID)
+		}
+		if res.ID != "" {
+			if seenID[res.ID] {
+				return fmt.Errorf("%s: reservations[%d]: id %q is used by an earlier reservation", errPrefix, i, res.ID)
+			}
+			seenID[res.ID] = true
 		}
 		if len(res.Names) > MaxReservationNames {
 			return fmt.Errorf("%s: reservations[%d]: %d extra names, at most %d", errPrefix, i, len(res.Names), MaxReservationNames)

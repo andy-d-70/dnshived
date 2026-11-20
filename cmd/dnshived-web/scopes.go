@@ -1142,6 +1142,16 @@ func handleScopeDetail(ref *configRef, store *TemplateStore) http.HandlerFunc {
 
 // upsertReservation adds a new reservation or updates an existing one
 // (matched by MAC).
+// reservationExists reports whether the scope already holds a reservation for mac.
+func reservationExists(sc config.ScopeConfig, mac string) bool {
+	for _, r := range sc.Reservations {
+		if strings.EqualFold(r.MAC, mac) {
+			return true
+		}
+	}
+	return false
+}
+
 func upsertReservation(reservations []config.Reservation, res config.Reservation) []config.Reservation {
 	for i, r := range reservations {
 		if strings.EqualFold(r.MAC, res.MAC) {
@@ -1228,8 +1238,11 @@ func promoteLeaseFormHandler(ref *configRef) http.HandlerFunc {
 		res := config.Reservation{MAC: mac, IP: ip, Hostname: hostname}
 		for _, old := range sc.Reservations {
 			if strings.EqualFold(old.MAC, mac) {
-				res.ClientID, res.Names = old.ClientID, old.Names
+				res.ClientID, res.Names, res.ID = old.ClientID, old.Names, old.ID
 			}
+		}
+		if res.ID == "" && !reservationExists(sc, mac) {
+			res.ID = config.NewReservationID()
 		}
 		if _, set := r.Form["client_id"]; set {
 			res.ClientID = strings.ToLower(strings.TrimSpace(r.FormValue("client_id")))
