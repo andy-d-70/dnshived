@@ -23,58 +23,84 @@ import (
 type candidateResponse struct {
 	Exists    bool           `json:"exists"`
 	Candidate config.Cluster `json:"candidate"`
+	// Authors is nil when the daemon does not report who changed what.
+	Authors map[string]string `json:"authors"`
 }
 
-// fetchCandidate reads one node's staged, not-yet-applied candidate —
-// exists is false (Candidate zero-valued) when nothing is pending there.
-func fetchCandidate(node NodeConfig) (config.Cluster, bool, error) {
+// fetchCandidateResponse reads one node's staged candidate with its author
+// journal.
+func fetchCandidateResponse(node NodeConfig) (candidateResponse, error) {
 	req, err := http.NewRequest(http.MethodGet, node.baseURL()+"/api/v1/candidate", nil)
 	if err != nil {
-		return config.Cluster{}, false, err
+		return candidateResponse{}, err
 	}
 	if node.AdminToken != "" {
 		req.Header.Set("Authorization", "Bearer "+node.AdminToken)
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return config.Cluster{}, false, err
+		return candidateResponse{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return config.Cluster{}, false, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
+		return candidateResponse{}, fmt.Errorf("status %d: %s", resp.StatusCode, string(body))
 	}
 	var cr candidateResponse
 	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
+		return candidateResponse{}, err
+	}
+	return cr, nil
+}
+
+// fetchCandidate reads one node's staged, not-yet-applied candidate —
+// exists is false (Candidate zero-valued) when nothing is pending there.
+func fetchCandidate(node NodeConfig) (config.Cluster, bool, error) {
+	cr, err := fetchCandidateResponse(node)
+	if err != nil {
 		return config.Cluster{}, false, err
 	}
 	return cr.Candidate, cr.Exists, nil
+}
+
+// firstReachableCandidateResponse returns the first reachable node's answer
+// that holds a candidate, else the first reachable node's answer.
+func firstReachableCandidateResponse(nodes []NodeConfig) (cr candidateResponse, node NodeConfig, err error) {
+	var lastErr error
+	haveEmpty := false
+	var empty candidateResponse
+	var emptyNode NodeConfig
+	for _, n := range nodes {
+		got, cerr := fetchCandidateResponse(n)
+		if cerr != nil {
+			lastErr = cerr
+			continue
+		}
+		if got.Exists {
+			return got, n, nil
+		}
+		if !haveEmpty {
+			haveEmpty, empty, emptyNode = true, got, n
+		}
+	}
+	if haveEmpty {
+		return empty, emptyNode, nil
+	}
+	return candidateResponse{}, NodeConfig{}, fmt.Errorf("no node reachable, last error: %w", lastErr)
 }
 
 // firstReachableCandidate returns the first reachable node's candidate and
 // whether one actually exists there — the Pending Changes page's own
 // read path.
 func firstReachableCandidate(nodes []NodeConfig) (c config.Cluster, exists bool, node NodeConfig, err error) {
-	var lastErr error
-	sawReachableWithNoCandidate := false
-	var noCandidateNode NodeConfig
-	for _, n := range nodes {
-		cand, ex, cerr := fetchCandidate(n)
-		if cerr != nil {
-			lastErr = cerr
-			continue
-		}
-		if ex {
-			return cand, true, n, nil
-		}
-		if !sawReachableWithNoCandidate {
-			sawReachableWithNoCandidate, noCandidateNode = true, n
-		}
+	cr, n, err := firstReachableCandidateResponse(nodes)
+	if err != nil {
+		return config.Cluster{}, false, NodeConfig{}, err
 	}
-	if sawReachableWithNoCandidate {
-		return config.Cluster{}, false, noCandidateNode, nil
+	if !cr.Exists {
+		return config.Cluster{}, false, n, nil
 	}
-	return config.Cluster{}, false, NodeConfig{}, fmt.Errorf("no node reachable, last error: %w", lastErr)
+	return cr.Candidate, true, n, nil
 }
 
 // currentEditableConfig is what every edit FORM reads its baseline from.
@@ -187,6 +213,7 @@ func discardCandidateScope(node NodeConfig, scope string) error {
 // counterpart.
 func pushCandidateAndRenderResult(w http.ResponseWriter, cfg *WebConfig, payload configPushPayload, user webauth.User, backLink, backText string) {
 	nodes := nodesIncludingSelf(cfg)
+	payload.Author = user.Name
 
 	type candidateSaveResult struct {
 		Node          NodeConfig

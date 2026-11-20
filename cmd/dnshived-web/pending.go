@@ -6,7 +6,6 @@ package main
 import (
 	"fmt"
 	"html/template"
-	"log"
 	"net/http"
 	"reflect"
 	"sort"
@@ -14,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"dnshived/internal/changeset"
 	"dnshived/internal/config"
 	"dnshived/internal/webauth"
 )
@@ -532,6 +532,7 @@ type pendingPageData struct {
 	ClusterDiffs         []clusterDiffEntry
 	RestartWarningFields []string
 	ScopeDiffs           []scopeDiffEntry
+	Authors              pendingAuthors
 	// NodeOp is the one staged node action (onboard-as-probe/replace/
 	// offboard), if any.
 	NodeOp *pendingNodeOp
@@ -598,13 +599,28 @@ function submitNodeOpCommit(form, title, steps){
 {{else}}
 <div class="banner warn actionbar">
 <strong>Nothing is applied until you commit.</strong><span class="banner-detail">Snapshot from {{.SourceNode}}</span><span class="grow"></span>
+{{if .Authors.Show}}
+{{if .Authors.MineCount}}<form method="post" action="/pending/discard" onsubmit="return confirm('Discard your own {{.Authors.MineCount}} pending change(s)? Changes made by others stay.')" style="display:inline"><input type="hidden" name="scope" value="mine"><button type="submit" class="btn-danger">Discard my changes</button></form>{{end}}
+<form method="get" action="/pending/confirm" style="display:inline"><input type="hidden" name="action" value="discard"><button type="submit" class="btn-danger" title="Also throws away the changes other admins staged. A warning comes first.">Discard everyone's…</button></form>
+{{if .Authors.MineCount}}<form method="post" action="/pending/commit" onsubmit="return confirm('Commit your own {{.Authors.MineCount}} pending change(s) to every configured node? Changes made by others stay staged.')" style="display:inline"><input type="hidden" name="scope" value="mine"><button type="submit" class="btn-success">Commit my {{.Authors.MineCount}} change(s)</button></form>{{end}}
+<form method="get" action="/pending/confirm" style="display:inline"><input type="hidden" name="action" value="commit"><button type="submit" class="btn-danger" title="Also makes the changes other admins staged go live. A warning comes first.">Commit everyone's…</button></form>
+{{else}}
 <form method="post" action="/pending/discard" onsubmit="return confirm('This will discard EVERY pending change on every node. Continue?')" style="display:inline">
 <button type="submit" class="btn-danger">Discard all</button>
 </form>
 <form method="post" action="/pending/commit" onsubmit="return confirm('This will push every pending change to every configured node and restart the daemon where needed. Continue?')" style="display:inline">
 <button type="submit" class="btn-success">Commit all {{.Count}} change(s)</button>
 </form>
+{{end}}
 </div>
+{{if .Authors.Show}}
+<h2>Who changed what</h2>
+<section class="card pend-card">
+{{range .Authors.Groups}}<p style="margin:.2rem 0"><b>{{if .Mine}}You{{else}}{{.Name}}{{end}}</b> — {{.Count}} change(s){{if not .Mine}} <span class="chip warn">not committed with "Commit my changes"</span>{{end}}</p>
+<ul class="card-list">{{range .Lines}}<li>{{.}}</li>{{end}}{{if .More}}<li class="dim">and {{.More}} more</li>{{end}}</ul>
+{{end}}
+</section>
+{{end}}
 
 {{if .RestartWarningFields}}
 <p class="warn">⚙ This change includes {{range $i, $f := .RestartWarningFields}}{{if $i}}, {{end}}<code>{{$f}}</code>{{end}} — committing it will restart the daemon on every node where that field changed. Each node is restarted one at a time, waiting for it to fully recover before moving to the next — expect a brief interruption on that node specifically, not the whole cluster at once.</p>
@@ -646,13 +662,18 @@ func handlePending(ref *configRef) http.HandlerFunc {
 			renderTemplate(w, pendingTmpl, pendingPageData{Error: "could not read live config from any node: " + err.Error()}, "pending")
 			return
 		}
-		candidate, exists, node, err := firstReachableCandidate(nodesIncludingSelf(cfg))
+		cr, node, err := firstReachableCandidateResponse(nodesIncludingSelf(cfg))
 		if err != nil {
 			renderTemplate(w, pendingTmpl, pendingPageData{Error: "could not read candidate from any node: " + err.Error()}, "pending")
 			return
 		}
+		candidate, exists := cr.Candidate, cr.Exists
 		data := pendingPageData{HasCandidate: exists, SourceNode: node.Name, NodeOp: currentNodeOp()}
 		if exists {
+			if v, verr := newPendingView(live, cr); verr == nil {
+				user, _ := userFromContext(r)
+				data.Authors = v.summary(user.Name)
+			}
 			data.ClusterDiffs = diffClusterFields(live, candidate)
 			data.RestartWarningFields = restartWarningFieldsFrom(data.ClusterDiffs)
 			data.ScopeDiffs = diffScopes(live.Scopes, candidate.Scopes, candidate.GlobalDNSRecords, candidate.DefaultDHCPOptions)
@@ -662,62 +683,145 @@ func handlePending(ref *configRef) http.HandlerFunc {
 	}
 }
 
+// commitCluster pushes c to every node as the new live configuration.
+func commitCluster(w http.ResponseWriter, r *http.Request, cfgPath string, ref *configRef, c config.Cluster, base int64, user webauth.User, afterOK func()) {
+	cfg := ref.Load()
+	payload := clusterPushPayloadFrom(c)
+	payload.Scopes = c.Scopes
+	payload.ConfigBaseRevision = &base
+
+	backLink, backText := returnTarget(r)
+	pushConfigAndRenderResult(w, cfg, payload, user, backLink, withOverviewLink(backLink, backText), func() {
+		afterOK()
+		if newHost := vipHostOf(payload.MgmtVIP); newHost != cfg.VIPHost {
+			propagateVIPHost(cfgPath, ref, newHost)
+		}
+	})
+}
+
 // handlePendingCommit (POST /pending/commit) applies the candidate to the
-// live cluster.
+// live cluster: only the committing admin's own changes with scope=mine,
+// otherwise everything, which needs the typed confirmation when other admins
+// have changes staged.
 func handlePendingCommit(cfgPath string, ref *configRef) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := ref.Load()
-		candidate, exists, _, err := firstReachableCandidate(nodesIncludingSelf(cfg))
+		nodes := nodesIncludingSelf(cfg)
+		cr, _, err := firstReachableCandidateResponse(nodes)
 		if err != nil {
 			http.Error(w, "could not read candidate: "+err.Error(), http.StatusBadGateway)
 			return
 		}
-		if !exists {
+		if !cr.Exists {
 			http.Redirect(w, r, "/pending", http.StatusSeeOther)
 			return
 		}
-
+		candidate := cr.Candidate
 		user, _ := userFromContext(r)
+
+		live, _, err := firstReachableConfig(nodes)
+		if err != nil {
+			http.Error(w, "could not read live config: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		view, err := newPendingView(live, cr)
+		if err != nil {
+			http.Error(w, "compare pending changes: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		authors := view.summary(user.Name)
+
+		if r.FormValue("scope") == "mine" {
+			commitMine(w, r, cfg, cfgPath, ref, view, user)
+			return
+		}
+		if authors.OtherCount > 0 && r.FormValue("confirm") != confirmCommitAll {
+			http.Redirect(w, r, "/pending/confirm?action=commit", http.StatusSeeOther)
+			return
+		}
 		if refuseOutsideRights(w, cfg, user, candidate, "commit") {
 			return
 		}
-		payload := clusterPushPayloadFrom(candidate)
-		payload.Scopes = candidate.Scopes
-		base := candidate.ConfigRevision
-		payload.ConfigBaseRevision = &base
-
-		backLink, backText := returnTarget(r)
-		pushConfigAndRenderResult(w, cfg, payload, user, backLink, withOverviewLink(backLink, backText), func() {
-			for _, n := range nodesIncludingSelf(cfg) {
-				if err := discardCandidate(n); err != nil {
-					log.Printf("[PENDING] clear candidate on %s after commit: %v", n.Name, err)
-				}
-			}
-			if newHost := vipHostOf(payload.MgmtVIP); newHost != cfg.VIPHost {
-				propagateVIPHost(cfgPath, ref, newHost)
+		commitCluster(w, r, cfgPath, ref, candidate, candidate.ConfigRevision, user, func() {
+			discardCandidateEverywhere(cfg)
+			if authors.Supported {
+				auditPending(cfg, user.Name, "pending.commit", "committed all pending changes: "+authors.describe())
 			}
 		})
 	}
 }
 
-// handlePendingDiscard (POST /pending/discard) reverts every pending
-// change at once, on every node.
+func commitMine(w http.ResponseWriter, r *http.Request, cfg *WebConfig, cfgPath string, ref *configRef, view *pendingView, user webauth.User) {
+	if !view.supported {
+		http.Error(w, "this cluster's daemons do not record who changed what; commit all changes instead", http.StatusConflict)
+		return
+	}
+	mine, n, err := view.onlyMine(user.Name)
+	if err != nil {
+		http.Error(w, "build your changes: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if n == 0 {
+		http.Error(w, "none of the pending changes are yours", http.StatusConflict)
+		return
+	}
+	if res := mine.ValidateExtended(); !res.OK() {
+		http.Error(w, "your changes cannot be committed without changes made by others, commit all changes or discard the difference: "+strings.Join(res.Errors, "; "), http.StatusConflict)
+		return
+	}
+	if refuseOutsideRights(w, cfg, user, mine, "commit") {
+		return
+	}
+	authors := view.summary(user.Name)
+	commitCluster(w, r, cfgPath, ref, mine, view.cand.ConfigRevision, user, func() {
+		keepRemainder(cfg)
+		auditPending(cfg, user.Name, "pending.commit", fmt.Sprintf("committed own %d pending change(s); %d change(s) of others stay staged", n, authors.OtherCount))
+	})
+}
+
+// handlePendingDiscard (POST /pending/discard) reverts the admin's own
+// pending changes with scope=mine, otherwise every pending change on every
+// node, which needs the typed confirmation when other admins have changes
+// staged.
 func handlePendingDiscard(ref *configRef) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := ref.Load()
 		user, _ := userFromContext(r)
-		if !user.HasPermission(webauth.PermEditConfig) {
-			candidate, exists, _, err := firstReachableCandidate(nodesIncludingSelf(cfg))
-			if err != nil {
-				http.Error(w, "could not read candidate: "+err.Error(), http.StatusBadGateway)
-				return
-			}
-			if exists && refuseOutsideRights(w, cfg, user, candidate, "discard") {
-				return
-			}
+		nodes := nodesIncludingSelf(cfg)
+		cr, _, cerr := firstReachableCandidateResponse(nodes)
+		if cerr != nil {
+			http.Error(w, "could not read candidate: "+cerr.Error(), http.StatusBadGateway)
+			return
+		}
+		if !cr.Exists {
+			http.Redirect(w, r, "/pending", http.StatusSeeOther)
+			return
+		}
+		if !user.HasPermission(webauth.PermEditConfig) && refuseOutsideRights(w, cfg, user, cr.Candidate, "discard") {
+			return
+		}
+		live, _, err := firstReachableConfig(nodes)
+		if err != nil {
+			http.Error(w, "could not read live config: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+		view, err := newPendingView(live, cr)
+		if err != nil {
+			http.Error(w, "compare pending changes: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		authors := view.summary(user.Name)
+
+		if r.FormValue("scope") == "mine" {
+			discardMine(w, r, cfg, view, user)
+			return
+		}
+		if authors.OtherCount > 0 && r.FormValue("confirm") != confirmDiscardAll {
+			http.Redirect(w, r, "/pending/confirm?action=discard", http.StatusSeeOther)
+			return
 		}
 		var errs []string
-		for _, n := range nodesIncludingSelf(cfg) {
+		for _, n := range nodes {
 			if err := discardCandidate(n); err != nil {
 				errs = append(errs, n.Name+": "+err.Error())
 				continue
@@ -730,6 +834,31 @@ func handlePendingDiscard(ref *configRef) http.HandlerFunc {
 		}
 		http.Redirect(w, r, "/pending", http.StatusSeeOther)
 	}
+}
+
+func discardMine(w http.ResponseWriter, r *http.Request, cfg *WebConfig, view *pendingView, user webauth.User) {
+	if !view.supported {
+		http.Error(w, "this cluster's daemons do not record who changed what; discard all changes instead", http.StatusConflict)
+		return
+	}
+	rest, n, err := view.withoutMine(user.Name)
+	if err != nil {
+		http.Error(w, "build the remaining changes: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if n == 0 {
+		http.Error(w, "none of the pending changes are yours", http.StatusConflict)
+		return
+	}
+	restTree, _ := changeset.Tree(rest)
+	if len(changeset.Changes(view.liveTree, restTree)) == 0 {
+		discardCandidateEverywhere(cfg)
+	} else if err := restageCandidate(cfg, rest); err != nil {
+		http.Error(w, "re-stage the remaining changes: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	auditPending(cfg, user.Name, "candidate.discard", fmt.Sprintf("discarded own %d pending change(s)", n))
+	http.Redirect(w, r, "/pending", http.StatusSeeOther)
 }
 
 // handlePendingNodeOpCommit (POST /pending/nodeop/commit) executes the one

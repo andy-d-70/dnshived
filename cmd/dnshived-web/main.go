@@ -248,6 +248,7 @@ func main() {
 	mux.HandleFunc("GET /api/pending-summary", requirePermissionQuiet(store, webauth.PermViewStatus, handlePendingSummary()))
 	mux.HandleFunc("GET /api/footer", requirePermissionQuiet(store, webauth.PermViewStatus, handleFooter(ref)))
 	mux.HandleFunc("POST /api/update-check", requirePermission(store, webauth.PermEditConfig, handleUpdateCheckToggle(*cfgPath, ref)))
+	mux.HandleFunc("GET /pending/confirm", requirePermission(store, webauth.PermEditScopes, handlePendingConfirm(ref)))
 	mux.HandleFunc("POST /pending/commit", requirePermission(store, webauth.PermEditScopes, handlePendingCommit(*cfgPath, ref)))
 	mux.HandleFunc("POST /pending/discard", requirePermission(store, webauth.PermEditScopes, handlePendingDiscard(ref)))
 	mux.HandleFunc("POST /pending/discard/scopes/{scope}", requirePermission(store, webauth.PermEditScopes, handlePendingDiscardScope(ref)))

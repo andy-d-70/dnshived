@@ -319,3 +319,54 @@ func TestApplyCandidateUpdate_StagesTheAccessList(t *testing.T) {
 		t.Errorf("an invalid list must be refused, status = %d", status)
 	}
 }
+
+func TestApplyCandidateUpdate_RecordsAuthors(t *testing.T) {
+	cfgPath := writeBaseConfig(t)
+	dataDir := t.TempDir()
+
+	scope := config.ScopeConfig{
+		Parent: "ens19", VLANID: 100, VIP: "192.168.100.1/24",
+		DHCPRange: [2]string{"192.168.100.100", "192.168.100.200"},
+		Gateway:   "192.168.100.1",
+		VRRPID:    51, PreferredWorker: config.RoleCore1,
+	}
+	upd := configUpdate{PSK: testPSK, Platform: testPlatform(), Author: "alice",
+		Scopes: map[string]config.ScopeConfig{"office": scope}}
+	if status, body := applyCandidateUpdate(dataDir, cfgPath, upd); status != http.StatusOK {
+		t.Fatalf("status = %d, body = %+v", status, body)
+	}
+	got := loadCandidateAuthors(dataDir)
+	if got["scopes/office"] != "alice" {
+		t.Fatalf("authors = %v", got)
+	}
+
+	second := scope
+	second.Gateway = "192.168.100.2"
+	upd2 := configUpdate{PSK: testPSK, Platform: testPlatform(), Author: "bob",
+		Scopes: map[string]config.ScopeConfig{"office": second}}
+	if status, body := applyCandidateUpdate(dataDir, cfgPath, upd2); status != http.StatusOK {
+		t.Fatalf("status = %d, body = %+v", status, body)
+	}
+	if got := loadCandidateAuthors(dataDir); got["scopes/office"] != "*" {
+		t.Fatalf("a unit two admins changed must be mixed, got %v", got)
+	}
+
+	if err := discardCandidateConfig(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadCandidateAuthors(dataDir); len(got) != 0 {
+		t.Fatalf("journal survived the discard: %v", got)
+	}
+}
+
+func TestApplyCandidateUpdate_NoAuthorLeavesNoOwner(t *testing.T) {
+	cfgPath := writeBaseConfig(t)
+	dataDir := t.TempDir()
+	upd := configUpdate{PSK: testPSK, Platform: testPlatform(), LogLevel: "debug"}
+	if status, body := applyCandidateUpdate(dataDir, cfgPath, upd); status != http.StatusOK {
+		t.Fatalf("status = %d, body = %+v", status, body)
+	}
+	if got := loadCandidateAuthors(dataDir); len(got) != 0 {
+		t.Fatalf("authors = %v", got)
+	}
+}

@@ -1988,6 +1988,7 @@ func adminAPIToken(cfg *config.Cluster) string {
 
 // configUpdate is the POST /api/v1/config request body.
 type configUpdate struct {
+	Author                string                        `json:"author,omitempty"`
 	PSK                   string                        `json:"psk"`
 	TrustedHosts          []string                      `json:"trusted_hosts"`
 	TLSCert               string                        `json:"tls_cert"`

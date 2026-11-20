@@ -23,6 +23,18 @@ core-2 teal, core-3 brown. The footer line shows the cluster state, per-core upt
   change on all nodes; nothing applies until you commit it on Pending
   changes, which shows a diff and warns if a change needs a restart.
   Scope changes hot-reload; see `docs/SCOPE_LIFECYCLE.md`.
+- **Pending changes record who changed what.** When other admins have changes
+  staged, Pending changes lists each admin's changes and offers *Commit my
+  changes* and *Discard my changes*; the others' changes stay staged.
+  *Commit everyone's* and *Discard everyone's* first show a warning that lists
+  the other admins' changes and need the words COMMIT ALL or DISCARD ALL. A
+  field is the unit: a setting, a scope option, a domain's default TTL or one
+  record set (host and type). Two admins changing the same record set share
+  it, and so does a record added to a domain that another admin added; such a
+  unit counts as nobody's own and goes live only with *Commit everyone's*.
+  Your own changes are refused when they would be invalid without a change of
+  someone else. With an older daemon, or a configuration too large for the
+  comparison, the page keeps the single *Commit all* button.
 - **Config hashes.** `config_hash` covers the settings a commit distributes
   except the sanity-check and backup settings; `config_hash_v2` also covers
   those and the access list (when there is one). The Overview, the catch-up and the start-up check compare the

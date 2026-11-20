@@ -118,6 +118,13 @@ replaced or written and are empty when the file does not exist. A client may
 only compare them for equality; an older daemon answers 404 and the client
 falls back to fetching the documents.
 
+Daemon API additions in 0.9.8.10 (new, same rules): `POST /api/v1/candidate`
+accepts the optional string `author`; the daemon keeps, per changed field, who
+changed it in `candidate-authors.json` beside `candidate.json` (removed with the
+candidate), and `GET /api/v1/candidate` adds the optional object `authors`
+(path to name; `*` marks a unit several admins changed; absent on older
+daemons). A client must treat a missing `authors` as "not recorded".
+
 Daemon API additions in 0.9.8.10 (new, same rules): `GET /api/v1/neighbors/<scope>`
 (the serving node's ARP view of the scope's VLAN) and
 `POST /api/v1/neighbors/<scope>/probe` (up to 16 IPv4 host addresses inside the
@@ -160,7 +167,7 @@ and, with the edit-scopes role, `POST /config/domains/<name>/records/add`,
 `/template` and `/mail`; every one of them stages an ordinary pending change or
 only shows a preview. `GET /simulator` (view role,
 read-only), `GET /users/policy` (admin; the password policy tab), `POST /hosts/check` (edit role; the on-demand ARP check) and the optional
-field `user` of `GET /api/pending-summary`; the Security menu item opens `/users` (users
+field `user` of `GET /api/pending-summary`; `GET /pending/confirm?action=commit|discard` (edit-scopes role; the warning page) and the optional form fields `scope=mine` and `confirm` of `POST /pending/commit` and `POST /pending/discard`; the Security menu item opens `/users` (users
 without the manage-users role are redirected to `/security`). `GET /api/footer` (view role) and
 `POST /api/update-check` (edit-configuration role, form field `enabled=1`);
 `web.json` gains the optional key `update_check`; the scope list and the probe

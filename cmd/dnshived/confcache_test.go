@@ -196,7 +196,7 @@ func TestCandidateGetHandler(t *testing.T) {
 	if err != nil || !exists {
 		t.Fatal(err)
 	}
-	want, _ := encodeJSON(map[string]interface{}{"exists": exists, "candidate": cand})
+	want, _ := encodeJSON(map[string]interface{}{"exists": exists, "candidate": cand, "authors": map[string]string{}})
 	for i := 0; i < 3; i++ {
 		if got := get(); got != string(want) {
 			t.Fatalf("with a candidate (call %d): %s", i, got)

@@ -35,6 +35,8 @@ const newTokenSlots = 5
 // configPushPayload mirrors cmd/dnshived's configUpdate JSON shape exactly
 // (field-for-field).
 type configPushPayload struct {
+	// Author names the admin who stages the change; the daemon records it per changed field.
+	Author                string                         `json:"author,omitempty"`
 	PSK                   string                         `json:"psk"`
 	TrustedHosts          []string                       `json:"trusted_hosts"`
 	TLSCert               string                         `json:"tls_cert"`

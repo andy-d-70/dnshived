@@ -38,12 +38,14 @@ func discardCandidateConfig(dataDir string) error {
 	if err := os.Remove(candidatePath(dataDir)); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	return nil
+	return removeCandidateAuthors(dataDir)
 }
 
 // applyCandidateUpdate is POST /api/v1/candidate's core logic — the
 // staged-config counterpart to applyConfigUpdate.
 func applyCandidateUpdate(dataDir, cfgPath string, upd configUpdate) (status int, body interface{}) {
+	candidateMu.Lock()
+	defer candidateMu.Unlock()
 	live, err := config.Load(cfgPath)
 	if err != nil {
 		return http.StatusInternalServerError, map[string]string{"error": "load live config: " + err.Error()}
@@ -62,6 +64,8 @@ func applyCandidateUpdate(dataDir, cfgPath string, upd configUpdate) (status int
 		return http.StatusBadRequest, result
 	}
 
+	old, _, _ := loadCandidateConfig(dataDir)
+	recordCandidateAuthors(dataDir, live, old, &candidate, upd.Author)
 	if err := config.Save(candidatePath(dataDir), &candidate); err != nil {
 		return http.StatusInternalServerError, map[string]string{"error": "save candidate: " + err.Error()}
 	}
@@ -71,6 +75,8 @@ func applyCandidateUpdate(dataDir, cfgPath string, upd configUpdate) (status int
 // discardCandidateScope reverts exactly one scope inside the candidate
 // back to its live value.
 func discardCandidateScope(dataDir, cfgPath, scope string) error {
+	candidateMu.Lock()
+	defer candidateMu.Unlock()
 	candidate, exists, err := loadCandidateConfig(dataDir)
 	if err != nil {
 		return err
@@ -90,5 +96,9 @@ func discardCandidateScope(dataDir, cfgPath, scope string) error {
 	} else {
 		delete(candidate.Scopes, scope)
 	}
-	return config.Save(candidatePath(dataDir), candidate)
+	if err := config.Save(candidatePath(dataDir), candidate); err != nil {
+		return err
+	}
+	pruneCandidateAuthors(dataDir, live, candidate)
+	return nil
 }

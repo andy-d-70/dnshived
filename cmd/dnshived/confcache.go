@@ -131,7 +131,11 @@ func candidateGetHandler(dir func() string, cache *responseCache) http.HandlerFu
 			if err != nil {
 				return nil, err
 			}
-			return encodeJSON(map[string]interface{}{"exists": exists, "candidate": cand})
+			resp := map[string]interface{}{"exists": exists, "candidate": cand}
+			if exists {
+				resp["authors"] = loadCandidateAuthors(d)
+			}
+			return encodeJSON(resp)
 		})
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load candidate: " + err.Error()})
