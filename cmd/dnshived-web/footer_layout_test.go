@@ -9,7 +9,7 @@ import (
 )
 
 func TestFooterHTML_EveryFieldCarriesItsId(t *testing.T) {
-	for _, id := range []string{"title", "upd", "state", "nodes", "dhcp", "rev", "ev"} {
+	for _, id := range []string{"title", "upd", "state", "nodes", "dhcp", "rev", "ev", "load", "nload", "uptime", "clock", "date"} {
 		if !strings.Contains(footerHTML, `data-f="`+id+`"`) {
 			t.Errorf("footer field %q has no data-f, the user cannot move, hide or resize it", id)
 		}
@@ -20,7 +20,7 @@ func TestFooterHTML_EveryFieldCarriesItsId(t *testing.T) {
 }
 
 func TestFooterLayoutScript_KeepsItsStorageKeyLimitsAndOrder(t *testing.T) {
-	for _, want := range []string{"KEY='dnshived-footer'", "MINW=3, MAXW=60", "var DROP=['upd','ev','dhcp','rev','title']", "contextmenu", "window.dnshivedFooter"} {
+	for _, want := range []string{"KEY='dnshived-footer'", "MINW=3, MAXW=60", "var DROP=['date','uptime','nload','upd','ev','dhcp','rev','clock','load','title']", "contextmenu", "window.dnshivedFooter"} {
 		if !strings.Contains(footerLayoutScriptHTML, want) {
 			t.Errorf("footer layout script lacks %q", want)
 		}

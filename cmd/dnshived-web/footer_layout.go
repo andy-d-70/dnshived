@@ -24,6 +24,10 @@ const footerLayoutStyle = `
 .ft-menu button:disabled{opacity:.35;cursor:default}
 .ft-menu .ft-menu-reset{margin:.35rem .3rem .1rem;width:calc(100% - .6rem);padding:.3rem .5rem}
 .ft-menu .nr{color:var(--muted);font-size:.85em}
+.ft-menu-name{flex:1;padding:.25rem .2rem}
+.ft-menu .ft-add{display:block;width:calc(100% - .6rem);margin:.1rem .3rem;text-align:left;padding:.25rem .5rem;border-color:transparent}
+.ft-menu .ft-add:disabled{opacity:.4;cursor:default}
+.ft-menu .ft-add:hover:not(:disabled){background:var(--accent)}
 `
 
 // footerLayoutScriptHTML lets the footer be arranged by the user: a right click
@@ -36,16 +40,24 @@ const footerLayoutStyle = `
 const footerLayoutScriptHTML = `
 <script>
 (function(){
-var IDS=['title','upd','state','nodes','dhcp','rev','ev'];
-var LABELS={title:'Version',upd:'Update check',state:'Cluster state',nodes:'Nodes',dhcp:'DHCP',rev:'Config revision',ev:'Newest event'};
-var DROP=['upd','ev','dhcp','rev','title'];
+var IDS=['title','upd','state','nodes','dhcp','rev','ev','load','nload','uptime','clock','date'];
+var NEW=['load','nload','uptime','clock','date'];
+var LABELS={title:'Version',upd:'Update check',state:'Cluster state',nodes:'Nodes',dhcp:'DHCP',rev:'Config revision',ev:'Newest event',load:'Load, all cores combined',nload:'Load per core',uptime:'Uptime (shortest)',clock:'Clock',date:'Date'};
+var DROP=['date','uptime','nload','upd','ev','dhcp','rev','clock','load','title'];
 var KEY='dnshived-footer', MINW=3, MAXW=60, DRAG=6;
-function def(){return {order:IDS.slice(),off:[],w:{}};}
+function def(){return {order:IDS.slice(),off:NEW.slice(),w:{}};}
 function validate(c){
   var out=def();
   if(!c||typeof c!=='object') return out;
-  if(Array.isArray(c.order)&&c.order.length===IDS.length&&IDS.every(function(i){return c.order.indexOf(i)>=0;})) out.order=c.order.slice();
-  if(Array.isArray(c.off)) out.off=c.off.filter(function(i,k,a){return IDS.indexOf(i)>=0&&a.indexOf(i)===k;});
+  var known=Array.isArray(c.order)?c.order.filter(function(i,k,a){return IDS.indexOf(i)>=0&&a.indexOf(i)===k;}):[];
+  if(known.length>0){
+    var added=IDS.filter(function(i){return known.indexOf(i)<0;});
+    out.order=known.concat(added);
+    out.off=added.filter(function(i){return NEW.indexOf(i)>=0;});
+    if(Array.isArray(c.off)) out.off=out.off.concat(c.off.filter(function(i,k,a){return IDS.indexOf(i)>=0&&a.indexOf(i)===k&&out.off.indexOf(i)<0;}));
+  }else if(Array.isArray(c.off)){
+    out.off=NEW.concat(c.off.filter(function(i,k,a){return IDS.indexOf(i)>=0&&a.indexOf(i)===k&&NEW.indexOf(i)<0;}));
+  }
   if(c.w&&typeof c.w==='object') IDS.forEach(function(i){var v=c.w[i]; if(typeof v==='number'&&isFinite(v)&&v>=MINW&&v<=MAXW) out.w[i]=Math.round(v*100)/100;});
   return out;
 }
@@ -165,24 +177,31 @@ function closeMenu(){ if(menu&&menu.parentNode) menu.parentNode.removeChild(menu
 function outside(e){ if(menu&&!menu.contains(e.target)) closeMenu(); }
 function esc(e){ if(e.key==='Escape') closeMenu(); }
 function btn(text,title,disabled,fn){ var b=document.createElement('button'); b.type='button'; b.textContent=text; b.title=title; b.setAttribute('aria-label',title); b.disabled=!!disabled; b.addEventListener('click',fn); return b; }
+function section(text){ var h=document.createElement('div'); h.className='ft-menu-h'; h.textContent=text; menu.appendChild(h); }
 function fillMenu(){
-  var keep=menu.querySelector('input:focus')?menu.querySelector('input:focus').getAttribute('data-id'):null;
+  var keep=menu.querySelector('button:focus')?menu.querySelector('button:focus').getAttribute('data-id'):null;
   while(menu.firstChild) menu.removeChild(menu.firstChild);
-  var h=document.createElement('div'); h.className='ft-menu-h'; h.textContent='Footer fields'; menu.appendChild(h);
-  cfg.order.forEach(function(id,i){
+  section('In the footer');
+  cfg.order.filter(function(id){return cfg.off.indexOf(id)<0;}).forEach(function(id,i,shown){
     var row=document.createElement('div'); row.className='ft-menu-row';
-    var lab=document.createElement('label'), cb=document.createElement('input'); cb.type='checkbox'; cb.checked=cfg.off.indexOf(id)<0; cb.setAttribute('data-id',id);
-    cb.addEventListener('change',function(){ var k=cfg.off.indexOf(id); if(cb.checked&&k>=0) cfg.off.splice(k,1); if(!cb.checked&&k<0) cfg.off.push(id); save(); apply(); });
-    lab.appendChild(cb); lab.appendChild(document.createTextNode(LABELS[id]));
-    var fe=field(id); if(cb.checked&&fe&&fe.classList.contains('ft-auto-off')){ var nr=document.createElement('span'); nr.className='nr'; nr.textContent='(no room)'; lab.appendChild(nr); }
+    var lab=document.createElement('span'); lab.className='ft-menu-name'; lab.textContent=LABELS[id];
+    var fe=field(id); if(fe&&fe.classList.contains('ft-auto-off')){ var nr=document.createElement('span'); nr.className='nr'; nr.textContent=' (no room)'; lab.appendChild(nr); }
     row.appendChild(lab);
-    row.appendChild(btn('◀','Move '+LABELS[id]+' left',i===0,function(){ cfg.order=moveBy(cfg.order,id,-1); save(); apply(); }));
-    row.appendChild(btn('▶','Move '+LABELS[id]+' right',i===cfg.order.length-1,function(){ cfg.order=moveBy(cfg.order,id,1); save(); apply(); }));
+    row.appendChild(btn('◀','Move '+LABELS[id]+' left',cfg.order.indexOf(id)===0,function(){ cfg.order=moveBy(cfg.order,id,-1); save(); apply(); }));
+    row.appendChild(btn('▶','Move '+LABELS[id]+' right',cfg.order.indexOf(id)===cfg.order.length-1,function(){ cfg.order=moveBy(cfg.order,id,1); save(); apply(); }));
+    var rm=btn('✕','Remove '+LABELS[id]+' from the footer',false,function(){ if(cfg.off.indexOf(id)<0) cfg.off.push(id); save(); apply(); }); rm.setAttribute('data-id',id);
+    row.appendChild(rm);
     menu.appendChild(row);
   });
-  var rs=btn('Reset footer','Show all fields in the default order and widths',false,function(){ cfg=def(); try{ localStorage.removeItem(KEY); }catch(e){} apply(); });
+  section('Add to the footer');
+  cfg.order.forEach(function(id){
+    var shown=cfg.off.indexOf(id)<0;
+    var b=btn((shown?'✓ ':'+ ')+LABELS[id],shown?LABELS[id]+' is in the footer already':'Add '+LABELS[id]+' to the footer',shown,function(){ var k=cfg.off.indexOf(id); if(k>=0) cfg.off.splice(k,1); cfg.order=placeBefore(cfg.order,id,null); save(); apply(); });
+    b.className='ft-add'; b.setAttribute('data-id','add-'+id); menu.appendChild(b);
+  });
+  var rs=btn('Reset footer','Show the default fields in the default order and widths',false,function(){ cfg=def(); try{ localStorage.removeItem(KEY); }catch(e){} apply(); });
   rs.className='ft-menu-reset'; menu.appendChild(rs);
-  if(keep){ var k=menu.querySelector('input[data-id="'+keep+'"]'); if(k) k.focus(); }
+  if(keep){ var k=menu.querySelector('button[data-id="'+keep+'"]'); if(k&&!k.disabled) k.focus(); }
   placeMenu();
 }
 function placeMenu(){
@@ -198,7 +217,7 @@ f.addEventListener('contextmenu',function(e){
   menuAt={x:e.clientX,y:e.clientY};
   document.body.appendChild(menu); fillMenu();
   document.addEventListener('pointerdown',outside,true); document.addEventListener('keydown',esc,true);
-  var first=menu.querySelector('input'); if(first) first.focus();
+  var first=menu.querySelector('button:not(:disabled)'); if(first) first.focus();
 });
 
 window.addEventListener('resize',schedule);

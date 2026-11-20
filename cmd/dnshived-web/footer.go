@@ -221,6 +221,7 @@ const footerHTML = `
   <span class="ft-state" id="ft-state" data-f="state" title="waiting for the first cluster reading"><span class="ft-hb" aria-hidden="true"><i class="hb"></i></span><span class="ft-st" id="ft-st">…</span></span>
   <span class="ft-nodes" id="ft-nodes" data-f="nodes"></span>
   <span class="w-dhcp" id="ft-dhcp" data-f="dhcp"></span><span class="w-rev" id="ft-rev" data-f="rev"></span><span class="w-ev" id="ft-ev" data-f="ev"></span>
+  <span class="w-load" id="ft-load" data-f="load"></span><span class="w-nload" id="ft-nload" data-f="nload"></span><span class="w-up" id="ft-up" data-f="uptime"></span><span class="w-clock" id="ft-clock" data-f="clock"></span><span class="w-date" id="ft-date" data-f="date"></span>
 </footer>
 <dialog id="upd-dialog" class="upd-dialog">
   <p id="upd-text"></p>
@@ -285,6 +286,18 @@ const footerHTML = `
       if(n.up&&n.load){var l=document.createElement('span');l.className='ld';l.textContent=' · ld '+n.load;s.appendChild(l)}
       s.title=n.name+(n.up?(': up '+(n.uptime||'-')+', load '+(n.load||'-')):': not reachable');
       box.appendChild(s)});
+    var up=(d.nodes||[]).filter(function(n){return n.up&&n.load!==undefined&&n.load!==''});
+    var ls=up.map(function(n){return parseFloat(n.load)}).filter(function(v){return isFinite(v)});
+    if(ls.length){
+      var sum=ls.reduce(function(a,b){return a+b},0),mx=Math.max.apply(null,ls);
+      el('ft-load').textContent='load '+sum.toFixed(2)+' · max '+mx.toFixed(2);
+      el('ft-load').title='Load average (1 minute) of all reachable cores added up: '+sum.toFixed(2)+'; the busiest core: '+mx.toFixed(2);
+      el('ft-nload').textContent='ld '+up.map(function(n){return n.load}).join(' · ');
+      el('ft-nload').title='Load average (1 minute) per core: '+up.map(function(n){return n.name+' '+n.load}).join(', ');
+    }else{el('ft-load').textContent='';el('ft-nload').textContent='';el('ft-load').title='';el('ft-nload').title=''}
+    var us=(d.nodes||[]).filter(function(n){return n.up&&n.uptime});
+    el('ft-up').textContent=us.length?('up '+us.map(function(n){return n.uptime}).sort(function(a,b){return a.length-b.length||(a<b?-1:1)})[0]):'';
+    el('ft-up').title=us.length?('Uptime per core: '+us.map(function(n){return n.name+' '+n.uptime}).join(', ')):'';
     var dh=d.dhcp;el('ft-dhcp').textContent=dh?('DHCP '+dh.active+' · '+dh.reserved+' res'):'';el('ft-dhcp').title=dh?(dh.active+' active DHCP clients in the scopes the cores serve, '+dh.reserved+' reservations'):'';
     el('ft-rev').textContent=d.revision?('config r'+d.revision):'';el('ft-rev').title=d.revision?('config revision '+d.revision):'';
     el('ft-ev').textContent=d.event||'';el('ft-ev').title=d.event?('newest event: '+d.event):'';
@@ -295,6 +308,14 @@ const footerHTML = `
     fetch('/api/footer',{credentials:'same-origin',cache:'no-store'}).then(function(r){if(!r.ok)throw 0;return r.json()}).then(render).catch(function(){}).then(function(){busy=false});
   }
   setInterval(function(){if(lastOK&&Date.now()-lastOK>STALE){setCS('stale');el('ft-st').textContent='NO DATA'}},1000);
+  function two(n){return n<10?'0'+n:''+n}
+  function tick(){
+    if(document.hidden)return;var n=new Date();
+    var c=el('ft-clock'),dt=el('ft-date');
+    if(c){var t=two(n.getHours())+':'+two(n.getMinutes())+':'+two(n.getSeconds());if(c.textContent!==t)c.textContent=t;c.title='Time of this browser'}
+    if(dt){var s=n.getFullYear()+'-'+two(n.getMonth()+1)+'-'+two(n.getDate());if(dt.textContent!==s)dt.textContent=s;dt.title='Date of this browser'}
+  }
+  tick();setInterval(tick,1000);
   poll();setInterval(poll,POLL);
   document.addEventListener('visibilitychange',function(){if(!document.hidden)poll()});
 })();
@@ -335,6 +356,7 @@ font-size:clamp(11px,.42vw + 7.2px,15px);line-height:1.3;white-space:nowrap;font
 @keyframes hbring{0%{transform:scale(1);opacity:.7}100%{transform:scale(3);opacity:0}}
 @keyframes hbfade{0%{opacity:1}50%{opacity:.35}100%{opacity:1}}
 @media (prefers-reduced-motion:reduce){.hb::before{animation:hbfade 2s ease-in-out infinite}.hb::after{animation:none;opacity:0}.appfoot[data-cs="stale"] .hb::before{animation:none}}
+.appfoot .w-load{display:inline-block;width:12em}.appfoot .w-nload{display:inline-block;width:12em}.appfoot .w-up{display:inline-block;width:7em}.appfoot .w-clock{display:inline-block;width:5.4em}.appfoot .w-date{display:inline-block;width:6.4em}
 @media (min-width:2000px){.appfoot .w-ev{width:26em}}
 @media (max-width:1850px){.appfoot .ld{display:none}.appfoot .ft-node{width:11em}}
 ` + footerLayoutStyle
