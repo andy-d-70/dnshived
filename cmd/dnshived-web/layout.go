@@ -238,6 +238,7 @@ const navHTML = `<script>document.documentElement.classList.add('js')</script>
 <a href="/hosts" class="nav-item" title="hosts, default DHCP options, option sets, DNS server for clients" data-match="/hosts,/simulator,/config/dhcp,/optionsets,/groups,/rollout"><span class="nav-name">DHCP</span></a>
 <a href="/config/domains" class="nav-item" title="DNS domains and records, checks, record sets" data-match="/config/dns,/config/domains,/templates"><span class="nav-name">DNS</span></a>
 <a href="/users" class="nav-item" title="users, tokens, mail, password policy" data-match="/security,/users,/config/mail,/password"><span class="nav-name">Security</span></a>
+<a href="/notify" class="nav-item" title="summary report and alerts by impact" data-match="/notify"><span class="nav-name">Notify</span></a>
 <a href="/backup" class="nav-item" title="export, import, backup and restore" data-match="/backup,/config/export"><span class="nav-name">Maintenance</span></a>
 <a href="/config" class="nav-item" title="nodes, interfaces, cluster-wide settings" data-match="/config"><span class="nav-name">Cluster settings</span></a>
 <a href="/logs" class="nav-item" title="system log, audit log, daemons" data-match="/logs,/audit,/daemons"><span class="nav-name">Logs</span></a>

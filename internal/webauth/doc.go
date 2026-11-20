@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"dnshived/internal/notify"
 	"dnshived/internal/repldoc"
 )
 
@@ -51,16 +52,17 @@ func (s *Store) Meta() Meta {
 
 // replicatedBody is exactly what replaceWith copies, without the stamp.
 type replicatedBody struct {
-	SessionKey        string        `json:"session_key"`
-	Users             []User        `json:"users"`
-	Resets            []ResetToken  `json:"resets"`
-	SMTP              *SMTPSettings `json:"smtp"`
-	PublicURL         string        `json:"public_url"`
-	MinPasswordLength int           `json:"min_password_length"`
+	SessionKey        string           `json:"session_key"`
+	Users             []User           `json:"users"`
+	Resets            []ResetToken     `json:"resets"`
+	SMTP              *SMTPSettings    `json:"smtp"`
+	PublicURL         string           `json:"public_url"`
+	MinPasswordLength int              `json:"min_password_length"`
+	Notify            *notify.Settings `json:"notify,omitempty"`
 }
 
 func (s *Store) bodyHashLocked() string {
-	data, err := json.Marshal(replicatedBody{s.SessionKey, s.Users, s.Resets, s.SMTP, s.PublicURL, s.MinPasswordLength})
+	data, err := json.Marshal(replicatedBody{s.SessionKey, s.Users, s.Resets, s.SMTP, s.PublicURL, s.MinPasswordLength, s.Notify})
 	if err != nil {
 		return ""
 	}
@@ -103,6 +105,22 @@ func (s *Store) replaceWith(f *Store) {
 	}
 	s.PublicURL = f.PublicURL
 	s.MinPasswordLength = f.MinPasswordLength
+	s.Notify = nil
+	if f.Notify != nil {
+		n := f.Notify.Clone()
+		s.Notify = &n
+	}
+}
+
+// NotifySettings returns a copy of the notification settings, the defaults
+// while none were saved.
+func (s *Store) NotifySettings() notify.Settings {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Notify == nil {
+		return notify.Default()
+	}
+	return s.Notify.Clone()
 }
 
 // Mutate runs fn on the document under the write lock and, if fn succeeds,

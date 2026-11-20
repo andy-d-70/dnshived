@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"dnshived/internal/cliguard"
@@ -103,6 +104,7 @@ func main() {
 	}
 	loginWaitsForSync = repl.waitingForFirstSync
 	repl.run()
+	runNotifier(context.Background(), store, ref, repl.selfName)
 	probeDoc := newProbeHostsDoc(ref, *cfgPath, repl.selfName)
 	probeSync := newProbeHostsSyncer(ref, probeDoc, repl.selfName)
 	runProbeHostsSync(context.Background(), probeSync)
@@ -276,6 +278,9 @@ func main() {
 	mux.HandleFunc("POST /users/{name}/signout", requirePermission(store, webauth.PermEditConfig, handleUserSignout(store, repl, ref)))
 	mux.HandleFunc("POST /users/{name}/delete", requirePermission(store, webauth.PermEditConfig, handleUserDelete(store, repl, ref)))
 	mux.HandleFunc("GET /config/mail", requirePermission(store, webauth.PermEditConfig, handleMailGet(store)))
+	notifyStatePath := func() string { return filepath.Join(filepath.Dir(ref.Load().UsersFile), "notify-state.json") }
+	mux.HandleFunc("GET /notify", requirePermission(store, webauth.PermEditConfig, handleNotifyGet(store, notifyStatePath)))
+	mux.HandleFunc("POST /notify", requirePermission(store, webauth.PermEditConfig, handleNotifyPost(store, repl, ref, notifyStatePath)))
 	mux.HandleFunc("POST /config/mail", requirePermission(store, webauth.PermEditConfig, handleMailPost(store, repl, ref)))
 	mux.HandleFunc("POST /internal/auth-doc", repl.handleAuthDocPost)
 	mux.HandleFunc("GET /internal/auth-doc/meta", repl.handleAuthDocMeta)

@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"dnshived/internal/notify"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -55,6 +56,8 @@ type Store struct {
 	Resets     []ResetToken  `json:"resets,omitempty"`
 	SMTP       *SMTPSettings `json:"smtp,omitempty"`
 	PublicURL  string        `json:"public_url,omitempty"`
+	// Notify holds the notification destinations and routing; nil until set.
+	Notify *notify.Settings `json:"notify,omitempty"`
 	// MinPasswordLength is the password policy's minimum length; 0 means the default.
 	MinPasswordLength int `json:"min_password_length,omitempty"`
 
