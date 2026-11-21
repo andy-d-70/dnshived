@@ -43,6 +43,7 @@ import (
 	"dnshived/internal/discovery"
 	"dnshived/internal/dnscentralrender"
 	"dnshived/internal/dnsmasqlog"
+	"dnshived/internal/dnsrelayrender"
 	"dnshived/internal/eventlog"
 	"dnshived/internal/fencing"
 	"dnshived/internal/fsm"
@@ -253,6 +254,9 @@ func main() {
 	}
 	go loglevel.Summarize(context.Background())
 	currentConfig.Store(cfg)
+	if dnsStoreEnabled() {
+		dnsrelayrender.TableFile = filepath.Join(dataDir(cfg), "dnstable.bin")
+	}
 	labprofile.Start(func() string { return dataDir(currentConfig.Load()) })
 	outage.rules.active.Store(cfg.OutageRulesActive)
 	accessGate.active.Store(cfg.AccessListActive)
@@ -1482,6 +1486,8 @@ func main() {
 		w.Write([]byte("<html><body><h1>dnshived " + version + "</h1></body></html>"))
 	})
 
+	startDNSStore(mux, authMw, ag, machine, observer, trustedHostsWithFallback)
+
 	// Wrap all routes with auth middleware (no-op when api_tokens is empty).
 	handler := authMw.Wrap(mux)
 
@@ -2183,8 +2189,12 @@ func applyConfigUpdate(cfgPath string, upd configUpdate, ag *agent.Agent, engine
 	if err != nil {
 		return http.StatusBadRequest, map[string]string{"error": err.Error()}
 	}
+	dnsBefore := dnsRecordsDigest(current)
 	upd.applyTo(current)
 	accessUpd.applyTo(current)
+	if !upd.ConfigCatchUp && dnsConfigFrozen() && dnsRecordsDigest(current) != dnsBefore {
+		return http.StatusConflict, map[string]string{"error": "the DNS records are managed by the DNS store now; change them on the DNS store page"}
+	}
 
 	result := current.ValidateExtended()
 	if !result.OK() {

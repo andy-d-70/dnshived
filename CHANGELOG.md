@@ -1,5 +1,19 @@
 # dnshived Changelog
 
+## 0.9.8.11 — in development
+
+**Internal**
+
+- A purpose-built storage engine for DNS data (`internal/dnsstore`): an append-only log with checksums and a keyed hash chain, atomic snapshots, crash recovery, key rotation and a consistency check, built on the standard library only. It is not wired into the daemon yet and changes nothing at runtime.
+- A DNS answer engine (`internal/dnsanswer`): exact names, wildcards, CNAME chains, authoritative negative answers with a synthesised SOA, forwarded domains, truncation and EDNS, with no dependencies and no allocation per query. Its answers were compared against dnsmasq for the same data.
+- A DNS data model (`internal/dnsdata`): hosts that answer in several domains, records of every type the configuration knows, the write gate that validates every change, and the merge with DHCP lease names. It is used by the DNS store behind the switch file.
+- The daemon can run the DNS store behind a switch file (`/etc/dnshived/dns-store.enable`, off by default): an admin API to commit changes through the write gate, list and search hosts and records, and read the store status; it compiles and publishes the answer table for the relay. The DNS relay answers the names in that table itself (UDP and TCP, authoritative negative answers inside the cluster's domains) and forwards everything else as before; it reloads the table when the file changes. With the switch off nothing changes.
+- The DNS store replicates between the cores with Raft's safety rules: one leader per term, votes only for the most up-to-date log, a previous-record check on every append, and a record counts as committed only when a majority holds it. Writes go through the leader (any other core answers with the leader's address), every core publishes the same answer table, a core that was down catches up by records or by snapshot, and the answers keep coming from the last committed state when the cluster has no quorum. The replication was tested with a deterministic cluster simulator (partitions, lost, duplicated and reordered messages, power cuts at any file operation): 300 three-core and 100 five-core random schedules, and mutation checks that break each safety rule and are caught.
+- DNS page, new tab "DNS store": list and search the store's hosts and records, add a host or a record, delete, copy the configuration's DNS records into the store ("Import from configuration", safe to repeat), see which core leads and what each core has committed, and switch from overlay to authoritative answers. In overlay mode (the default) the store answers the records it holds and everything else still goes to dnsmasq, so enabling the store breaks nothing; "Go authoritative" is the cutover and is replicated like any change. After it the configuration's own DNS records can no longer be changed (the cores refuse such a commit with a clear message).
+- Optional DNS VIP: an extra address on the management network, set on the DNS store tab, that answers DNS and follows the health of the DNS table instead of the cluster's quorum, so DNS keeps being answered while DHCP waits for a majority. It uses a second VRRP instance in the management keepalived file; with no DNS VIP set that file is unchanged.
+- The store's raw records (type with hex data) are served like any other record.
+- DHCP leases carry the time they were first leased (`leased_at`, optional, ignored by older cores) so every core agrees which client keeps a contested name.
+
 ## 0.9.8.10 — released
 
 **Performance optimizations**

@@ -319,6 +319,7 @@ type Agent struct {
 	// (reload failed), so the next render applies it again even if the file is
 	// unchanged.
 	mgmtRestartPending bool
+	dnsVIP             *DNSVIPSpec
 	topoTrunks         []string
 	topoRunner         *topobeacon.Runner
 	topoCtx            context.Context
@@ -1800,9 +1801,17 @@ func (a *Agent) HandleLocalLeaseEvent(action, mac, ip, hostname string, expiresA
 		return
 	}
 	var wireAction string
+	var leasedAt int64
 	switch action {
 	case "add", "old":
-		a.localDHCPLeases.Upsert(leasesync.SyncedLease{MAC: mac, IP: ip, ExpiresAt: expiresAt, Hostname: hostname})
+		l := leasesync.SyncedLease{MAC: mac, IP: ip, ExpiresAt: expiresAt, Hostname: hostname}
+		if action == "add" {
+			l.LeasedAt = time.Now().Unix()
+		}
+		a.localDHCPLeases.Upsert(l)
+		if got, ok := a.localDHCPLeases.Get(mac); ok {
+			leasedAt = got.LeasedAt
+		}
 		wireAction = "upsert"
 	case "del":
 		a.localDHCPLeases.Remove(mac)
@@ -1817,7 +1826,7 @@ func (a *Agent) HandleLocalLeaseEvent(action, mac, ip, hostname string, expiresA
 	if _, _, err := a.applyCoreDNSDynamicHostsFile(); err != nil {
 		loglevel.Warnf("[AGENT:ERROR] apply central DNS dynamic hosts file: %v", err)
 	}
-	a.pushLeaseToPeer(mac, ip, hostname, expiresAt, wireAction)
+	a.pushLeaseToPeer(mac, ip, hostname, expiresAt, leasedAt, wireAction)
 }
 
 // macHasRealReservation reports whether mac already has an operator-
@@ -1834,12 +1843,12 @@ func (a *Agent) macHasRealReservation(mac string) bool {
 	return false
 }
 
-func (a *Agent) pushLeaseToPeer(mac, ip, hostname string, expiresAt int64, wireAction string) {
+func (a *Agent) pushLeaseToPeer(mac, ip, hostname string, expiresAt, leasedAt int64, wireAction string) {
 	if a.observer == nil {
 		return
 	}
 	for _, addr := range a.observer.AllPeerAddrs() {
-		l := leasesync.SyncedLease{MAC: mac, IP: ip, ExpiresAt: expiresAt, Hostname: hostname}
+		l := leasesync.SyncedLease{MAC: mac, IP: ip, ExpiresAt: expiresAt, Hostname: hostname, LeasedAt: leasedAt}
 		if err := leasesync.Push(a.witnessHTTPClient(), a.witnessScheme(), addr, l, wireAction); err != nil {
 			loglevel.Warnf("[AGENT:LEASESYNC] push %s to %s failed: %v", wireAction, addr, err)
 		}

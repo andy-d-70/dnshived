@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"sync/atomic"
 
 	"dnshived/internal/access"
 	"dnshived/internal/config"
@@ -65,8 +66,28 @@ func RenderRelayConfig(cluster config.Cluster) (RelayConfig, error) {
 	if len(cfg.AllowedInterfaces) == 0 {
 		return RelayConfig{}, fmt.Errorf("no scope in cluster config is eligible for the DNS relay -- nothing for it to serve")
 	}
+	if extra := extraInterfaces.Load(); extra != nil {
+		have := map[string]bool{}
+		for _, n := range cfg.AllowedInterfaces {
+			have[n] = true
+		}
+		for _, n := range *extra {
+			if n != "" && !have[n] {
+				cfg.AllowedInterfaces = append(cfg.AllowedInterfaces, n)
+				have[n] = true
+			}
+		}
+	}
 	return cfg, nil
 }
+
+var extraInterfaces atomic.Pointer[[]string]
+
+// SetExtraInterfaces adds interfaces the relay listens on beside the scopes' own, for the DNS VIP on the management network.
+func SetExtraInterfaces(names []string) { extraInterfaces.Store(&names) }
+
+// TableFile, when set by the daemon, is written into the relay config as the answer table to serve from.
+var TableFile string
 
 // WriteRelayConfig renders cluster and MERGES the result into whatever's
 // already at path, rather than overwriting the file wholesale.
@@ -96,6 +117,9 @@ func WriteRelayConfig(path string, cluster config.Cluster) error {
 	}
 	if rendered.CacheMaxBytes != 0 {
 		existing["cache_max_bytes"] = rendered.CacheMaxBytes
+	}
+	if TableFile != "" {
+		existing["table_file"] = TableFile
 	}
 	if rendered.Access != nil {
 		existing["access"] = rendered.Access

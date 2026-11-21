@@ -20,6 +20,7 @@ type wireMessage struct {
 	IP        string `json:"ip,omitempty"`         // only meaningful for "upsert"
 	ExpiresAt int64  `json:"expires_at,omitempty"` // only meaningful for "upsert"
 	Hostname  string `json:"hostname,omitempty"`   // only meaningful for "upsert"
+	LeasedAt  int64  `json:"leased_at,omitempty"`  // only meaningful for "upsert"
 }
 
 // Handler receives lease-sync pushes from the peer worker and applies them
@@ -115,7 +116,7 @@ func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {
 
 	switch msg.Action {
 	case "upsert":
-		h.Store.Upsert(SyncedLease{MAC: msg.MAC, IP: msg.IP, ExpiresAt: msg.ExpiresAt, Hostname: msg.Hostname})
+		h.Store.Upsert(SyncedLease{MAC: msg.MAC, IP: msg.IP, ExpiresAt: msg.ExpiresAt, Hostname: msg.Hostname, LeasedAt: msg.LeasedAt})
 	case "remove":
 		h.Store.Remove(msg.MAC)
 	default:
@@ -130,7 +131,7 @@ func (h *Handler) handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func Push(client *http.Client, scheme, addr string, l SyncedLease, action string) error {
-	msg := wireMessage{Action: action, MAC: l.MAC, IP: l.IP, ExpiresAt: l.ExpiresAt, Hostname: l.Hostname}
+	msg := wireMessage{Action: action, MAC: l.MAC, IP: l.IP, ExpiresAt: l.ExpiresAt, Hostname: l.Hostname, LeasedAt: l.LeasedAt}
 	body, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal lease-sync message: %w", err)

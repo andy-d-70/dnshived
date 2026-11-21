@@ -24,6 +24,9 @@ type SyncedLease struct {
 	// hook receives it as its own argument when the client sent one via option
 	// 12/61).
 	Hostname string `json:"hostname,omitempty"`
+	// LeasedAt is when the address was first leased to this client (unix seconds, set by the core that saw the
+	// DHCP exchange); renewals keep it. Zero means unknown.
+	LeasedAt int64 `json:"leased_at,omitempty"`
 }
 
 // Store is a small, mutex-protected, MAC-keyed table of currently-valid
@@ -51,8 +54,19 @@ func (s *Store) SetPersistPath(path string) {
 func (s *Store) Upsert(l SyncedLease) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if old, ok := s.byMAC[l.MAC]; ok && old.IP == l.IP && old.LeasedAt != 0 && (l.LeasedAt == 0 || l.LeasedAt > old.LeasedAt) {
+		l.LeasedAt = old.LeasedAt
+	}
 	s.byMAC[l.MAC] = l
 	s.dirty = true
+}
+
+// Get returns the entry for mac.
+func (s *Store) Get(mac string) (SyncedLease, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	l, ok := s.byMAC[mac]
+	return l, ok
 }
 
 // Remove deletes mac's entry, if any.

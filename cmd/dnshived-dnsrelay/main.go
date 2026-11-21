@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"dnsrelay/access"
+	"dnsrelay/dnsanswer"
 	"dnsrelay/netsnap"
 )
 
@@ -89,6 +90,9 @@ type Config struct {
 	// no matter what. Both are absent until every core can enforce the list.
 	Access       *access.Config `json:"access,omitempty"`
 	AccessAlways []string       `json:"access_always,omitempty"`
+	// TableFile is the answer table the daemon publishes; names in it are answered here instead of being forwarded.
+	// Empty means the relay only forwards. A reload picks up a change.
+	TableFile string `json:"table_file,omitempty"`
 }
 
 // ACLConfig is one interface's policy override.
@@ -1983,6 +1987,7 @@ func reloadInterfaces(configPath string) {
 		return
 	}
 	applyAccess(newCfg)
+	setTablePath(newCfg.TableFile)
 	prevInterfaceACLs := cfg.InterfaceACLs
 	prevRewrites := cfg.Rewrites
 	cfg.InterfaceACLs = newCfg.InterfaceACLs
@@ -2157,6 +2162,15 @@ func processUDPQuery(conn *net.UDPConn, packet []byte, client *net.UDPAddr, acl 
 		}
 		sendUDPReply(conn, client, makeSynthesizedAnswer(packet, qnameEnd, decision.answer, decision.answerTTL, decision.hasRecord))
 		return
+	}
+
+	if t := localTable.Load(); t != nil && !decision.rewritten {
+		var stack [1500]byte
+		if resp, st := t.Respond(packet, stack[:0], false); st == dnsanswer.Answered {
+			localAnsweredTotal.Add(1)
+			sendUDPReply(conn, client, resp)
+			return
+		}
 	}
 
 	forwardQName := qname
@@ -2425,6 +2439,14 @@ func handleTCPConn(conn *net.TCPConn, ifIndex int, acl *resolvedACL) {
 			continue
 		}
 
+		if t := localTable.Load(); t != nil && !decision.rewritten {
+			if resp, st := t.Respond(query, nil, true); st == dnsanswer.Answered {
+				localAnsweredTotal.Add(1)
+				writeTCPResponse(conn, resp)
+				continue
+			}
+		}
+
 		forwardQName := qname
 		forwardQNameLower := qnameLower
 		queryToSend := query
@@ -2682,6 +2704,8 @@ func main() {
 	addrRefreshInterval := cfg.AddrRefreshInterval.D()
 	go addrSocketReconcileLoop(shutdownCtx, addrRefreshInterval)
 	go statsFileLoop(shutdownCtx, 15*time.Second)
+	setTablePath(cfg.TableFile)
+	go tableLoop(shutdownCtx)
 	go accessRep.Run(shutdownCtx, accessReportPath, 10*time.Second, accessEnforcing, logger.Printf)
 
 	logger.Printf("dnsrelay started: listen_port=%s upstreams=%v allowed_ifaces=%v cache_size=%d cache_max_bytes=%d max_outstanding=%d rate_scope=%s socket_pool=%d addr_refresh=%s cluster_rewrites=%d",
@@ -2820,4 +2844,64 @@ func loadUpstreams() error {
 
 func ipToUint32(ip net.IP) uint32 {
 	return binary.BigEndian.Uint32(ip.To4())
+}
+
+var (
+	localTable         atomic.Pointer[dnsanswer.Table]
+	localAnsweredTotal atomic.Uint64
+	tablePath          atomic.Pointer[string]
+)
+
+const maxTableFile = 128 << 20
+
+func setTablePath(p string) { tablePath.Store(&p) }
+
+// tableLoop loads the answer table the daemon publishes and swaps it in when the file changes. A damaged or
+// unreadable file is reported once and the table in use stays; clearing the path drops the table.
+func tableLoop(ctx context.Context) {
+	var lastPath string
+	var lastMod time.Time
+	var lastSize int64
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		var path string
+		if p := tablePath.Load(); p != nil {
+			path = *p
+		}
+		if path == "" {
+			if lastPath != "" {
+				localTable.Store(nil)
+				logger.Printf("[INFO] table dropped: no table_file configured any more")
+				lastPath = ""
+			}
+			continue
+		}
+		st, err := os.Stat(path)
+		if err != nil || path == lastPath && st.ModTime().Equal(lastMod) && st.Size() == lastSize {
+			continue
+		}
+		lastPath, lastMod, lastSize = path, st.ModTime(), st.Size()
+		if st.Size() > maxTableFile {
+			logger.Printf("[ERROR] table %s is %d bytes, over the %d limit", path, st.Size(), maxTableFile)
+			continue
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			logger.Printf("[ERROR] table %s: %v", path, err)
+			continue
+		}
+		t, spec, err := dnsanswer.DecodeTable(b)
+		if err != nil {
+			logger.Printf("[ERROR] table %s: %v (keeping the table in use)", path, err)
+			continue
+		}
+		localTable.Store(t)
+		logger.Printf("[INFO] table loaded: %d names, %d records, serial %d", t.Names(), t.Records(), spec.Serial)
+	}
 }

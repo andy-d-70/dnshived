@@ -35,6 +35,11 @@ var exemptPaths = map[string]bool{
 	"/api/v1/leasesync":             true,
 	"/api/v1/leasesync/fingerprint": true,
 	"/api/v1/leasesync/snapshot":    true,
+	// Peer-to-peer DNS store replication, gated by trusted_hosts and a token derived from the cluster PSK in
+	// internal/dnsrepl.
+	"/internal/dnsrepl/vote":     true,
+	"/internal/dnsrepl/append":   true,
+	"/internal/dnsrepl/snapshot": true,
 }
 
 // resolvedToken pairs a config.APIToken with its expiry pre-parsed once at
