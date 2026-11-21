@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -43,10 +45,10 @@ func newNotifyRig(t *testing.T, s notify.Settings, self string) *notifyRig {
 			return r.evs[n.Name], nil
 		},
 		self: func() string { return self },
-		send: func(d notify.Destination, subject, body string) error {
+		send: func(d notify.Destination, m notify.Message) error {
 			r.mu.Lock()
 			defer r.mu.Unlock()
-			r.sent = append(r.sent, sentMsg{d.ID, subject, body})
+			r.sent = append(r.sent, sentMsg{d.ID, m.Subject(), m.Text(time.UTC)})
 			return nil
 		},
 		now:   func() time.Time { return r.now },
@@ -96,12 +98,12 @@ func TestNotifyTick_NodeLossIsOneMessageAndRecoveryToo(t *testing.T) {
 	r.rows[1].FetchError = "down"
 	r.deps.tick()
 	r.deps.tick()
-	if len(r.sent) != 2 || !strings.Contains(r.sent[0].subject, "node lost") {
+	if len(r.sent) != 2 || !strings.Contains(r.sent[0].subject, "Node lost") {
 		t.Fatalf("one loss goes to both destinations of impact 2, once: %+v", r.sent)
 	}
 	r.rows[2].FetchError = "down"
 	r.deps.tick()
-	if got := r.sent[len(r.sent)-1].subject; !strings.Contains(got, "cluster at risk") {
+	if got := r.sent[len(r.sent)-1].subject; !strings.Contains(got, "Cluster at risk") {
 		t.Fatalf("two lost is impact 1: %q", got)
 	}
 	r.sent = nil
@@ -121,7 +123,7 @@ func TestNotifyTick_EventsAreGroupedByImpactAndSentOnce(t *testing.T) {
 	r.evs["core-1"] = []event{{Timestamp: r.now.Add(time.Second), Level: "INFO", Prefix: "AGENT:START", Message: "started"}}
 	r.now = r.now.Add(time.Minute)
 	r.deps.tick()
-	if len(r.sent) != 1 || r.sent[0].dest != "b" || !strings.Contains(r.sent[0].body, " 30x ") {
+	if len(r.sent) != 1 || r.sent[0].dest != "b" || !strings.Contains(r.sent[0].body, "30x ") {
 		t.Fatalf("30 equal events are one message to the one destination routed for impact 3: %+v", r.sent)
 	}
 	r.sent = nil
@@ -142,7 +144,7 @@ func TestNotifyTick_SummaryWaitsForTheChosenHourThenRepeats(t *testing.T) {
 	}
 	r.now = time.Date(2026, 11, 20, 7, 1, 0, 0, time.UTC)
 	r.deps.tick()
-	if len(r.sent) != 1 || r.sent[0].dest != "a" || !strings.Contains(r.sent[0].subject, "summary") {
+	if len(r.sent) != 1 || r.sent[0].dest != "a" || !strings.Contains(r.sent[0].subject, "Summary") {
 		t.Fatalf("summary at 07:00: %+v", r.sent)
 	}
 	r.deps.tick()
@@ -245,7 +247,7 @@ func TestHandleNotifyPost_DestinationsMatrixAndSummary(t *testing.T) {
 		t.Fatalf("impact 2 routes to the destination: %+v", got)
 	}
 
-	form = url.Values{"action": {"save_summary"}, "enabled": {"on"}, "interval": {"weekly"}, "hour": {"9"}, "target": {id, "ghost"}}
+	form = url.Values{"action": {"save_summary"}, "enabled": {"on"}, "interval": {"weekly"}, "time": {"09:15"}, "target": {id, "ghost"}}
 	if rec := postNotify(t, store, repl, cfg, form); rec.Code != http.StatusBadRequest {
 		t.Fatalf("a summary to an unknown destination must be refused: %d", rec.Code)
 	}
@@ -253,8 +255,13 @@ func TestHandleNotifyPost_DestinationsMatrixAndSummary(t *testing.T) {
 	if rec := postNotify(t, store, repl, cfg, form); rec.Code != 200 {
 		t.Fatalf("summary: %d %s", rec.Code, rec.Body.String())
 	}
-	if got := store.NotifySettings().Summary; got.Interval != "weekly" || got.Hour != 9 || !got.Enabled {
+	if got := store.NotifySettings().Summary; got.Interval != "daily" || got.Hour != 9 || got.Minute != 15 || !got.Enabled {
 		t.Fatalf("%+v", got)
+	}
+
+	form["time"] = []string{"09:20"}
+	if rec := postNotify(t, store, repl, cfg, form); rec.Code != http.StatusBadRequest {
+		t.Fatalf("a minute off the 15 minute grid must be refused: %d", rec.Code)
 	}
 
 	if rec := postNotify(t, store, repl, cfg, url.Values{"action": {"remove"}, "id": {id}}); rec.Code != 200 {
@@ -271,8 +278,144 @@ func TestNotifyPage_NeverShowsAWebhookAddress(t *testing.T) {
 	s.Destinations = []notify.Destination{{ID: "h", Name: "Hook", Kind: notify.KindWebhook, Address: "https://example.org/secret-token-123"}}
 	store.Mutate("t", func(d *webauth.Store) error { d.Notify = &s; return nil })
 	rec := httptest.NewRecorder()
-	handleNotifyGet(store, func() string { return filepath.Join(t.TempDir(), "x") })(rec, httptest.NewRequest("GET", "/notify", nil))
+	handleNotifyGet(store, nil, func() string { return filepath.Join(t.TempDir(), "x") })(rec, httptest.NewRequest("GET", "/notify", nil))
 	if rec.Code != 200 || strings.Contains(rec.Body.String(), "secret-token-123") || !strings.Contains(rec.Body.String(), "Hook") {
 		t.Fatalf("%d, the secret must not reach the page", rec.Code)
+	}
+}
+
+func TestNotifyTick_QuietScheduleDropsAlarmsForItsDestinationsOnly(t *testing.T) {
+	s := notifySettings()
+	s.Schedules = []notify.Schedule{{ID: "q", Name: "night", Start: "05:00", End: "07:00", Targets: []string{"b"}}}
+	s.Matrix = map[string][]string{"3": {"a", "b"}, "2": {"a", "b"}}
+	s.Summary.Enabled = false
+	r := newNotifyRig(t, s, "core-1")
+	r.deps.tick()
+	r.evs["core-2"] = []event{{Timestamp: r.now.Add(time.Second), Level: "ERROR", Prefix: "AGENT:UNSERVED", Message: "scope x"}}
+	r.now = r.now.Add(time.Minute)
+	r.deps.tick()
+	if len(r.sent) != 1 || r.sent[0].dest != "a" {
+		t.Fatalf("only the destination outside a quiet window is told: %+v", r.sent)
+	}
+	r.sent = nil
+	r.rows[2].FetchError = "down"
+	r.now = r.now.Add(time.Minute)
+	r.deps.tick()
+	if len(r.sent) != 1 || r.sent[0].dest != "a" {
+		t.Fatalf("a node loss obeys the schedule too: %+v", r.sent)
+	}
+	r.sent = nil
+	r.now = time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
+	r.evs["core-2"] = append(r.evs["core-2"], event{Timestamp: r.now.Add(time.Second), Level: "ERROR", Prefix: "AGENT:UNSERVED", Message: "scope y"})
+	r.deps.tick()
+	if len(r.sent) != 2 {
+		t.Fatalf("after the window both are told, and the dropped alert is not replayed: %+v", r.sent)
+	}
+}
+
+func TestHandleNotifyPost_Schedules(t *testing.T) {
+	store, usersFile := newTestStore(t, "admin", "correct-horse", "admin")
+	cfg := &WebConfig{UsersFile: usersFile}
+	repl := testRepl(store, cfg)
+	postNotify(t, store, repl, cfg, url.Values{"action": {"add"}, "name": {"Ops"}, "kind": {"email"}, "address": {"ops@example.org"}})
+	id := store.NotifySettings().Destinations[0].ID
+
+	bad := url.Values{"action": {"add_schedule"}, "name": {"x"}, "start": {"10:00"}, "end": {"10:00"}}
+	if rec := postNotify(t, store, repl, cfg, bad); rec.Code != http.StatusBadRequest {
+		t.Fatalf("equal from and to must be refused: %d", rec.Code)
+	}
+	ok := url.Values{"action": {"add_schedule"}, "name": {"Nights"}, "start": {"22:00"}, "end": {"06:00"}, "day": {"5", "1"}, "target": {id}}
+	if rec := postNotify(t, store, repl, cfg, ok); rec.Code != 200 || !strings.Contains(rec.Body.String(), "Nights") {
+		t.Fatalf("add: %d %s", rec.Code, rec.Body.String())
+	}
+	sc := store.NotifySettings().Schedules
+	if len(sc) != 1 || sc[0].Days[0] != 1 || sc[0].Days[1] != 5 || sc[0].Targets[0] != id {
+		t.Fatalf("%+v", sc)
+	}
+	form := url.Values{"action": {"save_summary"}, "interval": {"daily"}, "hour": {"7"}, "minute": {"45"}}
+	if rec := postNotify(t, store, repl, cfg, form); rec.Code != 200 || store.NotifySettings().Summary.Minute != 45 {
+		t.Fatalf("minute: %d", rec.Code)
+	}
+	form["minute"] = []string{"20"}
+	if rec := postNotify(t, store, repl, cfg, form); rec.Code != http.StatusBadRequest {
+		t.Fatalf("minute 20 must be refused: %d", rec.Code)
+	}
+	if rec := postNotify(t, store, repl, cfg, url.Values{"action": {"remove_schedule"}, "id": {sc[0].ID}}); rec.Code != 200 || len(store.NotifySettings().Schedules) != 0 {
+		t.Fatalf("remove: %d", rec.Code)
+	}
+}
+
+func TestRecordSend_FormatAndLogRoundTrip(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			var b struct{ Action, Summary string }
+			json.NewDecoder(r.Body).Decode(&b)
+			got = append(got, b.Action+"\t"+b.Summary)
+			w.Write([]byte(`{"ok":true}`))
+			return
+		}
+		var out strings.Builder
+		for _, g := range got {
+			p := strings.SplitN(g, "\t", 2)
+			j, _ := json.Marshal(map[string]string{"ts": "2026-11-20T10:00:00Z", "action": p[0], "summary": p[1]})
+			out.Write(j)
+			out.WriteString("\n")
+		}
+		out.WriteString(`{"ts":"2026-11-20T10:00:01Z","action":"config.commit","summary":"x"}` + "\n")
+		w.Write([]byte(out.String()))
+	}))
+	defer srv.Close()
+	u, _ := url.Parse(srv.URL)
+	n := NodeConfig{Name: "core-1", Addr: u.Host}
+	cfg := &WebConfig{Nodes: []NodeConfig{n}}
+	d := notify.Destination{ID: "a", Name: "Ops", Kind: notify.KindEmail, Address: "secret@example.org"}
+
+	recordSend(cfg, "alert: Node lost", d, "subj 1", "", nil)
+	recordSend(cfg, "recover", d, "subj 2", "", errors.New("smtp down"))
+	recordSend(cfg, "alert: Warning", d, "subj 3", "dropped, quiet schedule Nights", nil)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && len(got) < 3 {
+		time.Sleep(20 * time.Millisecond)
+	}
+	rows := fetchNotifyLog([]NodeConfig{n, n}, 10)
+	if len(rows) != 3 {
+		t.Fatalf("rows: %+v (got %v)", rows, got)
+	}
+	if !rows[0].Bad && rows[0].Subject != "subj 2" {
+		t.Logf("order is newest first: %+v", rows)
+	}
+	for _, r := range rows {
+		if strings.Contains(r.To+r.Result+r.Subject+r.Reason, "secret@example.org") {
+			t.Errorf("address leaked: %+v", r)
+		}
+	}
+}
+
+func TestNotifyTick_SummaryCountsTheRoutineBackups(t *testing.T) {
+	r := newNotifyRig(t, notifySettings(), "core-1")
+	r.deps.backups = func() time.Duration { return 30 * time.Minute }
+	r.deps.tick()
+	at := func(m int) time.Time { return time.Date(2026, 11, 20, 6, m, 0, 0, time.UTC) }
+	r.evs["core-3"] = []event{
+		{Timestamp: at(10), Level: "INFO", Prefix: "AGENT:BACKUP", Message: "automated backup written: backup-a.enc, 1.0 KB, on 3 of 3 cores, checked"},
+		{Timestamp: at(40), Level: "WARNING", Prefix: "AGENT:BACKUP", Message: "automated backup written: backup-b.enc, 1.0 KB, only 2 of 3 cores, missing on: x"},
+	}
+	r.now = at(45)
+	r.deps.tick()
+	r.sent = nil
+	r.now = time.Date(2026, 11, 20, 7, 1, 0, 0, time.UTC)
+	r.deps.tick()
+	var sum *sentMsg
+	for i := range r.sent {
+		if strings.Contains(r.sent[i].subject, "Summary") {
+			sum = &r.sent[i]
+		}
+	}
+	if sum == nil {
+		t.Fatalf("no summary: %+v", r.sent)
+	}
+	if !strings.Contains(sum.body, "Backups") || !strings.Contains(sum.body, "2 of 2 written, 1 not on every core") || !strings.Contains(sum.subject, "warning") {
+		t.Errorf("%s\n%s", sum.subject, sum.body)
 	}
 }

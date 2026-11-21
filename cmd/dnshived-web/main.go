@@ -280,7 +280,7 @@ func main() {
 	mux.HandleFunc("POST /users/{name}/delete", requirePermission(store, webauth.PermEditConfig, handleUserDelete(store, repl, ref)))
 	mux.HandleFunc("GET /config/mail", requirePermission(store, webauth.PermEditConfig, handleMailGet(store)))
 	notifyStatePath := func() string { return filepath.Join(filepath.Dir(ref.Load().UsersFile), "notify-state.json") }
-	mux.HandleFunc("GET /notify", requirePermission(store, webauth.PermEditConfig, handleNotifyGet(store, notifyStatePath)))
+	mux.HandleFunc("GET /notify", requirePermission(store, webauth.PermEditConfig, handleNotifyGet(store, ref, notifyStatePath)))
 	mux.HandleFunc("POST /notify", requirePermission(store, webauth.PermEditConfig, handleNotifyPost(store, repl, ref, notifyStatePath)))
 	mux.HandleFunc("POST /config/mail", requirePermission(store, webauth.PermEditConfig, handleMailPost(store, repl, ref)))
 	mux.HandleFunc("POST /internal/auth-doc", repl.handleAuthDocPost)

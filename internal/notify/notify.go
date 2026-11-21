@@ -78,32 +78,104 @@ type Destination struct {
 	Address string `json:"address"`
 }
 
-// Summary is the periodic report. Interval is one of Intervals; Hour is the
-// local hour a daily or weekly report is sent at.
+// Summary is the daily report, sent at Hour:Minute local time. Interval is
+// kept as "daily" for cores that still read it; any stored value means daily.
 type Summary struct {
 	Enabled  bool     `json:"enabled"`
 	Interval string   `json:"interval"`
 	Hour     int      `json:"hour"`
+	Minute   int      `json:"minute,omitempty"`
 	Targets  []string `json:"targets,omitempty"`
+}
+
+// Schedule is a quiet time: between Start and End (local, "15:04") on Days
+// (0 = Sunday, none = every day) no alarm goes to Targets (none = every
+// destination). A window that ends before it starts runs past midnight and
+// belongs to the day it starts on.
+type Schedule struct {
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Days    []int    `json:"days,omitempty"`
+	Start   string   `json:"start"`
+	End     string   `json:"end"`
+	Targets []string `json:"targets,omitempty"`
 }
 
 // Settings is the whole notification configuration.
 type Settings struct {
+	ClusterName  string              `json:"cluster_name,omitempty"`
 	Summary      Summary             `json:"summary"`
 	Destinations []Destination       `json:"destinations,omitempty"`
 	Matrix       map[string][]string `json:"matrix,omitempty"`
+	Schedules    []Schedule          `json:"schedules,omitempty"`
 }
 
-// Intervals the operator can choose, with their length.
-var Intervals = []struct {
-	Name  string
-	Every time.Duration
-	Text  string
-}{
-	{"hourly", time.Hour, "every hour"},
-	{"6h", 6 * time.Hour, "every 6 hours"},
-	{"daily", 24 * time.Hour, "daily"},
-	{"weekly", 7 * 24 * time.Hour, "weekly"},
+var Minutes = []int{0, 15, 30, 45}
+
+const MaxSchedules = 16
+
+func clockMinutes(s string) (int, bool) {
+	t, err := time.Parse("15:04", s)
+	if err != nil {
+		return 0, false
+	}
+	return t.Hour()*60 + t.Minute(), true
+}
+
+func (sc Schedule) onDay(d int) bool {
+	if len(sc.Days) == 0 {
+		return true
+	}
+	for _, v := range sc.Days {
+		if v == d {
+			return true
+		}
+	}
+	return false
+}
+
+func (sc Schedule) Active(t time.Time) bool {
+	a, ok1 := clockMinutes(sc.Start)
+	b, ok2 := clockMinutes(sc.End)
+	if !ok1 || !ok2 || a == b {
+		return false
+	}
+	m := t.Hour()*60 + t.Minute()
+	day := int(t.Weekday())
+	if a < b {
+		return m >= a && m < b && sc.onDay(day)
+	}
+	if m >= a {
+		return sc.onDay(day)
+	}
+	return m < b && sc.onDay((day+6)%7)
+}
+
+func (sc Schedule) Covers(id string) bool {
+	if len(sc.Targets) == 0 {
+		return true
+	}
+	for _, t := range sc.Targets {
+		if t == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (s Settings) Quiet(id string, t time.Time) bool {
+	_, quiet := s.QuietBy(id, t)
+	return quiet
+}
+
+// QuietBy is Quiet that also names the schedule that holds the alarm back.
+func (s Settings) QuietBy(id string, t time.Time) (string, bool) {
+	for _, sc := range s.Schedules {
+		if sc.Covers(id) && sc.Active(t) {
+			return sc.Name, true
+		}
+	}
+	return "", false
 }
 
 const (
@@ -118,11 +190,28 @@ func Default() Settings {
 	return Settings{Summary: Summary{Interval: DefaultInterval, Hour: DefaultHour}}
 }
 
+// ClusterLabel is the name subjects carry: the operator's, else the cluster id.
+func (s Settings) ClusterLabel(id string) string {
+	if s.ClusterName != "" {
+		return s.ClusterName
+	}
+	return id
+}
+
 // Clone returns a copy that shares nothing with s.
 func (s Settings) Clone() Settings {
 	out := s
 	out.Summary.Targets = append([]string(nil), s.Summary.Targets...)
 	out.Destinations = append([]Destination(nil), s.Destinations...)
+	out.Schedules = make([]Schedule, len(s.Schedules))
+	for i, sc := range s.Schedules {
+		sc.Days = append([]int(nil), sc.Days...)
+		sc.Targets = append([]string(nil), sc.Targets...)
+		out.Schedules[i] = sc
+	}
+	if len(out.Schedules) == 0 {
+		out.Schedules = nil
+	}
 	out.Matrix = make(map[string][]string, len(s.Matrix))
 	for k, v := range s.Matrix {
 		out.Matrix[k] = append([]string(nil), v...)
@@ -133,17 +222,11 @@ func (s Settings) Clone() Settings {
 // Key is the matrix key of an impact.
 func Key(i Impact) string { return fmt.Sprintf("%d", int(i)) }
 
-func intervalLength(name string) (time.Duration, bool) {
-	for _, iv := range Intervals {
-		if iv.Name == name {
-			return iv.Every, true
-		}
-	}
-	return 0, false
-}
-
 // Validate checks s and returns the first problem in words an operator can act on.
 func (s Settings) Validate() error {
+	if len(s.ClusterName) > 64 || strings.ContainsAny(s.ClusterName, "\r\n\t[]<>\"") {
+		return fmt.Errorf("the cluster name is at most 64 characters, without brackets, quotes or line breaks")
+	}
 	if len(s.Destinations) > MaxDestinations {
 		return fmt.Errorf("at most %d destinations", MaxDestinations)
 	}
@@ -173,15 +256,46 @@ func (s Settings) Validate() error {
 			return fmt.Errorf("%s: unknown kind %q", d.Name, d.Kind)
 		}
 	}
-	if _, ok := intervalLength(s.Summary.Interval); !ok {
-		return fmt.Errorf("unknown summary interval %q", s.Summary.Interval)
-	}
 	if s.Summary.Hour < 0 || s.Summary.Hour > 23 {
 		return fmt.Errorf("summary hour %d is not between 0 and 23", s.Summary.Hour)
+	}
+	if s.Summary.Minute < 0 || s.Summary.Minute > 59 || s.Summary.Minute%15 != 0 {
+		return fmt.Errorf("summary minute %d is not 0, 15, 30 or 45", s.Summary.Minute)
 	}
 	for _, t := range s.Summary.Targets {
 		if !ids[t] {
 			return fmt.Errorf("the summary goes to an unknown destination %q", t)
+		}
+	}
+	if len(s.Schedules) > MaxSchedules {
+		return fmt.Errorf("at most %d schedules", MaxSchedules)
+	}
+	sids := make(map[string]bool, len(s.Schedules))
+	for _, sc := range s.Schedules {
+		if sc.ID == "" || strings.ContainsAny(sc.ID, " \t\r\n\"<>&") || len(sc.ID) > 32 || sids[sc.ID] {
+			return fmt.Errorf("invalid or duplicate schedule id %q", sc.ID)
+		}
+		sids[sc.ID] = true
+		if strings.TrimSpace(sc.Name) == "" || len(sc.Name) > 60 || strings.ContainsAny(sc.Name, "\r\n") {
+			return fmt.Errorf("schedule %s needs a name of up to 60 characters", sc.ID)
+		}
+		a, ok1 := clockMinutes(sc.Start)
+		b, ok2 := clockMinutes(sc.End)
+		if !ok1 || !ok2 {
+			return fmt.Errorf("schedule %s: times must look like 22:00", sc.Name)
+		}
+		if a == b {
+			return fmt.Errorf("schedule %s: from and to must differ", sc.Name)
+		}
+		for _, d := range sc.Days {
+			if d < 0 || d > 6 {
+				return fmt.Errorf("schedule %s: unknown weekday %d", sc.Name, d)
+			}
+		}
+		for _, t := range sc.Targets {
+			if !ids[t] {
+				return fmt.Errorf("schedule %s covers an unknown destination %q", sc.Name, t)
+			}
 		}
 	}
 	for k, list := range s.Matrix {
@@ -289,6 +403,16 @@ func (s *Settings) RemoveDestination(id string) {
 		return out
 	}
 	s.Summary.Targets = drop(s.Summary.Targets)
+	keep := s.Schedules[:0:0]
+	for _, sc := range s.Schedules {
+		had := len(sc.Targets)
+		sc.Targets = drop(sc.Targets)
+		if had > 0 && len(sc.Targets) == 0 {
+			continue
+		}
+		keep = append(keep, sc)
+	}
+	s.Schedules = keep
 	for k, list := range s.Matrix {
 		if l := drop(list); len(l) == 0 {
 			delete(s.Matrix, k)
@@ -298,24 +422,13 @@ func (s *Settings) RemoveDestination(id string) {
 	}
 }
 
-// NextDue returns when the summary after the one sent at last is due. Hourly
-// and 6-hourly reports follow the previous one; daily and weekly ones are sent
-// at the chosen local hour, so a restart or a late start never shifts them.
+// NextDue returns when the summary after the one sent at last is due: the
+// chosen local time of day, so a restart or a late start never shifts it.
 func (s Summary) NextDue(last time.Time, loc *time.Location) time.Time {
-	every, ok := intervalLength(s.Interval)
-	if !ok {
-		every = 24 * time.Hour
-	}
-	if every < 24*time.Hour {
-		return last.Add(every)
-	}
 	l := last.In(loc)
-	next := time.Date(l.Year(), l.Month(), l.Day(), s.Hour, 0, 0, 0, loc)
+	next := time.Date(l.Year(), l.Month(), l.Day(), s.Hour, s.Minute, 0, 0, loc)
 	for !next.After(l) {
 		next = next.AddDate(0, 0, 1)
-	}
-	if every >= 7*24*time.Hour {
-		next = next.AddDate(0, 0, 6)
 	}
 	return next
 }

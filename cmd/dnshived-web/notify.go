@@ -39,6 +39,10 @@ type notifyState struct {
 	LastSummary time.Time `json:"last_summary"`
 	LastEvents  time.Time `json:"last_events"`
 	Lost        []string  `json:"lost,omitempty"`
+	StableSince time.Time `json:"stable_since,omitempty"`
+	LastLeases  *int      `json:"last_leases,omitempty"`
+	BackupsOK   int       `json:"backups_ok,omitempty"`
+	BackupsBad  int       `json:"backups_bad,omitempty"`
 }
 
 func loadNotifyState(path string) notifyState {
@@ -68,7 +72,11 @@ type notifyDeps struct {
 	events   func(NodeConfig) ([]event, error)
 	self     func() string
 	cluster  string
-	send     func(d notify.Destination, subject, body string) error
+	send     func(d notify.Destination, m notify.Message) error
+	base     func() string
+	backups  func() time.Duration
+	update   func(version string) (state, latest, url string)
+	record   func(reason string, d notify.Destination, subject, result string, err error)
 	now      func() time.Time
 	loc      *time.Location
 	state    string
@@ -95,10 +103,15 @@ func (d notifyDeps) tick() {
 	if !isSender(rows, d.self()) {
 		return
 	}
-	d.cluster = clusterOf(rows)
+	d.cluster = s.ClusterLabel(clusterOf(rows))
 	now := d.now()
 	st := loadNotifyState(d.state)
 	changed := false
+	if stable := allStable(rows); stable && st.StableSince.IsZero() {
+		st.StableSince, changed = now, true
+	} else if !stable && !st.StableSince.IsZero() {
+		st.StableSince, changed = time.Time{}, true
+	}
 	if st.LastSummary.IsZero() {
 		st.LastSummary, changed = now, true
 	}
@@ -125,13 +138,20 @@ func (d notifyDeps) tick() {
 			if e.Time.After(last) {
 				last = e.Time
 			}
+			switch {
+			case isBackupWritten(e) && e.Level == "INFO":
+				st.BackupsOK++
+			case isBackupWritten(e):
+				st.BackupsBad++
+			}
 		}
 		st.LastEvents, changed = last, true
 	}
 
 	if s.Summary.Due(st.LastSummary, now, d.loc) {
-		d.sendSummary(s, rows, st.LastSummary, now)
-		st.LastSummary, changed = now, true
+		total := d.sendSummary(s, rows, st, now)
+		st.LastSummary, st.LastLeases, changed = now, total, true
+		st.BackupsOK, st.BackupsBad = 0, 0
 	}
 	if changed {
 		if err := saveNotifyState(d.state, st); err != nil {
@@ -173,12 +193,65 @@ func (d notifyDeps) collect(rows []statusRow, since time.Time) []notify.Event {
 	return out
 }
 
-func (d notifyDeps) deliver(dests []notify.Destination, subject, body string) {
-	for _, dest := range dests {
-		if err := d.send(dest, subject, body); err != nil {
-			log.Printf("[NOTIFY] %s (%s): %v", dest.Name, dest.Kind, err)
+func isBackupWritten(e notify.Event) bool {
+	return e.Prefix == "AGENT:BACKUP" && strings.HasPrefix(e.Message, "automated backup written")
+}
+
+// withoutRoutine drops the backup events a routine line already counts.
+func withoutRoutine(events []notify.Event) []notify.Event {
+	out := events[:0:0]
+	for _, e := range events {
+		if !(isBackupWritten(e) && e.Level == "INFO") {
+			out = append(out, e)
 		}
 	}
+	return out
+}
+
+func allStable(rows []statusRow) bool {
+	for _, r := range rows {
+		if r.FetchError != "" || r.Status.State != "STABLE" {
+			return false
+		}
+	}
+	return len(rows) > 0
+}
+
+func (d notifyDeps) link() string {
+	if d.base == nil {
+		return ""
+	}
+	return d.base()
+}
+
+func (d notifyDeps) deliver(reason string, dests []notify.Destination, m notify.Message) {
+	subject := m.Subject()
+	for _, dest := range dests {
+		err := d.send(dest, m)
+		if err != nil {
+			log.Printf("[NOTIFY] %s (%s): %v", dest.Name, dest.Kind, err)
+		}
+		if d.record != nil {
+			d.record(reason, dest, subject, "", err)
+		}
+	}
+}
+
+// deliverAlarm is deliver for alerts and loss messages: a destination inside
+// one of its quiet schedules gets nothing, and the message is not kept for later.
+func (d notifyDeps) deliverAlarm(s notify.Settings, reason string, dests []notify.Destination, m notify.Message) {
+	at := d.now().In(d.loc)
+	var open []notify.Destination
+	for _, dest := range dests {
+		if name, quiet := s.QuietBy(dest.ID, at); quiet {
+			if d.record != nil {
+				d.record(reason, dest, m.Subject(), "dropped, quiet schedule "+name, nil)
+			}
+			continue
+		}
+		open = append(open, dest)
+	}
+	d.deliver(reason, open, m)
 }
 
 func (d notifyDeps) sendAlerts(s notify.Settings, events []notify.Event) {
@@ -193,33 +266,193 @@ func (d notifyDeps) sendAlerts(s notify.Settings, events []notify.Event) {
 		if len(list) == 0 || len(dests) == 0 {
 			continue
 		}
-		subject, body := notify.Alert(i, d.cluster, list, d.loc)
-		d.deliver(dests, subject, body)
+		d.deliverAlarm(s, "alert: "+i.String(), dests, notify.Alert(i, d.cluster, list, d.loc, d.link()))
 	}
+}
+
+func lossMessage(i notify.Impact, isLoss bool, cluster, link string, lost []string, total int, now time.Time, loc *time.Location) notify.Message {
+	at := now.In(loc).Format("2006-01-02 15:04:05 MST")
+	m := notify.Message{Cluster: cluster, At: now, Link: link}
+	if !isLoss {
+		m.Class = notify.ClassNotify
+		m.Title = "all cores reachable again"
+		m.Headline = "Every core answers again."
+		m.Details = []notify.Detail{{Rows: []notify.Fact{{Label: "Since", Value: at}}}}
+		return m
+	}
+	names := strings.Join(lost, ", ")
+	m.Class = notify.ClassOf(i)
+	m.Title = fmt.Sprintf("%s: %s", i, names)
+	m.Headline = fmt.Sprintf("%s: %s. %s", i, names, i.Describe())
+	m.Details = []notify.Detail{{Rows: []notify.Fact{
+		{Label: "Not reachable", Value: names},
+		{Label: "Since", Value: at},
+		{Label: "Cores", Value: fmt.Sprintf("%d of %d reachable", total-len(lost), total)},
+	}}}
+	return m
 }
 
 func (d notifyDeps) sendLoss(s notify.Settings, lost []string, total int, now time.Time) {
 	i, isLoss := notify.Lost(len(lost), total)
-	var subject, body string
-	if isLoss {
-		subject = fmt.Sprintf("dnshived %s: %s", strings.ToLower(i.String()), d.cluster)
-		body = fmt.Sprintf("%s on %s\n%s\n\nNot reachable: %s\nSince %s\n", i, d.cluster, i.Describe(), strings.Join(lost, ", "), now.In(d.loc).Format("2006-01-02 15:04:05 MST"))
-	} else {
-		i = notify.Info
-		subject = "dnshived: all cores reachable again: " + d.cluster
-		body = "Every core answers again on " + d.cluster + " since " + now.In(d.loc).Format("2006-01-02 15:04:05 MST") + ".\n"
+	reason := "alert: " + i.String()
+	if !isLoss {
+		i, reason = notify.Info, "recover"
 	}
-	d.deliver(s.Route(i), subject, body)
+	d.deliverAlarm(s, reason, s.Route(i), lossMessage(i, isLoss, d.cluster, d.link(), lost, total, now, d.loc))
 }
 
-func (d notifyDeps) sendSummary(s notify.Settings, rows []statusRow, from, to time.Time) {
-	facts := notify.Facts{Cluster: d.cluster, From: from, To: to}
+// sendSummary sends the daily report and returns the lease total it saw, to
+// compare with the next one.
+func (d notifyDeps) sendSummary(s notify.Settings, rows []statusRow, st notifyState, to time.Time) *int {
+	facts := notify.Facts{Cluster: d.cluster, From: st.LastSummary, To: to, Link: d.link(), LeasesTotal: -1, StableSince: st.StableSince}
+	var uptime int64
+	leases, haveLeases := 0, false
 	for _, r := range rows {
 		facts.Nodes = append(facts.Nodes, notify.NodeLine{Name: r.Node.Name, Reachable: r.FetchError == "", State: r.Status.State})
+		if r.FetchError != "" {
+			continue
+		}
+		if r.HasSystem && r.System.UptimeSec > 0 && (uptime == 0 || r.System.UptimeSec < uptime) {
+			uptime = r.System.UptimeSec
+		}
+		if r.Status.DHCPActive != nil && isCoreRole(r.Status.Role) {
+			leases, haveLeases = leases+*r.Status.DHCPActive, true
+		}
+		if facts.Version == "" {
+			facts.Version = r.Status.Version
+		}
 	}
-	facts.Events = d.collect(rows, from)
-	subject, body := notify.BuildSummary(facts, d.loc)
-	d.deliver(s.SummaryTargets(), subject, body)
+	facts.Uptime = time.Duration(uptime) * time.Second
+	var total *int
+	if haveLeases {
+		facts.LeasesTotal, total = leases, &leases
+		if st.LastLeases != nil {
+			facts.LeasesDelta, facts.HasDelta = leases-*st.LastLeases, true
+		}
+	}
+	if d.update != nil {
+		facts.UpdateState, facts.Latest, facts.LatestURL = d.update(facts.Version)
+	}
+	facts.Events = d.collect(rows, st.LastSummary)
+	if d.backups != nil {
+		if every := d.backups(); every > 0 {
+			expected := int(to.Sub(st.LastSummary) / every)
+			facts.Routines = []notify.Routine{{Name: "Backups", Verb: "written", Got: st.BackupsOK + st.BackupsBad, Expected: expected, Flagged: st.BackupsBad}}
+		}
+	}
+	facts.Events = withoutRoutine(facts.Events)
+	d.deliver("summary", s.SummaryTargets(), notify.BuildSummary(facts, d.loc))
+	return total
+}
+
+// sampleMessage is what the test button sends for each class, with invented
+// numbers and a note saying so.
+func sampleMessage(kind, cluster, link, by string, now time.Time, loc *time.Location) (notify.Message, bool) {
+	note := "Test message sent from the Notify page by " + by + ". Nothing is wrong."
+	ev := func(level, prefix, msg string) []notify.Event {
+		return []notify.Event{{Time: now, Level: level, Prefix: prefix, Message: msg, Node: "core-3"}}
+	}
+	var m notify.Message
+	switch kind {
+	case "", "notify":
+		m = notify.Alert(notify.Info, cluster, ev("INFO", "AGENT:BACKUP", "automated backup written: backup-20261121-050040.enc, 48.2 KB, on 3 of 3 cores, checked"), loc, link)
+	case "warning":
+		m = notify.Alert(notify.Warning, cluster, ev("WARNING", "AGENT:DRIFT", "gate_vrrp_coherence DHCP gate is open but VRRP state is BACKUP, not MASTER"), loc, link)
+	case "error":
+		m = lossMessage(notify.NodeLost, true, cluster, link, []string{"core-3"}, 3, now, loc)
+	case "summary":
+		m = notify.BuildSummary(notify.Facts{
+			Cluster: cluster, From: now.Add(-24 * time.Hour), To: now, Link: link,
+			Nodes:    []notify.NodeLine{{Name: "core-1", Reachable: true, State: "STABLE"}, {Name: "core-2", Reachable: true, State: "STABLE"}, {Name: "core-3", Reachable: true, State: "STABLE"}},
+			Routines: []notify.Routine{{Name: "Backups", Verb: "written", Got: 24, Expected: 24}},
+			Uptime:   12*24*time.Hour + 3*time.Hour, StableSince: now.Add(-9 * 24 * time.Hour), LeasesTotal: 142, LeasesDelta: 7, HasDelta: true,
+			Events:  ev("INFO", "AGENT:BACKUP", "backup"),
+			Version: "0.9.8.10", Latest: "0.9.9", LatestURL: updateURLPrefix + "latest", UpdateState: "new",
+		}, loc)
+		m.Facts = append(m.Facts, notify.Fact{Label: "Note", Value: note})
+		return m, true
+	default:
+		return m, false
+	}
+	m.Details = append(m.Details, notify.Detail{Title: "Test", Rows: []notify.Fact{{Label: "Note", Value: note}}})
+	return m, true
+}
+
+const notifyLogSep = " | "
+
+var notifyLogActions = map[string]bool{"notify.sent": true, "notify.failed": true, "notify.dropped": true, "notify.test": true}
+
+// recordSend writes one audit entry per send attempt, on every core, so the
+// message log reads the same on every web UI: reason, destination, result, subject.
+// Addresses and webhook URLs are never part of it.
+func recordSend(cfg *WebConfig, reason string, d notify.Destination, subject, result string, err error) {
+	action := "notify.sent"
+	switch {
+	case err != nil:
+		action, result = "notify.failed", "failed: "+err.Error()
+	case strings.HasPrefix(result, "dropped"):
+		action = "notify.dropped"
+	case reason == "test":
+		action, result = "notify.test", "sent"
+	default:
+		result = "sent"
+	}
+	if len(subject) > 300 {
+		subject = subject[:300] + "…"
+	}
+	line := reason + notifyLogSep + d.Name + " (" + d.Kind + ")" + notifyLogSep + result + notifyLogSep + subject + notifyLogSep + newDestinationID()
+	auditAll(cfg, "notify", action, line)
+}
+
+type notifyLogRow struct {
+	Time                        time.Time
+	Reason, To, Result, Subject string
+	Bad                         bool
+}
+
+// fetchNotifyLog returns the newest notification entries, merged from every
+// core that answers: a core that was down when a message went out lacks that
+// entry, so no single core holds the whole log.
+func fetchNotifyLog(nodes []NodeConfig, max int) []notifyLogRow {
+	var rows []notifyLogRow
+	seen := map[string]bool{}
+	for _, sec := range fetchNodeAuditSections(nodes) {
+		if sec.Err != nil {
+			continue
+		}
+		for _, line := range strings.Split(sec.Body, "\n") {
+			var e struct {
+				TS      time.Time `json:"ts"`
+				Action  string    `json:"action"`
+				Summary string    `json:"summary"`
+			}
+			if json.Unmarshal([]byte(line), &e) != nil || !notifyLogActions[e.Action] {
+				continue
+			}
+			p := strings.Split(e.Summary, notifyLogSep)
+			if len(p) < 4 {
+				continue
+			}
+			key := e.TS.Format(time.RFC3339Nano) + e.Summary
+			if len(p) >= 5 {
+				key = p[len(p)-1]
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			subject := p[3]
+			if len(p) > 4 {
+				subject = strings.Join(p[3:len(p)-1], notifyLogSep)
+			}
+			rows = append(rows, notifyLogRow{Time: e.TS.In(time.Local), Reason: p[0], To: p[1], Result: p[2], Subject: subject, Bad: e.Action == "notify.failed"})
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Time.After(rows[j].Time) })
+	if len(rows) > max {
+		rows = rows[:max]
+	}
+	return rows
 }
 
 var webhookClient = &http.Client{
@@ -267,18 +500,19 @@ func redactURL(err error) error {
 	return err
 }
 
-func sendNotification(store *webauth.Store, d notify.Destination, subject, body string) error {
+func sendNotification(store *webauth.Store, d notify.Destination, m notify.Message) error {
+	text := m.Text(time.Local)
 	switch d.Kind {
 	case notify.KindEmail:
 		smtpCfg, _ := store.MailSettings()
 		if smtpCfg.Host == "" || smtpCfg.From == "" {
 			return errors.New("no mail server configured (Security, Mail & reset)")
 		}
-		return sendMail(smtpCfg, d.Address, subject, body+"\n— dnshived")
+		return sendMailHTML(smtpCfg, d.Address, m.Subject(), text, renderMailHTML(m, time.Local))
 	case notify.KindWebhook:
 		ctx, cancel := context.WithTimeout(context.Background(), webhookTimeout)
 		defer cancel()
-		return sendWebhook(ctx, d.Address, subject, body)
+		return sendWebhook(ctx, d.Address, m.Subject(), text)
 	}
 	return fmt.Errorf("unknown destination kind %q", d.Kind)
 }
@@ -293,8 +527,29 @@ func runNotifier(ctx context.Context, store *webauth.Store, ref *configRef, self
 		},
 		events: func(n NodeConfig) ([]event, error) { return fetchEvents(n, notifyEventWindow) },
 		self:   self,
-		send: func(dst notify.Destination, subject, body string) error {
-			return sendNotification(store, dst, subject, body)
+		send: func(dst notify.Destination, m notify.Message) error {
+			return sendNotification(store, dst, m)
+		},
+		base: func() string {
+			u, _ := resetBaseURL(store, ref.Load())
+			return u
+		},
+		backups: func() time.Duration {
+			c, _, err := firstReachableConfig(nodesIncludingSelf(ref.Load()))
+			if err != nil || !c.BackupEnabled || c.BackupPassword == "" {
+				return 0
+			}
+			if c.BackupIntervalHours <= 0 {
+				return 24 * time.Hour
+			}
+			return time.Duration(c.BackupIntervalHours) * time.Hour
+		},
+		update: func(version string) (string, string, string) {
+			info := updates.status(ref.Load().UpdateCheck, version)
+			return info.State, info.Latest, info.URL
+		},
+		record: func(reason string, dst notify.Destination, subject, result string, err error) {
+			recordSend(ref.Load(), reason, dst, subject, result, err)
 		},
 		now:   time.Now,
 		loc:   time.Local,
@@ -334,16 +589,20 @@ type notifyRow struct {
 	Cells  []notifyCell
 }
 
+type notifyScheduleRow struct {
+	ID, Name, Days, Window, Applies string
+}
+
+var weekdayNames = []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+
 type notifyPageData struct {
 	Settings  notify.Settings
 	Rows      []notifyRow
-	Intervals []struct {
-		Name, Text string
-		Selected   bool
-	}
 	SummaryOn map[string]bool
-	Hours     []int
+	Weekdays  []string
+	Schedules []notifyScheduleRow
 	MailSet   bool
+	Log       []notifyLogRow
 	NextDue   string
 	Error     string
 	Notice    string
@@ -378,17 +637,38 @@ one the web UIs can reach, so one message goes out, not one per core.</p>
 <input name="address" placeholder="ops@example.org or https://..." size="40" autocomplete="off">
 <button name="action" value="add" class="btn-success">Add destination</button></form>
 
+<form method="post" action="/notify" style="margin:.8rem 0 0">
+<label>Cluster name in subjects <input name="cluster_name" value="{{.Settings.ClusterName}}" placeholder="cluster id when empty" size="24" maxlength="64"></label>
+<button name="action" value="save_name" class="btn-success">Save name</button>
+<span class="info-ico" title="Every message subject starts with [name] and the class (Notify, Summary, Warning, Error). The link in each message is the Public URL under Security, Mail &amp; reset, or the management VIP.">ⓘ</span></form>
+
 <h2>Summary report</h2>
 <form method="post" action="/notify">
 <table border="1" cellpadding="4">
 <tr><td>Send a summary</td><td><label><input type="checkbox" name="enabled" {{if .Settings.Summary.Enabled}}checked{{end}}> enabled</label></td></tr>
-<tr><td>Interval</td><td><select name="interval" class="js-combo">{{range .Intervals}}<option value="{{.Name}}" {{if .Selected}}selected{{end}}>{{.Text}}</option>{{end}}</select>
- at <select name="hour" class="js-combo">{{range .Hours}}<option value="{{.}}" {{if eq . $.Settings.Summary.Hour}}selected{{end}}>{{printf "%02d" .}}:00</option>{{end}}</select>
- <span class="info-ico" title="Daily and weekly reports go out at this local hour of the web server; hourly and 6-hourly reports follow the previous one.">ⓘ</span></td></tr>
+<tr><td>Sent daily at</td><td><input type="time" name="time" step="900" value="{{printf "%02d:%02d" .Settings.Summary.Hour .Settings.Summary.Minute}}" required>
+ <span class="info-ico" title="Local time of the web server, in steps of 15 minutes. Routine events (backups, commits) are collected here instead of being mailed one by one.">ⓘ</span></td></tr>
 <tr><td>Goes to</td><td>{{range .Settings.Destinations}}<label style="margin-right:1rem"><input type="checkbox" name="target" value="{{.ID}}" {{if index $.SummaryOn .ID}}checked{{end}}> {{.Name}}</label>{{else}}<span class="dim">add a destination first</span>{{end}}</td></tr>
 <tr><td>Next report</td><td>{{.NextDue}}</td></tr>
 </table>
 <p><button name="action" value="save_summary" class="btn-success">Save summary</button></p>
+</form>
+
+<h2>Quiet schedules</h2>
+<p class="dim">Inside a window no alert and no node-loss message goes to the destinations it covers; they are dropped, not sent later. The summary report and test messages are not affected. Times are the local time of the web server.</p>
+<table border="1" cellpadding="4">
+<tr><th>Name</th><th>Days</th><th>Quiet from - to</th><th>Covers</th><th></th></tr>
+{{range .Schedules}}<tr><td>{{.Name}}</td><td>{{.Days}}</td><td>{{.Window}}</td><td>{{.Applies}}</td>
+<td><form method="post" action="/notify" style="display:inline"><input type="hidden" name="id" value="{{.ID}}"><button name="action" value="remove_schedule" class="btn-cancel">Remove</button></form></td></tr>{{else}}<tr><td colspan="5" class="dim">No schedule: alerts go out at any time.</td></tr>{{end}}
+</table>
+<form method="post" action="/notify" style="margin-top:.6rem">
+<table border="1" cellpadding="4">
+<tr><td>Name</td><td><input name="name" placeholder="e.g. Nights" size="20"></td></tr>
+<tr><td>Days</td><td>{{range $i, $d := .Weekdays}}<label style="margin-right:.7rem"><input type="checkbox" name="day" value="{{$i}}"> {{$d}}</label>{{end}} <span class="dim">none ticked = every day</span></td></tr>
+<tr><td>Quiet from - to</td><td><input type="time" name="start" step="900" value="22:00" required> - <input type="time" name="end" step="900" value="06:00" required> <span class="dim">a window that ends earlier than it starts runs past midnight</span></td></tr>
+<tr><td>Covers</td><td>{{range .Settings.Destinations}}<label style="margin-right:1rem"><input type="checkbox" name="target" value="{{.ID}}"> {{.Name}}</label>{{else}}<span class="dim">add a destination first</span>{{end}} <span class="dim">none ticked = all</span></td></tr>
+</table>
+<p><button name="action" value="add_schedule" class="btn-success">Add schedule</button></p>
 </form>
 
 <h2>Alerts by impact</h2>
@@ -401,7 +681,38 @@ one the web UIs can reach, so one message goes out, not one per core.</p>
 <p class="dim">A tick sends the events of one impact class as a single message per destination, with a count per kind of event.</p>
 <p><button name="action" value="save_matrix" class="btn-success">Save routes</button></p>
 </form>
+
+<h2>Message log</h2>
+<p class="dim">Every message the notifier sent or held back, newest first: test, alert, recover and summary, with the result and the reason it was not sent. Addresses are not logged.</p>
+<div class="table-wrap"><table border="1" cellpadding="4">
+<thead><tr><th style="width:11rem">Time</th><th style="width:11rem">Reason</th><th style="width:12rem">To</th><th style="width:16rem">Result</th><th>Subject</th></tr></thead>
+<tbody data-pager="10,25,50" data-pager-key="notify-log">{{range .Log}}<tr><td>{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.Reason}}</td><td>{{.To}}</td><td class="{{if .Bad}}crit{{end}}" title="{{.Result}}">{{.Result}}</td><td title="{{.Subject}}">{{.Subject}}</td></tr>{{else}}<tr><td colspan="5" class="dim">Nothing sent yet.</td></tr>{{end}}</tbody>
+</table></div>
 `))
+
+func summaryTime(r *http.Request) (hour, minute int, err error) {
+	if v := r.FormValue("time"); v != "" {
+		hh, mm, ok := strings.Cut(v, ":")
+		hour, err = strconv.Atoi(hh)
+		if err == nil && ok {
+			minute, err = strconv.Atoi(mm)
+		}
+		if err != nil || !ok {
+			return 0, 0, errors.New("invalid time")
+		}
+		return hour, minute, nil
+	}
+	hour, err = strconv.Atoi(r.FormValue("hour"))
+	if err != nil {
+		return 0, 0, errors.New("invalid hour")
+	}
+	if v := r.FormValue("minute"); v != "" {
+		if minute, err = strconv.Atoi(v); err != nil {
+			return 0, 0, errors.New("invalid minute")
+		}
+	}
+	return hour, minute, nil
+}
 
 func notifyPage(store *webauth.Store, loc *time.Location, last time.Time) notifyPageData {
 	s := store.NotifySettings()
@@ -411,14 +722,28 @@ func notifyPage(store *webauth.Store, loc *time.Location, last time.Time) notify
 	for _, id := range s.Summary.Targets {
 		data.SummaryOn[id] = true
 	}
-	for _, iv := range notify.Intervals {
-		data.Intervals = append(data.Intervals, struct {
-			Name, Text string
-			Selected   bool
-		}{iv.Name, iv.Text, iv.Name == s.Summary.Interval})
+	data.Weekdays = weekdayNames
+	names := map[string]string{}
+	for _, d := range s.Destinations {
+		names[d.ID] = d.Name
 	}
-	for h := 0; h < 24; h++ {
-		data.Hours = append(data.Hours, h)
+	for _, sc := range s.Schedules {
+		row := notifyScheduleRow{ID: sc.ID, Name: sc.Name, Window: sc.Start + " - " + sc.End, Days: "every day", Applies: "all destinations"}
+		if len(sc.Days) > 0 {
+			var ds []string
+			for _, d := range sc.Days {
+				ds = append(ds, weekdayNames[d])
+			}
+			row.Days = strings.Join(ds, ", ")
+		}
+		if len(sc.Targets) > 0 {
+			var ts []string
+			for _, t := range sc.Targets {
+				ts = append(ts, names[t])
+			}
+			row.Applies = strings.Join(ts, ", ")
+		}
+		data.Schedules = append(data.Schedules, row)
 	}
 	for _, i := range notify.Impacts {
 		row := notifyRow{Impact: i}
@@ -435,7 +760,7 @@ func notifyPage(store *webauth.Store, loc *time.Location, last time.Time) notify
 	case !s.Summary.Enabled || len(s.Summary.Targets) == 0:
 		data.NextDue = "none (off, or no destination chosen)"
 	case last.IsZero():
-		data.NextDue = "at the first chosen hour after the sender starts"
+		data.NextDue = s.Summary.NextDue(time.Now(), loc).In(loc).Format("2006-01-02 15:04 MST")
 	default:
 		data.NextDue = s.Summary.NextDue(last, loc).In(loc).Format("2006-01-02 15:04 MST")
 	}
@@ -452,9 +777,13 @@ func newDestinationID() string {
 	return hex.EncodeToString(b)
 }
 
-func handleNotifyGet(store *webauth.Store, statePath func() string) http.HandlerFunc {
+func handleNotifyGet(store *webauth.Store, ref *configRef, statePath func() string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		renderTemplate(w, notifyTmpl, notifyPage(store, time.Local, loadNotifyState(statePath()).LastSummary), "notify")
+		data := notifyPage(store, time.Local, loadNotifyState(statePath()).LastSummary)
+		if ref != nil {
+			data.Log = fetchNotifyLog(nodesIncludingSelf(ref.Load()), 100)
+		}
+		renderTemplate(w, notifyTmpl, data, "notify")
 	}
 }
 
@@ -478,16 +807,46 @@ func handleNotifyPost(store *webauth.Store, repl *authSync, ref *configRef, stat
 			case "remove":
 				s.RemoveDestination(r.FormValue("id"))
 				notice = "Destination removed."
+			case "save_name":
+				s.ClusterName = strings.TrimSpace(r.FormValue("cluster_name"))
+				notice = "Cluster name saved."
 			case "save_summary":
 				s.Summary.Enabled = r.FormValue("enabled") == "on"
-				s.Summary.Interval = r.FormValue("interval")
-				h, err := strconv.Atoi(r.FormValue("hour"))
+				s.Summary.Interval = notify.DefaultInterval
+				h, m, err := summaryTime(r)
 				if err != nil {
-					return errors.New("invalid hour")
+					return err
 				}
-				s.Summary.Hour = h
+				s.Summary.Hour, s.Summary.Minute = h, m
 				s.Summary.Targets = r.Form["target"]
 				notice = "Summary settings saved."
+			case "add_schedule":
+				sc := notify.Schedule{
+					ID:      newDestinationID(),
+					Name:    strings.TrimSpace(r.FormValue("name")),
+					Start:   r.FormValue("start"),
+					End:     r.FormValue("end"),
+					Targets: r.Form["target"],
+				}
+				for _, v := range r.Form["day"] {
+					d, err := strconv.Atoi(v)
+					if err != nil {
+						return errors.New("invalid weekday")
+					}
+					sc.Days = append(sc.Days, d)
+				}
+				sort.Ints(sc.Days)
+				s.Schedules = append(s.Schedules, sc)
+				notice = "Schedule added."
+			case "remove_schedule":
+				kept := s.Schedules[:0:0]
+				for _, sc := range s.Schedules {
+					if sc.ID != r.FormValue("id") {
+						kept = append(kept, sc)
+					}
+				}
+				s.Schedules = kept
+				notice = "Schedule removed."
 			case "save_matrix":
 				s.Matrix = map[string][]string{}
 				for _, i := range notify.Impacts {
@@ -501,7 +860,17 @@ func handleNotifyPost(store *webauth.Store, repl *authSync, ref *configRef, stat
 			case "test":
 				for _, d := range s.Destinations {
 					if d.ID == r.FormValue("id") {
-						if err := sendNotification(store, d, "dnshived test notification", "This is a test from the dnshived web UI, sent by "+user.Name+"."); err != nil {
+						cfg := ref.Load()
+						cluster := s.ClusterLabel(clusterOf(fetchAllStatus(cfg, nodesIncludingSelf(cfg))))
+						base, _ := resetBaseURL(store, cfg)
+						msg, ok := sampleMessage(r.FormValue("kind"), cluster, base, user.Name, time.Now(), time.Local)
+						if !ok {
+							return errors.New("unknown test kind")
+						}
+						subject := msg.Subject()
+						err := sendNotification(store, d, msg)
+						recordSend(ref.Load(), "test", d, subject, "", err)
+						if err != nil {
 							return fmt.Errorf("test to %s failed: %w", d.Name, err)
 						}
 						notice = "Test sent to " + d.Name + "."
@@ -522,6 +891,7 @@ func handleNotifyPost(store *webauth.Store, repl *authSync, ref *configRef, stat
 			})
 		}()
 		data := notifyPage(store, time.Local, loadNotifyState(statePath()).LastSummary)
+		data.Log = fetchNotifyLog(nodesIncludingSelf(ref.Load()), 100)
 		if err != nil {
 			data.Error = err.Error()
 			w.WriteHeader(http.StatusBadRequest)

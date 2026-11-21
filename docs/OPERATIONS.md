@@ -135,6 +135,18 @@ core-2 teal, core-3 brown. The footer line shows the cluster state, per-core upt
   Users, password-reset links and mail settings are replicated between
   the cores' web UIs and apply without a commit.
 
+## Notifications
+
+The **Notify** page of the web UI sends mail or webhook messages about the cluster. Setup order: configure the mail server (Security, Mail & reset), add a destination (an email address, or a webhook such as Teams, Slack or Mattermost), then choose what goes where.
+
+- **Message shape.** Every message has the subject `[cluster name] Class: title`, with the class Notify, Summary, Warning or Error. The body opens with one or two lines that say it all and a link to the web UI (the Public URL under Security, Mail & reset, otherwise the management VIP), then a separator, then the technical details. Mail is sent as HTML with a plain-text version; webhooks get the same text as `{"text": ...}`.
+- **Alerts by impact.** Events are sorted into five impact classes: cluster at risk, node lost, service degraded, warning, info. A tick in the matrix sends the events of one class to one destination as a single message with a count per kind of event. The first three classes are sent as Error, warning as Warning, info as Notify.
+- **Summary report.** One report a day at the chosen time (the web server's local time, in steps of 15 minutes), to the chosen destinations. It carries no technical details: cores up, uptime of the shortest running core, stable since, the active DHCP lease total and its change since the last report, event counts per class, whether routine things (automatic backups) happened as often as expected, and a newer release when the update check is on.
+- **Quiet schedules.** A schedule names days, a time window (past midnight is allowed) and the destinations it covers. Alerts for a covered destination inside the window are dropped, not queued; the summary and the test message are not affected.
+- **Message log.** The last part of the page lists every message sent or held back, with the reason (test, alert and its class, recover, summary), the destination name, the result and the subject, ten rows at a time. Addresses and webhook URLs are never logged.
+- **Who sends.** Every web UI instance runs the notifier, but only the first reachable core in the cluster's fixed order sends, so a message goes out once.
+- **Cluster name.** The name in the subject is set in the Cluster name field on the Notify page; when empty, the cluster id is used.
+
 ## Access list
 
 Cluster settings, Access: one list of who this cluster serves, for DNS, DHCP

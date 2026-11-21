@@ -695,10 +695,12 @@ func main() {
 				loglevel.Infof("[AGENT:BACKUP] prune: %v", err)
 			}
 			loglevel.Infof("[AGENT:BACKUP] wrote %s", info.Name)
-			events.Add("INFO", "AGENT:BACKUP", "automated backup written: "+info.Name)
+			var sp backupSpread
 			if cfg.BackupReplicateToPeers {
-				replicateBackupToPeers(cfg, dataDir(cfg), info.Name)
+				sp = replicateBackupToPeers(cfg, dataDir(cfg), info.Name)
 			}
+			lvl, msg := backupEvent("automated", info, cfg.BackupReplicateToPeers, sp)
+			events.Add(lvl, "AGENT:BACKUP", msg)
 		}
 	}()
 
@@ -1357,10 +1359,12 @@ func main() {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create backup: " + err.Error()})
 			return
 		}
-		events.Add("INFO", "AGENT:BACKUP", "manual backup written: "+info.Name)
+		var sp backupSpread
 		if cfg.BackupReplicateToPeers {
-			replicateBackupToPeers(cfg, dataDir(cfg), info.Name)
+			sp = replicateBackupToPeers(cfg, dataDir(cfg), info.Name)
 		}
+		lvl, msg := backupEvent("manual", info, cfg.BackupReplicateToPeers, sp)
+		events.Add(lvl, "AGENT:BACKUP", msg)
 		writeJSON(w, http.StatusOK, info)
 	}))
 
@@ -1943,21 +1947,24 @@ func backupDue(lastRun time.Time, interval time.Duration, now time.Time) bool {
 // replicateBackupToPeers reads name's raw (still-encrypted) bytes back off
 // local disk and PUTs them to every configured peer's own PUT
 // /api/v1/backups/{name}.
-func replicateBackupToPeers(cfg *config.Cluster, dataDirPath, name string) {
+func replicateBackupToPeers(cfg *config.Cluster, dataDirPath, name string) backupSpread {
+	spread := backupSpread{Total: len(cfg.Peers) + 1, Stored: 1}
 	if len(cfg.Peers) == 0 {
-		return
+		return spread
 	}
 	data, err := backup.Read(dataDirPath, name)
 	if err != nil {
 		loglevel.Infof("[AGENT:BACKUP] replicate %s: read local copy: %v", name, err)
-		return
+		spread.Missing = cfg.Peers
+		return spread
 	}
 	comment := backup.ReadComment(dataDirPath, name)
 	automated := backup.IsAutomated(dataDirPath, name)
 	token := adminAPIToken(cfg)
 	if token == "" {
 		loglevel.Warnf("[AGENT:BACKUP] backup_replicate_to_peers is on but no admin-role api_token is configured — cannot authenticate to peers")
-		return
+		spread.Missing = cfg.Peers
+		return spread
 	}
 	scheme := "http"
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -1971,6 +1978,7 @@ func replicateBackupToPeers(cfg *config.Cluster, dataDirPath, name string) {
 		req, err := http.NewRequest(http.MethodPut, url, bytes.NewReader(data))
 		if err != nil {
 			loglevel.Infof("[AGENT:BACKUP] replicate %s to %s: %v", name, peer, err)
+			spread.Missing = append(spread.Missing, peer)
 			continue
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -1984,18 +1992,81 @@ func replicateBackupToPeers(cfg *config.Cluster, dataDirPath, name string) {
 		resp, err := client.Do(req)
 		if err != nil {
 			loglevel.Infof("[AGENT:BACKUP] replicate %s to %s: %v", name, peer, err)
+			spread.Missing = append(spread.Missing, peer)
 			continue
 		}
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			loglevel.Infof("[AGENT:BACKUP] replicate %s to %s: status %d", name, peer, resp.StatusCode)
+			spread.Missing = append(spread.Missing, peer)
 			continue
 		}
+		if !peerHasBackup(client, scheme, peer, token, name, int64(len(data))) {
+			loglevel.Infof("[AGENT:BACKUP] replicate %s to %s: not listed with the same size afterwards", name, peer)
+			spread.Missing = append(spread.Missing, peer)
+			continue
+		}
+		spread.Stored++
 		replicated++
 	}
 	if replicated > 0 {
 		loglevel.Infof("[AGENT:BACKUP] replicated %s to %d/%d peer(s)", name, replicated, len(cfg.Peers))
 	}
+	return spread
+}
+
+type backupSpread struct {
+	Stored, Total int
+	Missing       []string
+}
+
+func peerHasBackup(client *http.Client, scheme, peer, token, name string, size int64) bool {
+	req, err := http.NewRequest(http.MethodGet, scheme+"://"+peer+"/api/v1/backups", nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var list []backup.Info
+	if json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&list) != nil {
+		return false
+	}
+	for _, i := range list {
+		if i.Name == name {
+			return i.Size == size
+		}
+	}
+	return false
+}
+
+// backupEvent returns the event level and text for a written backup: its
+// name, size and on how many cores it was found afterwards.
+func backupEvent(kind string, info backup.Info, replicate bool, sp backupSpread) (string, string) {
+	msg := fmt.Sprintf("%s backup written: %s, %s", kind, info.Name, humanBackupSize(info.Size))
+	switch {
+	case !replicate:
+		return "INFO", msg + ", this core only"
+	case len(sp.Missing) == 0:
+		return "INFO", fmt.Sprintf("%s, on %d of %d cores, checked", msg, sp.Stored, sp.Total)
+	}
+	return "WARNING", fmt.Sprintf("%s, only %d of %d cores, missing on: %s", msg, sp.Stored, sp.Total, strings.Join(sp.Missing, ", "))
+}
+
+func humanBackupSize(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	}
+	return fmt.Sprintf("%d bytes", n)
 }
 
 // adminAPIToken returns the first admin-role api_token configured, or "".

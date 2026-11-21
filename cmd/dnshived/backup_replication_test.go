@@ -5,11 +5,13 @@ package main
 
 import (
 	"encoding/base64"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,6 +74,10 @@ func TestReplicateBackupToPeers_PutsRawBytesWithAuthToEveryPeer(t *testing.T) {
 	var gotMethod, gotPath, gotAuth string
 	var gotBody []byte
 	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
 		gotMethod = r.Method
 		gotPath = r.URL.Path
 		gotAuth = r.Header.Get("Authorization")
@@ -113,6 +119,10 @@ func TestReplicateBackupToPeers_PutsRawBytesWithAuthToEveryPeer(t *testing.T) {
 func TestReplicateBackupToPeers_CarriesCommentHeader(t *testing.T) {
 	var gotHeader string
 	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
 		gotHeader = r.Header.Get("X-Backup-Comment")
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -146,6 +156,10 @@ func TestReplicateBackupToPeers_CarriesCommentHeader(t *testing.T) {
 func TestReplicateBackupToPeers_NoCommentSendsNoHeader(t *testing.T) {
 	headerPresent := false
 	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
 		_, headerPresent = r.Header["X-Backup-Comment"]
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -170,6 +184,10 @@ func TestReplicateBackupToPeers_NoCommentSendsNoHeader(t *testing.T) {
 func TestReplicateBackupToPeers_CarriesAutomatedHeader(t *testing.T) {
 	var gotHeader string
 	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
 		gotHeader = r.Header.Get("X-Backup-Automated")
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -199,6 +217,10 @@ func TestReplicateBackupToPeers_CarriesAutomatedHeader(t *testing.T) {
 func TestReplicateBackupToPeers_NotAutomatedSendsNoHeader(t *testing.T) {
 	headerPresent := false
 	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
 		_, headerPresent = r.Header["X-Backup-Automated"]
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -225,6 +247,10 @@ func TestReplicateBackupToPeers_NotAutomatedSendsNoHeader(t *testing.T) {
 func TestReplicateBackupToPeers_NoAdminTokenLogsAndSkips(t *testing.T) {
 	called := false
 	peer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
 		called = true
 	}))
 	defer peer.Close()
@@ -350,5 +376,47 @@ func TestBackupDue_JustAfterSlotBoundaryIsDue(t *testing.T) {
 	now := time.Date(2026, 9, 13, 14, 0, 1, 0, time.UTC) // 1s after the 14:00 boundary
 	if !backupDue(lastRun, 2*time.Hour, now) {
 		t.Error("backupDue() 1s after the next slot boundary = false, want true")
+	}
+}
+
+func TestReplicateBackupToPeers_ReportsWhereTheCopyWasFound(t *testing.T) {
+	const name = "backup-20260101-000000.enc"
+	raw := []byte("encrypted-backup-content")
+	serve := func(listed int64) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				_, _ = fmt.Fprintf(w, `[{"Name":%q,"Size":%d}]`, name, listed)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+	}
+	good, short := serve(int64(len(raw))), serve(3)
+	defer good.Close()
+	defer short.Close()
+	host := func(s *httptest.Server) string { u, _ := url.Parse(s.URL); return u.Host }
+
+	dir := t.TempDir()
+	if _, err := backup.Import(dir, name, raw, "", false); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Cluster{
+		Peers:     []string{host(good), host(short)},
+		APITokens: []config.APIToken{{Name: "a", Token: "t", Role: "admin"}},
+	}
+	sp := replicateBackupToPeers(cfg, dir, name)
+	if sp.Stored != 2 || sp.Total != 3 || len(sp.Missing) != 1 || sp.Missing[0] != host(short) {
+		t.Fatalf("spread = %+v", sp)
+	}
+	lvl, msg := backupEvent("automated", backup.Info{Name: name, Size: 2048}, true, sp)
+	if lvl != "WARNING" || !strings.Contains(msg, name) || !strings.Contains(msg, "2.0 KB") || !strings.Contains(msg, "2 of 3") {
+		t.Errorf("%s %q", lvl, msg)
+	}
+	lvl, msg = backupEvent("automated", backup.Info{Name: name, Size: 2048}, true, backupSpread{Stored: 3, Total: 3})
+	if lvl != "INFO" || !strings.Contains(msg, "3 of 3 cores, checked") {
+		t.Errorf("%s %q", lvl, msg)
+	}
+	if _, msg = backupEvent("manual", backup.Info{Name: name, Size: 5}, false, backupSpread{}); !strings.Contains(msg, "this core only") {
+		t.Errorf("%q", msg)
 	}
 }

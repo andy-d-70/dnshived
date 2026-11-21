@@ -250,7 +250,7 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // auditAll records one event on every core, in the background.
 func auditAll(cfg *WebConfig, actor, action, summary string) {
-	nodes := append([]NodeConfig(nil), cfg.Nodes...)
+	nodes := nodesIncludingSelf(cfg)
 	go func() {
 		for _, n := range nodes {
 			if err := pushAudit(n, actor, action, summary); err != nil {

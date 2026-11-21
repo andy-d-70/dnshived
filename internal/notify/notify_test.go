@@ -31,7 +31,6 @@ func TestSettings_Validate(t *testing.T) {
 		{"webhook login", func(s *Settings) { s.Destinations[1].Address = "https://u:p@example.org/x" }, "login"},
 		{"duplicate id", func(s *Settings) { s.Destinations[1].ID = "a" }, "duplicate"},
 		{"unknown kind", func(s *Settings) { s.Destinations[1].Kind = "sms" }, "unknown kind"},
-		{"unknown interval", func(s *Settings) { s.Summary.Interval = "yearly" }, "interval"},
 		{"hour range", func(s *Settings) { s.Summary.Hour = 24 }, "hour"},
 		{"summary target", func(s *Settings) { s.Summary.Targets = []string{"zz"} }, "unknown destination"},
 		{"matrix target", func(s *Settings) { s.Matrix = map[string][]string{"1": {"zz"}} }, "unknown destination"},
@@ -106,13 +105,16 @@ func TestSummary_NextDueAndDue(t *testing.T) {
 	if got := sum.NextDue(at("2026-11-20 03:00"), loc); !got.Equal(at("2026-11-20 07:00")) {
 		t.Errorf("before the hour: %v", got)
 	}
-	sum.Interval = "weekly"
-	if got := sum.NextDue(at("2026-11-20 07:00"), loc); !got.Equal(at("2026-11-27 07:00")) {
-		t.Errorf("weekly: %v", got)
+	sum.Minute = 45
+	if got := sum.NextDue(at("2026-11-20 07:50"), loc); !got.Equal(at("2026-11-21 07:45")) {
+		t.Errorf("daily on the minute: %v", got)
 	}
-	sum.Interval = "6h"
-	if got := sum.NextDue(at("2026-11-20 07:10"), loc); !got.Equal(at("2026-11-20 13:10")) {
-		t.Errorf("6h follows the last: %v", got)
+	sum.Minute = 0
+	for _, old := range []string{"hourly", "6h", "weekly", ""} {
+		sum.Interval = old
+		if got := sum.NextDue(at("2026-11-20 07:00"), loc); !got.Equal(at("2026-11-21 07:00")) {
+			t.Errorf("stored interval %q reads as daily: %v", old, got)
+		}
 	}
 
 	sum.Interval = "daily"
@@ -180,27 +182,25 @@ func TestBuildSummary_GroupsEqualEvents(t *testing.T) {
 		ev = append(ev, Event{Time: now.Add(-time.Duration(i) * time.Minute), Level: "ERROR", Prefix: "AGENT:ERROR", Message: "render failed\nfor scope " + string(rune('a'+i%3))})
 	}
 	ev = append(ev, Event{Time: now, Level: "INFO", Prefix: "AGENT:START", Message: "started"})
-	subject, body := BuildSummary(Facts{
+	m := BuildSummary(Facts{
 		Cluster: "c1", From: now.Add(-24 * time.Hour), To: now,
 		Nodes:  []NodeLine{{"core-1", true, "stable"}, {"core-2", false, ""}, {"core-3", true, "stable"}},
 		Events: ev,
 	}, loc)
-	if !strings.Contains(subject, "node lost") || !strings.Contains(subject, "2 of 3") {
-		t.Errorf("subject %q", subject)
+	body := m.Text(time.UTC)
+	if m.Class != ClassSummary || !strings.Contains(m.Subject(), "node lost") || !strings.Contains(body, "2 of 3") {
+		t.Errorf("subject %q\n%s", m.Subject(), body)
 	}
-	if strings.Count(body, "AGENT:ERROR") != 1 || !strings.Contains(body, " 40x ") {
-		t.Errorf("forty equal events must be one line:\n%s", body)
-	}
-	if strings.Contains(body, "\nfor scope") || !strings.Contains(body, "NOT REACHABLE") {
-		t.Errorf("a newline in a message must not break the report:\n%s", body)
+	if len(m.Details) != 0 || !strings.Contains(body, "40 service degraded") {
+		t.Errorf("a summary has facts and counts, no technical details, and forty equal events are one count:\n%s", body)
 	}
 }
 
 func TestBuildSummary_AllClear(t *testing.T) {
 	now := time.Now()
-	subject, _ := BuildSummary(Facts{Cluster: "c", From: now, To: now, Nodes: []NodeLine{{"core-1", true, "stable"}}}, time.UTC)
-	if !strings.Contains(subject, "all clear") {
-		t.Errorf("subject %q", subject)
+	m := BuildSummary(Facts{Cluster: "c", From: now, To: now, LeasesTotal: -1, Nodes: []NodeLine{{"core-1", true, "stable"}}}, time.UTC)
+	if !strings.Contains(m.Subject(), "all clear") || !strings.HasPrefix(m.Subject(), "[c] Summary: ") {
+		t.Errorf("subject %q", m.Subject())
 	}
 }
 
@@ -209,8 +209,137 @@ func TestAlert_OneMessageForManyEvents(t *testing.T) {
 	for i := 0; i < 25; i++ {
 		ev = append(ev, Event{Time: time.Unix(int64(1000+i), 0), Level: "ERROR", Prefix: "AGENT:UNSERVED", Message: "scope x"})
 	}
-	subject, body := Alert(ServiceDegraded, "c1", ev, time.UTC)
-	if !strings.Contains(subject, "service degraded") || strings.Count(body, "AGENT:UNSERVED") != 1 || !strings.Contains(body, " 25x ") {
+	am := Alert(ServiceDegraded, "c1", ev, time.UTC, "https://x")
+	subject, body := am.Subject(), am.Text(time.UTC)
+	if !strings.HasPrefix(subject, "[c1] Error: ") || !strings.Contains(body, "https://x") || strings.Count(body, "AGENT:UNSERVED") != 1 || !strings.Contains(body, "25x A scope is not being served") {
 		t.Errorf("%q\n%s", subject, body)
+	}
+}
+
+func TestSchedule_ActiveAndQuiet(t *testing.T) {
+	loc := time.FixedZone("x", 3600)
+	at := func(d string) time.Time { v, _ := time.ParseInLocation("2006-01-02 15:04", d, loc); return v }
+	night := Schedule{ID: "n", Name: "night", Start: "22:00", End: "06:00", Days: []int{5}}
+	cases := []struct {
+		when string
+		want bool
+	}{
+		{"2026-11-20 21:59", false},
+		{"2026-11-20 22:00", true},
+		{"2026-11-21 05:59", true},
+		{"2026-11-21 06:00", false},
+		{"2026-11-21 22:30", false},
+		{"2026-11-19 23:00", false},
+	}
+	for _, c := range cases {
+		if got := night.Active(at(c.when)); got != c.want {
+			t.Errorf("night window at %s = %v, want %v", c.when, got, c.want)
+		}
+	}
+	day := Schedule{ID: "d", Name: "lunch", Start: "12:00", End: "13:00"}
+	if !day.Active(at("2026-11-22 12:30")) || day.Active(at("2026-11-22 13:00")) {
+		t.Error("same-day window with every day")
+	}
+	if (Schedule{Start: "10:00", End: "10:00"}).Active(at("2026-11-20 10:00")) {
+		t.Error("equal from and to is never active")
+	}
+
+	s := Default()
+	s.Destinations = []Destination{{ID: "a", Name: "A", Kind: KindEmail, Address: "a@example.org"}, {ID: "b", Name: "B", Kind: KindEmail, Address: "b@example.org"}}
+	s.Schedules = []Schedule{{ID: "s1", Name: "one", Start: "22:00", End: "06:00", Targets: []string{"a"}}}
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Quiet("a", at("2026-11-20 23:00")) || s.Quiet("b", at("2026-11-20 23:00")) {
+		t.Error("a schedule covers only its targets")
+	}
+	s.Schedules[0].Targets = nil
+	if !s.Quiet("b", at("2026-11-20 23:00")) {
+		t.Error("no targets means every destination")
+	}
+	s.Schedules[0].Targets = []string{"a"}
+	s.RemoveDestination("a")
+	if len(s.Schedules) != 0 {
+		t.Errorf("a schedule of a removed destination must go, not widen to all: %+v", s.Schedules)
+	}
+}
+
+func TestSettings_ValidateScheduleAndMinute(t *testing.T) {
+	base := Default()
+	bad := []func(*Settings){
+		func(s *Settings) { s.Summary.Minute = 20 },
+		func(s *Settings) { s.Schedules = []Schedule{{ID: "x", Name: "n", Start: "25:00", End: "06:00"}} },
+		func(s *Settings) { s.Schedules = []Schedule{{ID: "x", Name: "n", Start: "06:00", End: "06:00"}} },
+		func(s *Settings) {
+			s.Schedules = []Schedule{{ID: "x", Name: "n", Start: "01:00", End: "06:00", Days: []int{7}}}
+		},
+		func(s *Settings) {
+			s.Schedules = []Schedule{{ID: "x", Name: "n", Start: "01:00", End: "06:00", Targets: []string{"ghost"}}}
+		},
+	}
+	for i, f := range bad {
+		s := base.Clone()
+		f(&s)
+		if s.Validate() == nil {
+			t.Errorf("case %d accepted", i)
+		}
+	}
+}
+
+func TestAlert_SaysItInPlainWords(t *testing.T) {
+	ev := []Event{{Time: time.Unix(1000, 0), Level: "WARNING", Prefix: "AGENT:DRIFT", Node: "core-2",
+		Message: "scope dante-099: gate_vrrp_coherence DHCP gate is open but VRRP state is BACKUP, not MASTER"}}
+	body := Alert(Warning, "c1", ev, time.UTC, "").Text(time.UTC)
+	for _, want := range []string{"What runs differs from what is configured", "does not hold the scope's address (VRRP state BACKUP, expected MASTER)", "on core-2", "Event      AGENT:DRIFT"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q in\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "gate_vrrp_coherence") {
+		t.Errorf("internal check name leaked:\n%s", body)
+	}
+}
+
+func TestMessage_SubjectIsOneLine(t *testing.T) {
+	m := Message{Class: ClassError, Cluster: "c", Title: "a\r\nBcc: x@example.org"}
+	if got := m.Subject(); strings.ContainsAny(got, "\r\n") {
+		t.Errorf("%q", got)
+	}
+}
+
+func TestRoutine_OKAndSummaryHeadline(t *testing.T) {
+	for _, c := range []struct {
+		r  Routine
+		ok bool
+	}{{Routine{Got: 24, Expected: 24}, true}, {Routine{Got: 22, Expected: 24}, true}, {Routine{Got: 19, Expected: 24}, false},
+		{Routine{Got: 0, Expected: 1}, false}, {Routine{Got: 24, Expected: 24, Flagged: 1}, false}} {
+		if c.r.OK() != c.ok {
+			t.Errorf("%+v", c.r)
+		}
+	}
+	now := time.Unix(100000, 0)
+	m := BuildSummary(Facts{Cluster: "c", From: now.Add(-24 * time.Hour), To: now, LeasesTotal: -1,
+		Nodes:    []NodeLine{{"core-1", true, "STABLE"}},
+		Routines: []Routine{{Name: "Backups", Verb: "written", Got: 19, Expected: 24}}}, time.UTC)
+	if !strings.Contains(m.Headline, "Warning: backups 19 of 24 written") || len(m.Details) != 0 {
+		t.Errorf("%q", m.Headline)
+	}
+	m = BuildSummary(Facts{Cluster: "c", From: now.Add(-24 * time.Hour), To: now, LeasesTotal: -1,
+		Nodes:    []NodeLine{{"core-1", true, "STABLE"}},
+		Routines: []Routine{{Name: "Backups", Verb: "written", Got: 24, Expected: 24}}}, time.UTC)
+	if !strings.Contains(m.Headline, "All clear") || !strings.Contains(m.Text(time.UTC), "24 of 24 written, all as usual") {
+		t.Errorf("%q\n%s", m.Headline, m.Text(time.UTC))
+	}
+}
+
+func TestAlert_BackupIsOneStraightLine(t *testing.T) {
+	ev := []Event{{Time: time.Unix(1000, 0), Level: "INFO", Prefix: "AGENT:BACKUP", Node: "core-3",
+		Message: "automated backup written: backup-1.enc, 48.2 KB, on 3 of 3 cores, checked"}}
+	m := Alert(Info, "c1", ev, time.UTC, "")
+	if m.Headline != "Notify: Backup written" || m.Subject() != "[c1] Notify: Backup written" {
+		t.Errorf("%q %q", m.Headline, m.Subject())
+	}
+	if len(m.Details) != 1 || m.Details[0].Title != "Backup written: backup-1.enc, 48.2 KB, on 3 of 3 cores, checked" || len(m.Details[0].Rows) != 0 {
+		t.Errorf("%+v", m.Details)
 	}
 }

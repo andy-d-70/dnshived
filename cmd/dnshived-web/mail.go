@@ -122,6 +122,12 @@ func validAddress(a string) bool {
 }
 
 func sendMail(s webauth.SMTPSettings, to, subject, body string) error {
+	return sendMailHTML(s, to, subject, body, "")
+}
+
+// sendMailHTML sends body as plain text and, when html is not empty, as a
+// styled alternative with the logo attached inline.
+func sendMailHTML(s webauth.SMTPSettings, to, subject, body, html string) error {
 	if !validAddress(s.From) {
 		return fmt.Errorf("invalid sender address %q", s.From)
 	}
@@ -149,15 +155,25 @@ func sendMail(s webauth.SMTPSettings, to, subject, body string) error {
 	if at := strings.LastIndex(s.From, "@"); at >= 0 {
 		host = s.From[at+1:]
 	}
-	msg := "From: dnshived <" + s.From + ">\r\n" +
+	head := "From: dnshived <" + s.From + ">\r\n" +
 		"To: <" + to + ">\r\n" +
 		"Subject: " + subject + "\r\n" +
 		"Date: " + time.Now().Format(time.RFC1123Z) + "\r\n" +
 		"Message-ID: <" + hex.EncodeToString(id) + "@" + host + ">\r\n" +
-		"MIME-Version: 1.0\r\n" +
-		"Content-Type: text/plain; charset=utf-8\r\n" +
-		"Content-Transfer-Encoding: 8bit\r\n\r\n" +
-		strings.ReplaceAll(body, "\n", "\r\n") + "\r\n"
+		"MIME-Version: 1.0\r\n"
+	text := strings.ReplaceAll(body, "\n", "\r\n") + "\r\n"
+	msg := head + "Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + text
+	if html != "" {
+		b1, b2 := hex.EncodeToString(id[:6]), hex.EncodeToString(id[6:])
+		msg = head + "Content-Type: multipart/alternative; boundary=\"" + b1 + "\"\r\n\r\n" +
+			"--" + b1 + "\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" + text +
+			"--" + b1 + "\r\nContent-Type: multipart/related; boundary=\"" + b2 + "\"\r\n\r\n" +
+			"--" + b2 + "\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n" +
+			strings.ReplaceAll(html, "\n", "\r\n") + "\r\n" +
+			"--" + b2 + "\r\nContent-Type: image/png\r\nContent-Transfer-Encoding: base64\r\nContent-ID: <" + mailLogoCID + ">\r\n" +
+			"Content-Disposition: inline; filename=\"dnshived.png\"\r\n\r\n" + mailLogoBase64() + "\r\n" +
+			"--" + b2 + "--\r\n--" + b1 + "--\r\n"
+	}
 	if _, err := w.Write([]byte(msg)); err != nil {
 		return fmt.Errorf("write message: %w", err)
 	}
