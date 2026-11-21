@@ -38,7 +38,8 @@ of failure.
 Web UI on a three-node lab cluster (dark theme; IP addresses blurred).
 
 **Overview**: cluster state, served scopes per node, probe coverage, the worst
-cluster paths and the health checks at a glance, with the newest events below.
+cluster paths and the health checks at a glance, with the newest events below
+and a footer on every page.
 
 ![Overview](artwork/screenshots/overview.png)
 
@@ -57,6 +58,16 @@ probe hosts and TLS, history and settings.
 settings, one tab each.
 
 ![Cluster settings](artwork/screenshots/cluster-settings.png)
+
+**DNS**: the domains editor. A domain list, and for the chosen domain a records
+list with search, bulk edit, import, export and record sets.
+
+![DNS](artwork/screenshots/dns.png)
+
+**Notify**: a daily summary report and alerts routed by impact, by email or
+webhook, with quiet schedules and a log of every message sent.
+
+![Notify](artwork/screenshots/notify.png)
 
 ## Components
 

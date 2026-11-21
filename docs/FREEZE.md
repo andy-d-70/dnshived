@@ -181,6 +181,14 @@ without the manage-users role are redirected to `/security`). `GET /api/footer` 
 `web.json` gains the optional key `update_check`; the scope list and the probe
 results accept `per=10|25|50|100|all` and ignore any other value.
 
+Notifications in 0.9.8.10 (new, same rules): the web UI page `/notify`. Its settings
+(destinations, routing by impact, quiet schedules, cluster name, daily summary time) are
+the optional key `notify` of the replicated `webui-users.json`; an older web UI ignores
+it. The sending web UI keeps its counters in `notify-state.json` beside that file; losing
+it only resets the summary's counters. Every message has the subject
+`[cluster] Class: title` with the class Notify, Summary, Warning or Error, a headline
+with a link, and technical details; email adds an HTML part.
+
 Access list in 0.9.8.10 (new, same rules): `cluster.json` gains the optional
 key `access` (mode `report` or `enforce`, the private-networks entry,
 `entries` with `net`, `note`, `off` and `dns`/`dhcp`/`web` set to `allow` or

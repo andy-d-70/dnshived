@@ -21,6 +21,8 @@ gotchas).
 - RHEL-family: `golang` ≥1.24, `rpm-build`
 - Ubuntu 24.04's `golang-go` is only 1.22: install Go 1.24+ from
   [go.dev/dl](https://go.dev/dl/) there.
+- Go 1.24 builds it, but Go 1.24 and older no longer get security fixes; use 1.26.11,
+  1.25.13 or newer (see [SECURITY.md](SECURITY.md)).
 
 **To run** (installed automatically as package dependencies):
 - `systemd`, `iproute2` (`iproute` on RHEL-family), `adduser`
