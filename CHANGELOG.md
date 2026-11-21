@@ -1,6 +1,6 @@
 # dnshived Changelog
 
-## Unreleased
+## 0.9.8.10 — released
 
 **Performance optimizations**
 
