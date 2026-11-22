@@ -22,7 +22,6 @@ type Info struct {
 	At         time.Time
 }
 
-// ConsumerOptions configure a Consumer.
 type ConsumerOptions struct {
 	// Dial opens a connection to the publisher.
 	Dial func(ctx context.Context) (net.Conn, error)
@@ -37,7 +36,6 @@ type ConsumerOptions struct {
 	Log                    func(format string, args ...any)
 }
 
-// ConsumerStatus is a snapshot of the consumer for status pages.
 type ConsumerStatus struct {
 	Connected  bool
 	Epoch, Seq uint64

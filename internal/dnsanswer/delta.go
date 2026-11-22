@@ -50,14 +50,12 @@ func NewLive(base *Table, zones []Zone, limit int) *Live {
 // Table returns the current view; it answers like any table and stays valid after later changes.
 func (v *Live) Table() *Table { return v.cur.Load() }
 
-// Len is the number of names changed since the base.
 func (v *Live) Len() int {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return len(v.set)
 }
 
-// Full reports that the changes outgrew the limit and a new base should be built.
 func (v *Live) Full() bool { return v.limit > 0 && v.Len() > v.limit }
 
 // Apply makes the changes visible at once and returns the sequence number they carry; serial is the zone serial the
