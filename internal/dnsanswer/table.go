@@ -9,6 +9,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -16,6 +18,8 @@ import (
 const (
 	flagZone uint8 = 1
 	flagFwd  uint8 = 2
+	flagDead uint8 = 4
+	flagENT  uint8 = 8
 )
 
 type RR struct {
@@ -56,6 +60,7 @@ type Table struct {
 	serial  uint32
 	negTTL  uint32
 	digest  [32]byte
+	over    *Table
 }
 
 func (t *Table) Digest() [32]byte { return t.digest }
@@ -63,11 +68,30 @@ func (t *Table) Names() int       { return len(t.groups) }
 func (t *Table) Records() int     { return len(t.rrs) }
 
 type Builder struct {
-	rrs   []RR
-	zones map[string]bool
+	rrs     []RR
+	zones   map[string]bool
+	dead    map[string]bool
+	overlay bool
 }
 
 func NewBuilder() *Builder { return &Builder{zones: map[string]bool{}} }
+
+// NewOverlayBuilder builds the small table that sits in front of a base table (see WithOverlay): the zones only tell it
+// which names are empty non-terminals, they are not part of the result; an owner added with AddDead hides the base's
+// records for that name.
+func NewOverlayBuilder() *Builder { return &Builder{zones: map[string]bool{}, overlay: true} }
+
+func (b *Builder) AddDead(owner string) error {
+	c, err := CanonicalName(owner)
+	if err != nil || c != owner {
+		return fmt.Errorf("%w: owner %q is not canonical", ErrName, owner)
+	}
+	if b.dead == nil {
+		b.dead = map[string]bool{}
+	}
+	b.dead[c] = true
+	return nil
+}
 
 func (b *Builder) AddZone(name string, forward bool) error {
 	c, err := CanonicalName(name)
@@ -149,12 +173,17 @@ func (b *Builder) Build(serial, negTTL uint32) (*Table, error) {
 		}
 		return p
 	}
-	for z, fwd := range b.zones {
-		p := get(z)
-		p.flags |= flagZone
-		if fwd {
-			p.flags |= flagFwd
+	if !b.overlay {
+		for z, fwd := range b.zones {
+			p := get(z)
+			p.flags |= flagZone
+			if fwd {
+				p.flags |= flagFwd
+			}
 		}
+	}
+	for n := range b.dead {
+		get(n).flags |= flagDead
 	}
 	for _, rr := range b.rrs {
 		p := get(rr.Owner)
@@ -173,29 +202,37 @@ func (b *Builder) Build(serial, negTTL uint32) (*Table, error) {
 		}
 	}
 	names := make([]string, 0, len(owners))
-	for n := range owners {
+	for n, p := range owners {
+		if b.overlay && p.flags == 0 && len(p.rrs) == 0 {
+			p.flags = flagENT
+		}
 		names = append(names, n)
 	}
 	sort.Strings(names)
 	t := &Table{serial: serial, negTTL: negTTL}
-	h := sha256.New()
-	var u [8]byte
-	binary.LittleEndian.PutUint32(u[:], serial)
-	binary.LittleEndian.PutUint32(u[4:], negTTL)
-	h.Write(u[:])
+	var h hash.Hash
+	if !b.overlay {
+		h = sha256.New()
+		var u [8]byte
+		binary.LittleEndian.PutUint32(u[:], serial)
+		binary.LittleEndian.PutUint32(u[4:], negTTL)
+		h.Write(u[:])
+	}
 	for _, n := range names {
 		p := owners[n]
 		wire, err := ToWire(n)
 		if err != nil {
 			return nil, err
 		}
-		sort.Slice(p.rrs, func(i, j int) bool {
-			if p.rrs[i].Type != p.rrs[j].Type {
-				return p.rrs[i].Type < p.rrs[j].Type
-			}
-			return bytes.Compare(p.rrs[i].RData, p.rrs[j].RData) < 0
-		})
-		var uniq []RR
+		if len(p.rrs) > 1 {
+			slices.SortFunc(p.rrs, func(a, b RR) int {
+				if a.Type != b.Type {
+					return int(a.Type) - int(b.Type)
+				}
+				return bytes.Compare(a.RData, b.RData)
+			})
+		}
+		uniq := p.rrs[:0]
 		for _, rr := range p.rrs {
 			if k := len(uniq); k > 0 && uniq[k-1].Type == rr.Type && bytes.Equal(uniq[k-1].RData, rr.RData) {
 				continue
@@ -207,17 +244,21 @@ func (b *Builder) Build(serial, negTTL uint32) (*Table, error) {
 		}
 		g := group{nameOff: uint32(len(t.arena)), firstRR: uint32(len(t.rrs)), nRR: uint16(len(uniq)), nameLen: uint8(len(wire)), flags: p.flags, hash: hashFold(wire)}
 		t.arena = append(t.arena, wire...)
-		h.Write([]byte{byte(len(wire)), p.flags})
-		h.Write(wire)
+		if h != nil {
+			h.Write([]byte{byte(len(wire)), p.flags})
+			h.Write(wire)
+		}
 		for _, rr := range uniq {
 			t.rrs = append(t.rrs, rrEnt{typ: rr.Type, rdLen: uint16(len(rr.RData)), ttl: rr.TTL, rdOff: uint32(len(t.arena))})
 			t.arena = append(t.arena, rr.RData...)
-			var e [8]byte
-			binary.LittleEndian.PutUint16(e[:], rr.Type)
-			binary.LittleEndian.PutUint32(e[2:], rr.TTL)
-			binary.LittleEndian.PutUint16(e[6:], uint16(len(rr.RData)))
-			h.Write(e[:])
-			h.Write(rr.RData)
+			if h != nil {
+				var e [8]byte
+				binary.LittleEndian.PutUint16(e[:], rr.Type)
+				binary.LittleEndian.PutUint32(e[2:], rr.TTL)
+				binary.LittleEndian.PutUint16(e[6:], uint16(len(rr.RData)))
+				h.Write(e[:])
+				h.Write(rr.RData)
+			}
 		}
 		t.groups = append(t.groups, g)
 		if len(t.arena) > 1<<31 || len(t.rrs) > 1<<30 {
@@ -238,13 +279,15 @@ func (b *Builder) Build(serial, negTTL uint32) (*Table, error) {
 			}
 		}
 	}
-	h.Sum(t.digest[:0])
+	if h != nil {
+		h.Sum(t.digest[:0])
+	}
 	return t, nil
 }
 
 func (t *Table) name(g *group) []byte { return t.arena[g.nameOff : g.nameOff+uint32(g.nameLen)] }
 
-func (t *Table) find(w []byte) int {
+func (t *Table) index(w []byte) int {
 	if len(t.buckets) == 0 {
 		return -1
 	}
@@ -259,4 +302,42 @@ func (t *Table) find(w []byte) int {
 			return int(e - 1)
 		}
 	}
+}
+
+// find looks a name up, in the overlay first when this table is a view with one.
+func (t *Table) find(w []byte) gref {
+	if t.over != nil {
+		return t.findOver(w)
+	}
+	if len(t.buckets) == 0 {
+		return gref{}
+	}
+	hv := hashFold(w)
+	for j := hv & t.mask; ; j = (j + 1) & t.mask {
+		e := t.buckets[j]
+		if e == 0 {
+			return gref{}
+		}
+		if g := &t.groups[e-1]; g.hash == hv && eqFold(t.name(g), w) {
+			return gref{t, int32(e - 1)}
+		}
+	}
+}
+
+func (t *Table) findOver(w []byte) gref {
+	if i := t.over.index(w); i >= 0 {
+		switch f := t.over.groups[i].flags; {
+		case f&flagDead != 0:
+			return gref{}
+		case f&flagENT != 0:
+			if j := t.index(w); j >= 0 {
+				return gref{t, int32(j)}
+			}
+		}
+		return gref{t.over, int32(i)}
+	}
+	if j := t.index(w); j >= 0 {
+		return gref{t, int32(j)}
+	}
+	return gref{}
 }

@@ -4,6 +4,7 @@
 package dnsservice
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"dnshived/internal/config"
 	"dnshived/internal/dnsanswer"
 	"dnshived/internal/dnsdata"
+	"dnshived/internal/dnsfeed"
 	"dnshived/internal/dnsstore"
 	"dnshived/internal/dnsstore/vfs"
 )
@@ -35,11 +37,12 @@ const (
 
 // CompileInput is what the cluster configuration contributes to the table and to the write gate.
 type CompileInput struct {
-	Zones      []dnsanswer.Zone
-	Reserved   map[string]string
-	DefaultTTL uint32
-	NegTTL     uint32
-	MaxNames   int
+	Zones         []dnsanswer.Zone
+	Reserved      map[string]string
+	ReservedNames []dnsdata.ReservedName
+	DefaultTTL    uint32
+	NegTTL        uint32
+	MaxNames      int
 }
 
 type Options struct {
@@ -63,11 +66,11 @@ type Options struct {
 	LeaderAddr func(leader string) string
 	// ImportSource lists the configuration's DNS records for the import endpoint.
 	ImportSource func() []config.DNSRecord
-	// OnSettings is called when the replicated settings change (and once at start); OnServing when this core's ability
-	// to serve DNS changes. CheckDNSVIP vets a new DNS VIP against the cluster configuration.
-	OnSettings  func(dnsdata.Settings)
-	OnServing   func(ok bool)
-	CheckDNSVIP func(vip string, vrrpID int) error
+	// OnServing is called when this core's ability to serve DNS changes.
+	OnServing func(ok bool)
+	// Feed, when set, receives every new table as a base and every change of the DHCP names on top of it, so the
+	// process that serves DNS follows without rebuilding the table. The table file is written as before.
+	Feed *dnsfeed.Publisher
 }
 
 type buildState struct {
@@ -80,6 +83,11 @@ type buildState struct {
 	builtAt    time.Time
 	fp         [32]byte
 	err        string
+
+	baseFP   [32]byte
+	authored map[string]struct{}
+	leaseRRs map[string][]dnsanswer.RR
+	deltas   int
 }
 
 type Service struct {
@@ -97,7 +105,6 @@ type Service struct {
 	closeOnce sync.Once
 
 	serving atomic.Int32
-	lastSet atomic.Pointer[dnsdata.Settings]
 }
 
 func New(o Options) (*Service, error) {
@@ -175,6 +182,9 @@ func fingerprint(rev uint64, in CompileInput, leases []dnsdata.LeaseName) [32]by
 	for _, z := range in.Zones {
 		fmt.Fprintf(h, "z:%s:%v|", z.Name, z.Forward)
 	}
+	for _, r := range in.ReservedNames {
+		fmt.Fprintf(h, "r:%s:%s:%s|", r.Name, r.IP, r.Scope)
+	}
 	for _, l := range leases {
 		fmt.Fprintf(h, "l:%s:%s:%s:%d|", l.Name, l.IP, l.MAC, l.LeasedAt)
 	}
@@ -201,16 +211,36 @@ func (s *Service) Rebuild(force bool) error {
 	if !force && old != nil && old.fp == fp && old.err == "" {
 		return nil
 	}
+	baseFP := fingerprint(view.Rev(), in, nil)
+	if s.o.Feed != nil && !force && old != nil && old.err == "" && old.authored != nil && old.baseFP == baseFP {
+		if ok := s.leaseDelta(old, view.Rev(), in, leases, fp); ok {
+			return nil
+		}
+	}
 	spec, rep := dnsdata.Compile(view, dnsdata.CompileConfig{Zones: in.Zones, DefaultTTL: in.DefaultTTL, NegTTL: in.NegTTL, Authoritative: dnsdata.ReadSettings(view).Authoritative})
+	dnsdata.MergeReserved(spec, in.ReservedNames, in.DefaultTTL)
+	var authored map[string]struct{}
+	authoredCount := len(spec.RRs)
+	if s.o.Feed != nil {
+		authored = make(map[string]struct{}, authoredCount)
+		for _, rr := range spec.RRs {
+			authored[rr.Owner] = struct{}{}
+		}
+	}
 	cols := dnsdata.MergeLeases(spec, leases, in.DefaultTTL)
 	tb, err := spec.Build()
 	if err != nil {
 		s.fail(old, fp, view.Rev(), err)
 		return err
 	}
-	st := &buildState{rev: view.Rev(), digest: tb.Digest(), names: tb.Names(), records: tb.Records(), report: rep, collisions: cols, builtAt: time.Now(), fp: fp}
-	if old == nil || old.digest != st.digest || force {
-		if err := writeFileAtomic(s.o.TablePath, dnsanswer.EncodeTable(spec, tb.Digest()), s.o.TableMode); err != nil {
+	st := &buildState{rev: view.Rev(), digest: tb.Digest(), names: tb.Names(), records: tb.Records(), report: rep, collisions: cols, builtAt: time.Now(), fp: fp, baseFP: baseFP, authored: authored}
+	if s.o.Feed != nil {
+		st.leaseRRs = groupByOwner(spec.RRs[authoredCount:])
+	}
+	changed := old == nil || old.digest != st.digest || force || old.deltas > 0
+	if changed {
+		blob := dnsanswer.EncodeTable(spec, tb.Digest())
+		if err := writeFileAtomic(s.o.TablePath, blob, s.o.TableMode); err != nil {
 			s.fail(old, fp, view.Rev(), err)
 			return err
 		}
@@ -219,15 +249,72 @@ func (s *Service) Rebuild(force bool) error {
 				s.o.Log("[DNSSTORE:ERROR] chown %s: %v", s.o.TablePath, err)
 			}
 		}
+		if s.o.Feed != nil {
+			if err := s.o.Feed.SetBase(blob); err != nil {
+				s.o.Log("[DNSSTORE:ERROR] feed: %v", err)
+			}
+		}
 	}
 	s.state.Store(st)
 	s.noteServing(true)
-	s.noteSettings(dnsdata.ReadSettings(view))
 	s.logCollisions(cols)
 	if len(rep.Errors) > 0 {
 		s.o.Log("[DNSSTORE:ROWS] %d row(s) skipped by the compile, first: %s", len(rep.Errors), rep.Errors[0].Msg)
 	}
 	return nil
+}
+
+func groupByOwner(rrs []dnsanswer.RR) map[string][]dnsanswer.RR {
+	m := make(map[string][]dnsanswer.RR)
+	for _, rr := range rrs {
+		m[rr.Owner] = append(m[rr.Owner], rr)
+	}
+	return m
+}
+
+func sameRRs(a, b []dnsanswer.RR) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Type != b[i].Type || a[i].TTL != b[i].TTL || !bytes.Equal(a[i].RData, b[i].RData) {
+			return false
+		}
+	}
+	return true
+}
+
+// leaseDelta publishes the change of the DHCP names since the last build as owner-level changes instead of building
+// the table again. It reports false when the caller has to build a full table.
+func (s *Service) leaseDelta(old *buildState, rev uint64, in CompileInput, leases []dnsdata.LeaseName, fp [32]byte) bool {
+	rrs, cols := dnsdata.LeaseRRs(func(o string) bool { _, ok := old.authored[o]; return ok }, leases, in.DefaultTTL)
+	next := groupByOwner(rrs)
+	var changes []dnsanswer.Change
+	for o, now := range next {
+		if !sameRRs(old.leaseRRs[o], now) {
+			changes = append(changes, dnsanswer.Change{Owner: o, RRs: now})
+		}
+	}
+	for o := range old.leaseRRs {
+		if _, ok := next[o]; !ok {
+			changes = append(changes, dnsanswer.Change{Owner: o, Delete: true})
+		}
+	}
+	st := *old
+	st.fp, st.collisions, st.builtAt, st.leaseRRs = fp, cols, time.Now(), next
+	if len(changes) > 0 {
+		sort.Slice(changes, func(i, j int) bool { return changes[i].Owner < changes[j].Owner })
+		if _, err := s.o.Feed.Publish(uint32(rev), changes); err != nil {
+			if !errors.Is(err, dnsfeed.ErrBaseNeeded) {
+				s.o.Log("[DNSSTORE:ERROR] feed: %v", err)
+			}
+			return false
+		}
+		st.deltas++
+	}
+	s.state.Store(&st)
+	s.logCollisions(cols)
+	return true
 }
 
 // noteServing tells the daemon when this core starts or stops being able to serve DNS: a table was built and published.
@@ -243,17 +330,6 @@ func (s *Service) noteServing(ok bool) {
 
 // Serving reports whether the last attempt to build and publish the table worked.
 func (s *Service) Serving() bool { return s.serving.Load() == 1 }
-
-func (s *Service) noteSettings(set dnsdata.Settings) {
-	old := s.lastSet.Load()
-	if old != nil && *old == set {
-		return
-	}
-	s.lastSet.Store(&set)
-	if s.o.OnSettings != nil {
-		s.o.OnSettings(set)
-	}
-}
 
 func (s *Service) fail(old *buildState, fp [32]byte, rev uint64, err error) {
 	s.noteServing(false)

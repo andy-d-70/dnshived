@@ -21,11 +21,12 @@ import (
 )
 
 type rig struct {
-	t      *testing.T
+	t      testing.TB
 	svc    *Service
 	mux    *http.ServeMux
 	dir    string
 	leases atomic.Pointer[[]dnsdata.LeaseName]
+	resv   atomic.Pointer[[]dnsdata.ReservedName]
 	logs   []string
 	recs   []config.DNSRecord
 }
@@ -38,16 +39,24 @@ func newRig(t *testing.T) *rig {
 func openRig(t *testing.T, dir string) *rig { return openRigMode(t, dir, 0) }
 
 func openRigMode(t *testing.T, dir string, tableMode os.FileMode) *rig {
+	return openRigWith(t, dir, tableMode, nil)
+}
+
+func openRigWith(t testing.TB, dir string, tableMode os.FileMode, mod func(*Options)) *rig {
 	t.Helper()
 	r := &rig{t: t, dir: dir}
 	keys, err := LoadOrCreateKey(filepath.Join(dir, "dnsstore.key"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc, err := New(Options{
+	o := Options{
 		Dir: filepath.Join(dir, "dnsstore"), TablePath: filepath.Join(dir, "dnstable.bin"), TableMode: tableMode, Keys: keys,
 		Input: func() CompileInput {
-			return CompileInput{Zones: []dnsanswer.Zone{{Name: "example.lan"}}, Reserved: map[string]string{"printer.example.lan": "office"}, DefaultTTL: 300, NegTTL: 60}
+			in := CompileInput{Zones: []dnsanswer.Zone{{Name: "example.lan"}}, Reserved: map[string]string{"printer.example.lan": "office"}, DefaultTTL: 300, NegTTL: 60}
+			if p := r.resv.Load(); p != nil {
+				in.ReservedNames = *p
+			}
+			return in
 		},
 		Leases: func() []dnsdata.LeaseName {
 			if p := r.leases.Load(); p != nil {
@@ -57,7 +66,11 @@ func openRigMode(t *testing.T, dir string, tableMode os.FileMode) *rig {
 		},
 		Log:          func(f string, a ...any) { r.logs = append(r.logs, strings.TrimSpace(strings.ReplaceAll(f, "\n", " "))) },
 		ImportSource: func() []config.DNSRecord { return r.recs },
-	})
+	}
+	if mod != nil {
+		mod(&o)
+	}
+	svc, err := New(o)
 	if err != nil {
 		t.Fatal(err)
 	}

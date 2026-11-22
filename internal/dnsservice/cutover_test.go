@@ -4,12 +4,10 @@
 package dnsservice
 
 import (
-	"fmt"
 	"testing"
 
 	"dnshived/internal/config"
 	"dnshived/internal/dnsanswer"
-	"dnshived/internal/dnsdata"
 )
 
 func TestService_OverlayUntilTheCutover(t *testing.T) {
@@ -74,43 +72,17 @@ func TestService_ImportFromTheConfiguration(t *testing.T) {
 	}
 }
 
-func TestService_DNSVIPSettingAndServingState(t *testing.T) {
+func TestService_ServingStateAndSettingsRequest(t *testing.T) {
 	r := newRig(t)
-	var sets []string
-	var serving []bool
-	r.svc.o.OnSettings = func(s dnsdata.Settings) { sets = append(sets, s.DNSVIP) }
-	r.svc.o.OnServing = func(ok bool) { serving = append(serving, ok) }
-	r.svc.o.CheckDNSVIP = func(vip string, id int) error {
-		if id == 60 {
-			return fmt.Errorf("VRRP id %d is already used by the management VIP", id)
-		}
-		return nil
-	}
 	if !r.svc.Serving() {
 		t.Fatal("a service that built its first table is serving")
 	}
-	if code, out := r.do("POST", "/api/v1/dnsstore/settings", `{"dns_vip":"192.0.2.53/24","vrrp_id":61}`); code != 200 || out["dns_vip"] != "192.0.2.53/24" {
-		t.Fatalf("set: %d %v", code, out)
-	}
-	if len(sets) == 0 || sets[len(sets)-1] != "192.0.2.53/24" {
-		t.Fatalf("the daemon must hear about the new setting: %v", sets)
-	}
-	if _, st := r.do("GET", "/api/v1/dnsstore/status", ""); st["dns_vip"] != "192.0.2.53/24" || st["serving"] != true {
+	if _, st := r.do("GET", "/api/v1/dnsstore/status", ""); st["serving"] != true {
 		t.Fatalf("status: %v", st)
 	}
-	for name, body := range map[string]string{
-		"bad address": `{"dns_vip":"nope","vrrp_id":61}`, "no id": `{"dns_vip":"192.0.2.53/24"}`, "id too big": `{"dns_vip":"192.0.2.53/24","vrrp_id":300}`,
-		"ipv6": `{"dns_vip":"fd00::53/64","vrrp_id":61}`, "collision": `{"dns_vip":"192.0.2.53/24","vrrp_id":60}`, "loopback": `{"dns_vip":"127.0.0.1/8","vrrp_id":61}`,
-	} {
-		if code, _ := r.do("POST", "/api/v1/dnsstore/settings", body); code != 422 {
-			t.Errorf("%s: status %d, want 422", name, code)
+	for name, body := range map[string]string{"empty": `{}`, "the removed DNS VIP": `{"dns_vip":"192.0.2.53/24","vrrp_id":61}`} {
+		if code, _ := r.do("POST", "/api/v1/dnsstore/settings", body); code != 400 {
+			t.Errorf("%s: status %d, want 400", name, code)
 		}
 	}
-	if code, _ := r.do("POST", "/api/v1/dnsstore/settings", `{"dns_vip":""}`); code != 200 {
-		t.Fatal("remove")
-	}
-	if sets[len(sets)-1] != "" {
-		t.Fatalf("removing the setting reaches the daemon: %v", sets)
-	}
-	_ = serving
 }

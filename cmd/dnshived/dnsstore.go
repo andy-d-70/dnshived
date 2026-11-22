@@ -4,11 +4,11 @@
 package main
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"hash/fnv"
 	"net"
 	"net/http"
@@ -24,7 +24,7 @@ import (
 	"dnshived/internal/config"
 	"dnshived/internal/dnsanswer"
 	"dnshived/internal/dnsdata"
-	"dnshived/internal/dnsrelayrender"
+	"dnshived/internal/dnsfeed"
 	"dnshived/internal/dnsrepl"
 	"dnshived/internal/dnsservice"
 	"dnshived/internal/dnsstore"
@@ -44,45 +44,6 @@ const (
 )
 
 var dnsStoreSvc atomic.Pointer[dnsservice.Service]
-
-var dnsServingNow atomic.Bool
-
-// writeDNSTrack writes the number keepalived adds to the DNS VIP priority: 0 while this core can serve DNS, a large
-// negative number while it cannot, so a healthy core takes the address.
-func writeDNSTrack(path string, ok bool) error {
-	val := "0\n"
-	if !ok {
-		val = fmt.Sprintf("%d\n", agent.DNSVIPUnhealthy)
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(val), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
-// checkDNSVIP vets a DNS VIP against the cluster configuration: it needs the management VIP (same network, same
-// keepalived instance file) and its VRRP id must be free.
-func checkDNSVIP(vip string, id int) error {
-	cfg := currentConfig.Load()
-	if cfg.MgmtVIP == nil || cfg.Platform.ResolveMgmt(cfg.Role) == "" {
-		return fmt.Errorf("configure the management VIP first: the DNS VIP shares its network and its keepalived file")
-	}
-	if id == cfg.MgmtVIP.VRRPID {
-		return fmt.Errorf("VRRP id %d is already used by the management VIP", id)
-	}
-	for name, sc := range cfg.Scopes {
-		if sc.VRRPID == id {
-			return fmt.Errorf("VRRP id %d is already used by scope %s", id, name)
-		}
-	}
-	if p, err := netip.ParsePrefix(vip); err == nil {
-		if m, err := netip.ParsePrefix(cfg.MgmtVIP.VIP); err == nil && m.Addr() == p.Addr() {
-			return fmt.Errorf("%s is the management VIP's own address", p.Addr())
-		}
-	}
-	return nil
-}
 
 // dnsConfigFrozen is true once the DNS store is authoritative: from then on the configuration's own DNS records are
 // not the source any more, and a change to them would silently do nothing.
@@ -105,6 +66,7 @@ func dnsStoreEnabled() bool {
 func dnsStoreInput() dnsservice.CompileInput {
 	cfg := currentConfig.Load()
 	in := dnsservice.CompileInput{DefaultTTL: dnsStoreDefaultTTL, NegTTL: dnsStoreNegTTL, Reserved: map[string]string{}}
+	in.ReservedNames = dnsdata.ReservedNames(cfg)
 	var domains []string
 	for _, d := range cfg.LocalDomains {
 		if c, err := dnsanswer.CanonicalName(d.Name); err == nil {
@@ -254,29 +216,8 @@ func startDNSStore(mux *http.ServeMux, authMw *auth.Middleware, ag *agent.Agent,
 		Chown:     ownership.Dnshived,
 
 		ImportSource: func() []config.DNSRecord { return dnsdata.ConfigRecords(currentConfig.Load()) },
-		CheckDNSVIP:  checkDNSVIP,
 		OnServing: func(ok bool) {
-			dnsServingNow.Store(ok)
-			if err := writeDNSTrack(filepath.Join(dir, "dns-vip.track"), ok); err != nil && !os.IsNotExist(err) {
-				loglevel.Warnf("[DNSSTORE:ERROR] DNS VIP track file: %v", err)
-			}
 			loglevel.Infof("[DNSSTORE:SERVING] this core %s DNS from the store", map[bool]string{true: "can serve", false: "cannot serve"}[ok])
-		},
-		OnSettings: func(s dnsdata.Settings) {
-			cfg := currentConfig.Load()
-			if s.DNSVIP == "" {
-				ag.SetDNSVIP(nil)
-				dnsrelayrender.SetExtraInterfaces(nil)
-			} else {
-				track := filepath.Join(dir, "dns-vip.track")
-				_ = writeDNSTrack(track, dnsServingNow.Load())
-				ag.SetDNSVIP(&agent.DNSVIPSpec{VIP: s.DNSVIP, VRRPID: s.DNSVIPID, TrackFile: track})
-				dnsrelayrender.SetExtraInterfaces([]string{cfg.Platform.ResolveMgmt(cfg.Role)})
-			}
-			if err := ag.RenderMgmtVIPConfig(cfg.MgmtVIP, cfg.Platform); err != nil {
-				loglevel.Warnf("[DNSSTORE:ERROR] apply the DNS VIP: %v", err)
-			}
-			loglevel.Infof("[DNSSTORE:DNSVIP] DNS VIP setting is now %q", s.DNSVIP)
 		},
 	}
 	var svc *dnsservice.Service
@@ -334,6 +275,11 @@ func startDNSStore(mux *http.ServeMux, authMw *auth.Middleware, ag *agent.Agent,
 			return map[string]any{"role": node.Role().String(), "term": node.Term(), "leader": node.Leader(), "self": cfg.Role, "voters": ids}
 		}
 	}
+	var feed *dnsfeed.Publisher
+	if dnsFeedEnabled() {
+		feed = dnsfeed.NewPublisher(dnsfeed.Options{Log: func(f string, a ...any) { loglevel.Infof(f, a...) }})
+		opts.Feed = feed
+	}
 	svc, err = dnsservice.New(opts)
 	if err != nil {
 		loglevel.Warnf("[DNSSTORE:ERROR] %v", err)
@@ -343,6 +289,11 @@ func startDNSStore(mux *http.ServeMux, authMw *auth.Middleware, ag *agent.Agent,
 		return
 	}
 	dnsStoreSvc.Store(svc)
+	if feed != nil {
+		if err := startDNSFeed(context.Background(), filepath.Join(dir, "dnsfeed.sock"), feed); err != nil {
+			loglevel.Warnf("[DNSFEED:ERROR] %v", err)
+		}
+	}
 	svc.Routes(mux, authMw.RequireAdmin)
 	if drv != nil {
 		drv.Start()

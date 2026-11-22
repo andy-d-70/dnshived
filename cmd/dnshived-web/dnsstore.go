@@ -42,8 +42,6 @@ type dsStatus struct {
 	Commit      uint64       `json:"commit_index"`
 	Head        uint64       `json:"head"`
 	Auth        bool         `json:"authoritative"`
-	DNSVIP      string       `json:"dns_vip"`
-	VRRPID      int          `json:"dns_vip_vrrp_id"`
 	Serving     bool         `json:"serving"`
 	Hosts       int          `json:"hosts"`
 	Records     int          `json:"records"`
@@ -199,105 +197,6 @@ func dsActor(r *http.Request) string {
 	return "web"
 }
 
-func splitList(s string) []string {
-	return strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\n' || r == '\r' || r == '\t' || r == ';' })
-}
-
-func dsDone(cfg *WebConfig, r *http.Request, action, summary string, out map[string]any) string {
-	auditAll(cfg, dsActor(r), action, summary)
-	msg := summary
-	if w, ok := out["warnings"].([]any); ok && len(w) > 0 {
-		var ws []string
-		for _, x := range w {
-			if m, ok := x.(map[string]any); ok {
-				ws = append(ws, fmt.Sprint(m["Msg"]))
-			}
-		}
-		msg += " Warning: " + strings.Join(ws, "; ")
-	}
-	return msg
-}
-
-func handleDNSStoreHost(ref *configRef) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		cfg := ref.Load()
-		label := strings.TrimSpace(r.FormValue("label"))
-		domains := splitList(r.FormValue("domains"))
-		var addrs []map[string]any
-		ptr := r.FormValue("ptr") != ""
-		for _, a := range splitList(r.FormValue("addrs")) {
-			addrs = append(addrs, map[string]any{"ip": a, "ptr": ptr})
-		}
-		ttl, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("ttl")))
-		if label == "" || len(domains) == 0 {
-			dsRedirect(w, r, "", "a host needs a name and at least one domain")
-			return
-		}
-		host := map[string]any{"label": label, "domains": domains, "addrs": addrs}
-		if ttl > 0 {
-			host["ttl"] = ttl
-		}
-		out, errText := dsWrite(cfg, "/api/v1/dnsstore/commit", map[string]any{"author": dsActor(r), "ops": []any{map[string]any{"op": "put", "kind": "host", "host": host}}})
-		if errText != "" {
-			dsRedirect(w, r, "", errText)
-			return
-		}
-		dsRedirect(w, r, dsDone(cfg, r, "dnsstore.host.add", "added host "+label, out), "")
-	}
-}
-
-func handleDNSStoreRecord(ref *configRef) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		cfg := ref.Load()
-		typ := strings.ToUpper(strings.TrimSpace(r.FormValue("type")))
-		owner := strings.TrimSpace(r.FormValue("owner"))
-		if owner == "" || typ == "" {
-			dsRedirect(w, r, "", "a record needs an owner name and a type")
-			return
-		}
-		num := func(k string) int { n, _ := strconv.Atoi(strings.TrimSpace(r.FormValue(k))); return n }
-		rec := map[string]any{"type": typ, "owner": owner}
-		if v := strings.TrimSpace(r.FormValue("value")); v != "" {
-			rec["value"] = v
-		}
-		if v := strings.TrimSpace(r.FormValue("target")); v != "" {
-			rec["target"] = v
-		}
-		if typ == "MX" {
-			rec["pref"] = num("priority")
-		} else {
-			rec["priority"] = num("priority")
-		}
-		rec["weight"], rec["port"] = num("weight"), num("port")
-		if t := num("ttl"); t > 0 {
-			rec["ttl"] = t
-		}
-		out, errText := dsWrite(cfg, "/api/v1/dnsstore/commit", map[string]any{"author": dsActor(r), "ops": []any{map[string]any{"op": "put", "kind": "record", "record": rec}}})
-		if errText != "" {
-			dsRedirect(w, r, "", errText)
-			return
-		}
-		dsRedirect(w, r, dsDone(cfg, r, "dnsstore.record.add", "added "+typ+" record "+owner, out), "")
-	}
-}
-
-func handleDNSStoreDelete(ref *configRef) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		cfg := ref.Load()
-		kind, id := r.FormValue("kind"), strings.TrimSpace(r.FormValue("id"))
-		if kind != "host" && kind != "record" || len(id) != 32 {
-			dsRedirect(w, r, "", "nothing to delete")
-			return
-		}
-		out, errText := dsWrite(cfg, "/api/v1/dnsstore/commit", map[string]any{"author": dsActor(r), "ops": []any{map[string]any{"op": "del", "kind": kind, "id": id}}})
-		if errText != "" {
-			dsRedirect(w, r, "", errText)
-			return
-		}
-		dsRedirect(w, r, dsDone(cfg, r, "dnsstore."+kind+".delete", "deleted a "+kind, out), "")
-	}
-}
-
 func handleDNSStoreImport(ref *configRef) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg := ref.Load()
@@ -319,27 +218,6 @@ func handleDNSStoreImport(ref *configRef) http.HandlerFunc {
 		if len(skipped) > 0 {
 			msg += fmt.Sprintf("; %d skipped, first: %v", len(skipped), skipped[0])
 		}
-		dsRedirect(w, r, msg, "")
-	}
-}
-
-func handleDNSStoreVIP(ref *configRef) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		cfg := ref.Load()
-		vip := strings.TrimSpace(r.FormValue("vip"))
-		if r.FormValue("remove") != "" {
-			vip = ""
-		}
-		id, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("vrrp_id")))
-		if _, errText := dsWrite(cfg, "/api/v1/dnsstore/settings", map[string]any{"dns_vip": vip, "vrrp_id": id, "author": dsActor(r)}); errText != "" {
-			dsRedirect(w, r, "", errText)
-			return
-		}
-		msg := "The DNS VIP is removed."
-		if vip != "" {
-			msg = "The DNS VIP " + vip + " is set; the cores apply it to their keepalived and relay within seconds."
-		}
-		auditAll(cfg, dsActor(r), "dnsstore.dnsvip", msg)
 		dsRedirect(w, r, msg, "")
 	}
 }
@@ -392,11 +270,7 @@ type dsPage struct {
 	Total       int
 	PagerTop    pagerBar
 	PagerBottom pagerBar
-	Types       []string
-	DomainNames []string
 }
-
-var dsRecordTypes = []string{"A", "AAAA", "CNAME", "TXT", "SRV", "MX", "PTR", "CAA", "NAPTR"}
 
 func handleDNSStore(ref *configRef) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -404,7 +278,7 @@ func handleDNSStore(ref *configRef) http.HandlerFunc {
 		nodes := nodesIncludingSelf(cfg)
 		states := dsFetchStatuses(nodes)
 		ordered := dsOrder(states)
-		data := dsPage{Msg: r.URL.Query().Get("msg"), Err: r.URL.Query().Get("err"), Tabs: template.HTML(dnsTabs("/dns/store")), Types: dsRecordTypes, Kind: "hosts"}
+		data := dsPage{Msg: r.URL.Query().Get("msg"), Err: r.URL.Query().Get("err"), Tabs: template.HTML(dnsTabs("/dns/store")), Kind: "hosts"}
 		if r.URL.Query().Get("kind") == "records" {
 			data.Kind = "records"
 		}
@@ -436,11 +310,6 @@ func handleDNSStore(ref *configRef) http.HandlerFunc {
 		}
 		if reader.Status.Replication != nil {
 			data.Leader = reader.Status.Replication.Leader
-		}
-		if cluster, _, err := firstReachableConfig(nodes); err == nil {
-			for _, d := range cluster.LocalDomains {
-				data.DomainNames = append(data.DomainNames, d.Name)
-			}
 		}
 		q := listQuery(r.URL.Query())
 		data.Q = q
@@ -557,9 +426,7 @@ var dsTmpl = template.Must(template.New("dnsstore").Parse(`<!doctype html>
 {{if not .Enabled}}
 <p class="dim">The DNS store is not running on any core. Create the file <code>/etc/dnshived/dns-store.enable</code> on every core and restart the daemons to switch it on.</p>
 {{else}}
-<p class="dim" title="Overlay keeps dnsmasq answering everything the store does not hold; the cutover makes the store answer for its whole domains and needs the records imported first.">Mode: <b>{{.Mode}}</b>{{if .Leader}} · leader: <b>{{.Leader}}</b>{{end}} · revision {{.Status.Rev}}{{with .Status.Published}} · table {{.Names}} names, {{.Records}} records{{end}}</p>
-<p class="dim" title="An extra address on the management network that answers DNS and follows the health of the DNS table, not the cluster's quorum, so DNS keeps being answered while DHCP waits for a majority. It needs the management VIP.">DNS VIP: {{if .Status.DNSVIP}}<b>{{.Status.DNSVIP}}</b> (VRRP id {{.Status.VRRPID}}) · this core {{if .Status.Serving}}serves{{else}}<span class="warn">cannot serve</span>{{end}}{{else}}not set{{end}}
-<form method="post" action="/dns/store/vip" style="display:inline;margin-left:.6rem"><input type="hidden" name="kind" value="{{.Kind}}"><input name="vip" placeholder="address/prefix" size="18" aria-label="DNS VIP address"{{if .Status.DNSVIP}} value="{{.Status.DNSVIP}}"{{end}}><input name="vrrp_id" placeholder="VRRP id" size="6" aria-label="VRRP id"{{if .Status.VRRPID}} value="{{.Status.VRRPID}}"{{end}}><button class="btn quiet sm">Set</button>{{if .Status.DNSVIP}} <button class="btn quiet sm" name="remove" value="1" onclick="return confirm('Remove the DNS VIP?')">Remove</button>{{end}}</form></p>
+<p class="dim" title="Overlay keeps dnsmasq answering everything the store does not hold; the cutover makes the store answer for its whole domains and needs the records imported first.">Mode: <b>{{.Mode}}</b>{{if .Leader}} · leader: <b>{{.Leader}}</b>{{end}} · revision {{.Status.Rev}}{{if not .Status.Serving}} · <span class="warn" title="The last attempt to build and publish the answer table on this core failed">this core cannot serve</span>{{end}}{{with .Status.Published}} · table {{.Names}} names, {{.Records}} records{{end}}</p>
 {{with .Status.Published}}{{if .Error}}<p class="crit" title="The last attempt to publish the answer table failed; the relays keep serving the previous one.">Publishing failed: {{.Error}}</p>{{end}}
 {{if .RowErrors}}<p class="warn" title="These rows are skipped when the table is built; the rest is served. The first one is shown as an example.">{{.RowErrN}} row(s) are skipped, for example: {{index .RowErrors 0}}</p>{{end}}
 {{if .Dangling}}<p class="warn" title="A host lists a domain that is not in the domain list any more; it is served under its other domains.">{{.DanglingN}} name(s) use a domain that is not in the domain list, for example {{index .Dangling 0}}</p>{{end}}
@@ -571,53 +438,28 @@ var dsTmpl = template.Must(template.New("dnsstore").Parse(`<!doctype html>
 <form method="post" action="/dns/store/import" style="display:inline"><input type="hidden" name="kind" value="{{.Kind}}"><button class="btn quiet sm" name="dry" value="1" title="Count the DNS records of the configuration that would be copied into the store">Preview import</button> <button class="btn quiet sm" title="Copy every DNS record of the configuration into the store; importing again changes nothing">Import from configuration</button></form>
 <form method="post" action="/dns/store/cutover" style="display:inline" onsubmit="return confirm(this.dataset.ask)" data-ask="{{if .Status.Auth}}Go back to overlay mode? Names the store lacks are forwarded to dnsmasq again.{{else}}Make the store authoritative? Names inside its domains that it does not hold then get a negative answer. Import the configuration records first.{{end}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="authoritative" value="{{if .Status.Auth}}off{{else}}on{{end}}"><button class="btn quiet sm" title="{{if .Status.Auth}}Back to overlay mode{{else}}Switch from overlay to authoritative answers{{end}}">{{if .Status.Auth}}Back to overlay{{else}}Go authoritative{{end}}</button></form>
 </div>
-<details style="margin:.4rem 0 .8rem"><summary class="dim" style="cursor:pointer">Add a host or a record</summary>
-<form method="post" action="/dns/store/host" class="listbar" style="margin:.5rem 0"><input type="hidden" name="kind" value="hosts">
-<input name="label" placeholder="host name" size="16" required aria-label="Host name">
-<input name="domains" list="dsdomains" placeholder="domain(s), comma separated" size="26" required aria-label="Domains">
-<input name="addrs" placeholder="address(es)" size="24" aria-label="Addresses">
-<input name="ttl" placeholder="TTL" size="6" aria-label="TTL">
-<label title="Publish a reverse record for each address"><input type="checkbox" name="ptr" value="1" checked> PTR</label>
-<button class="btn-primary" type="submit">+ Add host</button></form>
-<form method="post" action="/dns/store/record" class="listbar" style="margin:.5rem 0"><input type="hidden" name="kind" value="records">
-<select name="type" class="js-combo" aria-label="Type">{{range .Types}}<option>{{.}}</option>{{end}}</select>
-<input name="owner" placeholder="full name, e.g. _sip._tcp.example.lan" size="30" required aria-label="Owner name">
-<input name="value" placeholder="value" size="22" aria-label="Value">
-<input name="target" placeholder="target host (MX, SRV)" size="22" aria-label="Target">
-<input name="priority" placeholder="priority" size="6" aria-label="Priority">
-<input name="weight" placeholder="weight" size="6" aria-label="Weight"><input name="port" placeholder="port" size="6" aria-label="Port">
-<input name="ttl" placeholder="TTL" size="6" aria-label="TTL">
-<button class="btn-primary" type="submit">+ Add record</button></form>
-<datalist id="dsdomains">{{range .DomainNames}}<option value="{{.}}">{{end}}</datalist>
-</details>
 {{template "pagerbar" .PagerTop}}
 <div class="table-wrap">
 {{if eq .Kind "hosts"}}
 <table class="list-table" border="1" cellpadding="4" cellspacing="0" style="min-width:48rem">
-<colgroup><col style="width:20%"><col style="width:26%"><col style="width:36%"><col style="width:10%"><col style="width:8%"></colgroup>
-<tr><th>Name</th><th>Domains</th><th>Addresses</th><th>TTL</th><th></th></tr>
+<colgroup><col style="width:22%"><col style="width:28%"><col style="width:40%"><col style="width:10%"></colgroup>
+<tr><th>Name</th><th>Domains</th><th>Addresses</th><th>TTL</th></tr>
 {{range .Hosts}}<tr>
 <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{.Label}}">{{.Label}}</td>
 <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{.Domains}}">{{.Domains}}</td>
 <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums" title="{{.Addrs}}">{{.Addrs}}</td>
 <td style="font-variant-numeric:tabular-nums">{{if .TTL}}{{.TTL}}{{else}}<span class="dim">default</span>{{end}}</td>
-<td style="width:3rem;text-align:center"><details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.Label}}">&#9776;</summary><div class="row-menu-list" role="menu">
-<form method="post" action="/dns/store/delete" onsubmit="return confirm('Delete the host {{.Label}}? Its names stop answering.')"><input type="hidden" name="kind" value="host"><input type="hidden" name="id" value="{{.ID}}"><button type="submit" role="menuitem" class="danger" title="Delete this host; it is committed at once">Delete…</button></form>
-</div></details></td>
 </tr>{{end}}
 </table>
 {{else}}
 <table class="list-table" border="1" cellpadding="4" cellspacing="0" style="min-width:48rem">
-<colgroup><col style="width:30%"><col style="width:8%"><col style="width:42%"><col style="width:10%"><col style="width:8%"></colgroup>
-<tr><th>Owner</th><th>Type</th><th>Data</th><th>TTL</th><th></th></tr>
+<colgroup><col style="width:32%"><col style="width:8%"><col style="width:48%"><col style="width:12%"></colgroup>
+<tr><th>Owner</th><th>Type</th><th>Data</th><th>TTL</th></tr>
 {{range .Records}}<tr>
 <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{.Owner}}">{{.Owner}}</td>
 <td>{{.Type}}</td>
 <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{.Data}}">{{.Data}}</td>
 <td style="font-variant-numeric:tabular-nums">{{if .TTL}}{{.TTL}}{{else}}<span class="dim">default</span>{{end}}</td>
-<td style="width:3rem;text-align:center"><details class="row-menu"><summary aria-haspopup="menu" title="actions for {{.Owner}}">&#9776;</summary><div class="row-menu-list" role="menu">
-<form method="post" action="/dns/store/delete" onsubmit="return confirm('Delete this {{.Type}} record of {{.Owner}}?')"><input type="hidden" name="kind" value="record"><input type="hidden" name="id" value="{{.ID}}"><button type="submit" role="menuitem" class="danger" title="Delete this record; it is committed at once">Delete…</button></form>
-</div></details></td>
 </tr>{{end}}
 </table>
 {{end}}
@@ -629,6 +471,6 @@ var dsTmpl = template.Must(template.New("dnsstore").Parse(`<!doctype html>
 <tr><th>Core</th><th>Role</th><th>Head</th><th>Committed</th><th></th></tr>
 {{range .Nodes}}<tr><td>{{.Name}}</td><td>{{if .Err}}<span class="dim">{{.Err}}</span>{{else}}{{.Role}}{{end}}</td><td style="font-variant-numeric:tabular-nums">{{.Head}}</td><td style="font-variant-numeric:tabular-nums">{{.Commit}}</td><td></td></tr>{{end}}
 </table>
-<p class="dim"><b>Changes are committed at once</b> through the leader and copied to every core before they count; there is no pending step. <b>Overlay</b>: the store answers the names it holds and everything else still goes to dnsmasq, so nothing existing breaks. <b>Authoritative</b> is the cutover: do it after importing the configuration's records, and from then on the configuration's own DNS records cannot be changed.</p>
+<p class="dim">This page shows the store and switches its mode; hosts and records are edited on the <a href="/config/domains">Domains</a> page. <b>Overlay</b>: the store answers the names it holds and everything else still goes to dnsmasq, so nothing existing breaks. <b>Authoritative</b> is the cutover: do it after importing the configuration's records, and from then on the configuration's own DNS records cannot be changed.</p>
 {{end}}
 `))

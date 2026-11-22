@@ -34,7 +34,7 @@ func TestDNSStoreRender(t *testing.T) {
 	}
 	base := dsPage{Tabs: template.HTML(dnsTabs("/dns/store")), Enabled: true, Status: st, Mode: "overlay: records in the store are answered, everything else is forwarded", Leader: "core-1", Kind: "hosts",
 		Nodes: []dsNodeRow{{Name: "core-1", Role: "leader", Head: "1234", Commit: "1234"}, {Name: "core-2", Role: "follower", Head: "1234", Commit: "1234"}, {Name: "core-3", Err: "not enabled"}},
-		Hosts: hosts, Total: 4210, PagerTop: top, PagerBottom: bottom, Types: dsRecordTypes, DomainNames: []string{"example.lan"}, Chips: []listChip{{Label: "Hosts 4210", URL: "/dns/store?kind=hosts", Active: true}, {Label: "Records 380", URL: "/dns/store?kind=records"}}}
+		Hosts: hosts, Total: 4210, PagerTop: top, PagerBottom: bottom, Chips: []listChip{{Label: "Hosts 4210", URL: "/dns/store?kind=hosts", Active: true}, {Label: "Records 380", URL: "/dns/store?kind=records"}}}
 	warn := base
 	warn.Msg = "added host nas"
 	warn.Err = "cam.example.lan is already used by another host; a very long reason that goes on and on so that the line is long enough to show how the banner copes with it"

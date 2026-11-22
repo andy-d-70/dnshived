@@ -25,6 +25,42 @@ func nameErr(s, why string) error { return fmt.Errorf("%w %q: %s", ErrName, s, w
 // CanonicalName lowercases a name, strips one trailing dot, converts non-ASCII labels to punycode and validates it.
 // A "*" is allowed only as the whole leftmost label.
 func CanonicalName(s string) (string, error) {
+	t := s
+	if len(t) > 1 && t[len(t)-1] == '.' {
+		t = t[:len(t)-1]
+	}
+	if canonicalAlready(t) {
+		return t, nil
+	}
+	return canonicalName(s)
+}
+
+// canonicalAlready is the allocation-free check for the common case: a lower-case ASCII name without a wildcard whose
+// labels and length are within bounds, which CanonicalName would return unchanged (after dropping one trailing dot).
+func canonicalAlready(s string) bool {
+	if s == "" || len(s) > maxName {
+		return false
+	}
+	label := 0
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '-', c == '_':
+			if label++; label > maxLabel {
+				return false
+			}
+		case c == '.':
+			if label == 0 {
+				return false
+			}
+			label = 0
+		default:
+			return false
+		}
+	}
+	return label > 0
+}
+
+func canonicalName(s string) (string, error) {
 	s = strings.TrimSuffix(s, ".")
 	if s == "" {
 		return "", nameErr(s, "empty")

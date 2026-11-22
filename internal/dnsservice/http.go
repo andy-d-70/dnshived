@@ -267,8 +267,6 @@ type statusJSON struct {
 	Published *publishedJSON `json:"published,omitempty"`
 	Commit    uint64         `json:"commit_index"`
 	Auth      bool           `json:"authoritative"`
-	DNSVIP    string         `json:"dns_vip,omitempty"`
-	VRRPID    int            `json:"dns_vip_vrrp_id,omitempty"`
 	Serving   bool           `json:"serving"`
 	Hosts     int            `json:"hosts"`
 	Records   int            `json:"records"`
@@ -303,7 +301,7 @@ func (s *Service) Status() statusJSON {
 	v := s.store.View()
 	id := s.store.ID()
 	head, _, _ := s.store.Head()
-	out := statusJSON{Rev: v.Rev(), Term: v.Term(), Chain: hex32(v.Chain()), Manifest: hex32(v.Manifest()), Rows: v.Len(), Tombs: v.Tombstones(), StoreID: hex.EncodeToString(id[:]), Commit: s.store.CommitIndex(), Head: head, Auth: dnsdata.ReadSettings(v).Authoritative, DNSVIP: dnsdata.ReadSettings(v).DNSVIP, VRRPID: dnsdata.ReadSettings(v).DNSVIPID, Serving: s.Serving(), Hosts: v.CountOf(dnsdata.TypeHost), Records: v.CountOf(dnsdata.TypeRecord)}
+	out := statusJSON{Rev: v.Rev(), Term: v.Term(), Chain: hex32(v.Chain()), Manifest: hex32(v.Manifest()), Rows: v.Len(), Tombs: v.Tombstones(), StoreID: hex.EncodeToString(id[:]), Commit: s.store.CommitIndex(), Head: head, Auth: dnsdata.ReadSettings(v).Authoritative, Serving: s.Serving(), Hosts: v.CountOf(dnsdata.TypeHost), Records: v.CountOf(dnsdata.TypeRecord)}
 	if s.o.ReplStatus != nil {
 		out.Repl = s.o.ReplStatus()
 	}
@@ -457,44 +455,21 @@ func (s *Service) Routes(mux *http.ServeMux, admin func(http.HandlerFunc) http.H
 	}))
 	mux.HandleFunc("POST /api/v1/dnsstore/settings", admin(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Authoritative *bool   `json:"authoritative"`
-			DNSVIP        *string `json:"dns_vip"`
-			VRRPID        int     `json:"vrrp_id"`
-			Author        string  `json:"author"`
+			Authoritative *bool  `json:"authoritative"`
+			Author        string `json:"author"`
 		}
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
 		dec.DisallowUnknownFields()
-		if err := dec.Decode(&req); err != nil || req.Authoritative == nil && req.DNSVIP == nil {
-			plainError(w, http.StatusBadRequest, "send {\"authoritative\": true or false} or {\"dns_vip\": \"address/prefix\", \"vrrp_id\": n} (an empty dns_vip removes it)")
+		if err := dec.Decode(&req); err != nil || req.Authoritative == nil {
+			plainError(w, http.StatusBadRequest, "send {\"authoritative\": true or false}")
 			return
 		}
-		var op dnsstore.Op
-		out := map[string]any{}
-		if req.Authoritative != nil {
-			if *req.Authoritative && len(s.o.Input().Zones) == 0 {
-				writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"errors": []string{"no local domain is configured, so there is nothing to answer for"}})
-				return
-			}
-			op = dnsdata.SettingOp(dnsdata.AuthoritativeKey, *req.Authoritative)
-			out["authoritative"] = *req.Authoritative
-		} else {
-			vip, id := "", 0
-			if *req.DNSVIP != "" {
-				var err error
-				if vip, id, err = dnsdata.ParseDNSVIP(fmt.Sprintf("%s %d", *req.DNSVIP, req.VRRPID)); err != nil {
-					writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"errors": []string{err.Error()}})
-					return
-				}
-				if s.o.CheckDNSVIP != nil {
-					if err := s.o.CheckDNSVIP(vip, id); err != nil {
-						writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"errors": []string{err.Error()}})
-						return
-					}
-				}
-			}
-			op = dnsdata.DNSVIPOp(vip, id)
-			out["dns_vip"], out["vrrp_id"] = vip, id
+		if *req.Authoritative && len(s.o.Input().Zones) == 0 {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"errors": []string{"no local domain is configured, so there is nothing to answer for"}})
+			return
 		}
+		op := dnsdata.SettingOp(dnsdata.AuthoritativeKey, *req.Authoritative)
+		out := map[string]any{"authoritative": *req.Authoritative}
 		res, err := s.Commit(CommitRequest{Author: req.Author, Origin: OriginAPI, Ops: []dnsstore.Op{op}})
 		if s.writeCommitError(w, err) {
 			return

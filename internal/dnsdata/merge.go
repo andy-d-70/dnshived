@@ -27,14 +27,24 @@ type Collision struct {
 	Holder string
 }
 
-// MergeLeases adds the names of DHCP leases to spec. A name is never published twice: an authored name always wins,
-// among leases the earliest holder keeps it (ties by MAC), and a lease that loses stays without a name and is reported.
-// A holder may publish several addresses (for example IPv4 and IPv6) under its name.
+// MergeLeases adds the names of DHCP leases to spec; see LeaseRRs for the rules.
 func MergeLeases(spec *dnsanswer.Spec, leases []LeaseName, ttl uint32) []Collision {
 	authored := make(map[string]bool, len(spec.RRs))
 	for _, rr := range spec.RRs {
 		authored[rr.Owner] = true
 	}
+	rrs, cols := LeaseRRs(func(owner string) bool { return authored[owner] }, leases, ttl)
+	spec.RRs = append(spec.RRs, rrs...)
+	return cols
+}
+
+// LeaseRRs computes the records the names of DHCP leases add. A name is never published twice: an authored name
+// (authored reports whether a name has records of its own) always wins, among leases the earliest holder keeps it
+// (ties by MAC), and a lease that loses stays without a name and is reported. A holder may publish several addresses
+// (for example IPv4 and IPv6) under its name. The owners of the result never have authored records, so the result for
+// an owner is the owner's complete record set.
+func LeaseRRs(authored func(owner string) bool, leases []LeaseName, ttl uint32) ([]dnsanswer.RR, []Collision) {
+	var rrs []dnsanswer.RR
 	sorted := append([]LeaseName(nil), leases...)
 	sort.Slice(sorted, func(i, j int) bool {
 		a, b := sorted[i], sorted[j]
@@ -47,7 +57,10 @@ func MergeLeases(spec *dnsanswer.Spec, leases []LeaseName, ttl uint32) []Collisi
 		if a.MAC != b.MAC {
 			return a.MAC < b.MAC
 		}
-		return a.IP.Compare(b.IP) < 0
+		if c := a.IP.Compare(b.IP); c != 0 {
+			return c < 0
+		}
+		return a.Name < b.Name
 	})
 	holder := map[string]string{}
 	ptrTaken := map[string]bool{}
@@ -57,7 +70,7 @@ func MergeLeases(spec *dnsanswer.Spec, leases []LeaseName, ttl uint32) []Collisi
 		if err != nil || !l.IP.IsValid() || strings.HasPrefix(name, "*") {
 			continue
 		}
-		if authored[name] {
+		if authored(name) {
 			out = append(out, Collision{Name: name, MAC: l.MAC, Scope: l.Scope, IP: l.IP, Holder: "authored"})
 			continue
 		}
@@ -78,12 +91,12 @@ func MergeLeases(spec *dnsanswer.Spec, leases []LeaseName, ttl uint32) []Collisi
 		if err != nil {
 			continue
 		}
-		spec.RRs = append(spec.RRs, dnsanswer.RR{Owner: name, Type: typ, TTL: ttl, RData: rd})
+		rrs = append(rrs, dnsanswer.RR{Owner: name, Type: typ, TTL: ttl, RData: rd})
 		rev := dnsanswer.ReverseName(ip)
-		if !authored[rev] && !ptrTaken[rev] {
+		if !authored(rev) && !ptrTaken[rev] {
 			ptrTaken[rev] = true
 			if w, err := dnsanswer.ToWire(name); err == nil {
-				spec.RRs = append(spec.RRs, dnsanswer.RR{Owner: rev, Type: dnsanswer.TypePTR, TTL: ttl, RData: w})
+				rrs = append(rrs, dnsanswer.RR{Owner: rev, Type: dnsanswer.TypePTR, TTL: ttl, RData: w})
 			}
 		}
 	}
@@ -93,5 +106,5 @@ func MergeLeases(spec *dnsanswer.Spec, leases []LeaseName, ttl uint32) []Collisi
 		}
 		return out[i].MAC < out[j].MAC
 	})
-	return out
+	return rrs, out
 }

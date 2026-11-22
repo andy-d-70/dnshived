@@ -125,97 +125,50 @@ func TestDNSStorePage_BannerTextIsEscaped(t *testing.T) {
 	}
 }
 
-func TestDNSStoreWrites_GoToTheLeaderOnly(t *testing.T) {
-	a, b := newDSFake(t, "core1", "leader", true), newDSFake(t, "core2", "follower", true)
-	ref := dsRef(t, b, a)
-	w := dsPostForm(t, handleDNSStoreHost(ref), url.Values{"label": {"nas"}, "domains": {"example.lan, lab.lan"}, "addrs": {"10.0.0.9 fd00::9"}, "ptr": {"1"}, "ttl": {"600"}})
-	if w.Code != 303 || !strings.Contains(w.Header().Get("Location"), "msg=") {
-		t.Fatalf("host add: %d %s", w.Code, w.Header().Get("Location"))
-	}
-	if len(a.posts) != 1 || len(b.posts) != 0 {
-		t.Fatalf("the write must go to the leader first and only: leader %d, follower %d", len(a.posts), len(b.posts))
-	}
-	var sent struct {
-		Ops []struct {
-			Op   string `json:"op"`
-			Kind string `json:"kind"`
-			Host struct {
-				Label   string   `json:"label"`
-				Domains []string `json:"domains"`
-				Addrs   []struct {
-					IP  string `json:"ip"`
-					PTR bool   `json:"ptr"`
-				} `json:"addrs"`
-				TTL int `json:"ttl"`
-			} `json:"host"`
-		} `json:"ops"`
-	}
-	if err := json.Unmarshal([]byte(a.bodies[0]), &sent); err != nil || len(sent.Ops) != 1 {
-		t.Fatalf("body %s: %v", a.bodies[0], err)
-	}
-	h := sent.Ops[0].Host
-	if h.Label != "nas" || len(h.Domains) != 2 || len(h.Addrs) != 2 || !h.Addrs[0].PTR || h.TTL != 600 {
-		t.Fatalf("host sent: %+v", h)
-	}
-
-	if w = dsPostForm(t, handleDNSStoreHost(ref), url.Values{"label": {"x"}}); !strings.Contains(w.Header().Get("Location"), "err=") {
-		t.Fatal("a host without a domain is refused before anything is sent")
-	}
-	if len(a.posts) != 1 {
-		t.Fatal("nothing must be sent for an incomplete form")
+func TestDNSStorePage_IsNotAnEditor(t *testing.T) {
+	a := newDSFake(t, "core1", "leader", true)
+	ref := dsRef(t, a)
+	for _, target := range []string{"/dns/store", "/dns/store?kind=records"} {
+		body := dsGet(t, ref, target)
+		for _, gone := range []string{"Add a host", "Add record", "/dns/store/host", "/dns/store/record", "/dns/store/delete", "Delete…", "DNS VIP", "/dns/store/vip"} {
+			if strings.Contains(body, gone) {
+				t.Errorf("%s still offers %q", target, gone)
+			}
+		}
+		if !strings.Contains(body, "/config/domains") {
+			t.Errorf("%s does not point to the Domains page", target)
+		}
 	}
 }
 
-func TestDNSStoreWrites_RecordDeleteImportAndCutover(t *testing.T) {
-	a := newDSFake(t, "core1", "leader", true)
-	ref := dsRef(t, a)
-	dsPostForm(t, handleDNSStoreRecord(ref), url.Values{"type": {"MX"}, "owner": {"example.lan"}, "target": {"mail.example.lan"}, "priority": {"10"}})
-	dsPostForm(t, handleDNSStoreRecord(ref), url.Values{"type": {"SRV"}, "owner": {"_sip._tcp.example.lan"}, "target": {"pbx.example.lan"}, "priority": {"1"}, "weight": {"5"}, "port": {"5060"}})
-	dsPostForm(t, handleDNSStoreDelete(ref), url.Values{"kind": {"record"}, "id": {strings.Repeat("b", 32)}})
+func TestDNSStoreWrites_ImportAndCutoverGoToTheLeaderOnly(t *testing.T) {
+	a, b := newDSFake(t, "core1", "leader", true), newDSFake(t, "core2", "follower", true)
+	ref := dsRef(t, b, a)
 	dsPostForm(t, handleDNSStoreImport(ref), url.Values{"dry": {"1"}})
 	dsPostForm(t, handleDNSStoreCutover(ref), url.Values{"authoritative": {"on"}})
-	want := []string{"/api/v1/dnsstore/commit", "/api/v1/dnsstore/commit", "/api/v1/dnsstore/commit", "/api/v1/dnsstore/import", "/api/v1/dnsstore/settings"}
-	if strings.Join(a.posts, ",") != strings.Join(want, ",") {
-		t.Fatalf("posts: %v", a.posts)
+	want := []string{"/api/v1/dnsstore/import", "/api/v1/dnsstore/settings"}
+	if strings.Join(a.posts, ",") != strings.Join(want, ",") || len(b.posts) != 0 {
+		t.Fatalf("leader posts %v, follower posts %v", a.posts, b.posts)
 	}
-	if !strings.Contains(a.bodies[0], `"pref":10`) || !strings.Contains(a.bodies[1], `"priority":1`) || !strings.Contains(a.bodies[1], `"port":5060`) {
-		t.Fatalf("MX uses pref, SRV uses priority: %s | %s", a.bodies[0], a.bodies[1])
-	}
-	if !strings.Contains(a.bodies[3], `"dry_run":true`) || !strings.Contains(a.bodies[4], `"authoritative":true`) {
-		t.Fatalf("import and settings bodies: %s | %s", a.bodies[3], a.bodies[4])
-	}
-	if w := dsPostForm(t, handleDNSStoreDelete(ref), url.Values{"kind": {"host"}, "id": {"short"}}); !strings.Contains(w.Header().Get("Location"), "err=") {
-		t.Fatal("a bad id is refused")
+	if !strings.Contains(a.bodies[0], `"dry_run":true`) || !strings.Contains(a.bodies[1], `"authoritative":true`) {
+		t.Fatalf("import and settings bodies: %s | %s", a.bodies[0], a.bodies[1])
 	}
 }
 
 func TestDNSStoreWrites_GateErrorsReachThePage(t *testing.T) {
 	a := newDSFake(t, "core1", "leader", true)
-	a.reply, a.replyOut = 422, `{"errors":["cam.example.lan is already used by another host"],"warnings":[]}`
-	w := dsPostForm(t, handleDNSStoreHost(dsRef(t, a)), url.Values{"label": {"cam"}, "domains": {"example.lan"}})
+	a.reply, a.replyOut = 422, `{"errors":["no local domain is configured, so there is nothing to answer for"],"warnings":[]}`
+	w := dsPostForm(t, handleDNSStoreCutover(dsRef(t, a)), url.Values{"authoritative": {"on"}})
 	loc, _ := url.Parse(w.Header().Get("Location"))
-	if !strings.Contains(loc.Query().Get("err"), "already used by another host") {
-		t.Fatalf("the gate's reason must be shown: %s", w.Header().Get("Location"))
+	if !strings.Contains(loc.Query().Get("err"), "no local domain") {
+		t.Fatalf("the core's reason must be shown: %s", w.Header().Get("Location"))
 	}
 }
 
 func TestDNSStoreWrites_NoCoreRunsTheStore(t *testing.T) {
 	a := newDSFake(t, "core1", "leader", false)
-	w := dsPostForm(t, handleDNSStoreHost(dsRef(t, a)), url.Values{"label": {"a"}, "domains": {"example.lan"}})
+	w := dsPostForm(t, handleDNSStoreCutover(dsRef(t, a)), url.Values{"authoritative": {"on"}})
 	if loc, _ := url.Parse(w.Header().Get("Location")); !strings.Contains(loc.Query().Get("err"), "not enabled") {
 		t.Fatalf("location %s", w.Header().Get("Location"))
-	}
-}
-
-func TestDNSStoreWrites_VIP(t *testing.T) {
-	a := newDSFake(t, "core1", "leader", true)
-	ref := dsRef(t, a)
-	dsPostForm(t, handleDNSStoreVIP(ref), url.Values{"vip": {"192.0.2.53/24"}, "vrrp_id": {"61"}})
-	dsPostForm(t, handleDNSStoreVIP(ref), url.Values{"vip": {"192.0.2.53/24"}, "vrrp_id": {"61"}, "remove": {"1"}})
-	if len(a.bodies) != 2 || !strings.Contains(a.bodies[0], `"dns_vip":"192.0.2.53/24"`) || !strings.Contains(a.bodies[0], `"vrrp_id":61`) || !strings.Contains(a.bodies[1], `"dns_vip":""`) {
-		t.Fatalf("bodies: %v", a.bodies)
-	}
-	if !strings.Contains(dsGet(t, ref, "/dns/store"), "DNS VIP: not set") {
-		t.Fatal("the page shows that no DNS VIP is set")
 	}
 }

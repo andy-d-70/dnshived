@@ -27,28 +27,7 @@ type mgmtVIPData struct {
 	VRRPID    int
 	Priority  int
 	VIP       string
-	DNS       *dnsVIPData
 }
-
-// DNSVIPSpec asks for a second VRRP instance beside the management VIP: an address that answers DNS and that follows
-// the health of the DNS table, not the cluster's quorum. TrackFile holds a number added to the priority.
-type DNSVIPSpec struct {
-	VIP       string
-	VRRPID    int
-	TrackFile string
-}
-
-type dnsVIPData struct {
-	AuthPass  string
-	VRRPID    int
-	Priority  int
-	VIP       string
-	TrackFile string
-}
-
-// DNSVIPUnhealthy is written to the track file when this core cannot serve DNS, which drops its priority below every
-// healthy core's.
-const DNSVIPUnhealthy = -80
 
 // mgmtVIPTmpl renders the management-plane VIP's keepalived config.
 var mgmtVIPTmpl = template.Must(template.New("keepalived-mgmt").Parse(`# dnshived managed — management VIP
@@ -70,43 +49,7 @@ vrrp_instance DNSHIVED_MGMT {
         {{.VIP}}
     }
 }
-{{- if .DNS}}
-
-vrrp_track_file DNSHIVED_DNS_OK {
-    file {{.DNS.TrackFile}}
-    weight 1
-    init_file 0
-}
-
-vrrp_instance DNSHIVED_DNS {
-    state BACKUP
-    interface {{.Interface}}
-    virtual_router_id {{.DNS.VRRPID}}
-    priority {{.DNS.Priority}}
-    advert_int 1
-    preempt_delay 20
-{{- if .DNS.AuthPass}}
-    authentication {
-        auth_type PASS
-        auth_pass {{.DNS.AuthPass}}
-    }
-{{- end}}
-    virtual_ipaddress {
-        {{.DNS.VIP}}
-    }
-    track_file {
-        DNSHIVED_DNS_OK
-    }
-}
-{{- end}}
 `))
-
-// SetDNSVIP switches the DNS VIP instance on (spec) or off (nil); call RenderMgmtVIPConfig afterwards to apply it.
-func (a *Agent) SetDNSVIP(spec *DNSVIPSpec) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.dnsVIP = spec
-}
 
 // mgmtVIPConfPath is where keepalived-mgmt.conf is rendered — factored
 // out so the render and decommission paths below always agree on it.
@@ -137,16 +80,6 @@ func (a *Agent) RenderMgmtVIPConfig(mgmtVIP *config.MgmtVIPConfig, platform *con
 	}
 	if a.psk != "" {
 		data.AuthPass = vrrpPassword(a.psk, fmt.Sprintf("mgmt:vrid:%d", mgmtVIP.VRRPID))
-	}
-	a.mu.Lock()
-	dns := a.dnsVIP
-	a.mu.Unlock()
-	if dns != nil {
-		d := &dnsVIPData{VRRPID: dns.VRRPID, Priority: priority, VIP: dns.VIP, TrackFile: dns.TrackFile}
-		if a.psk != "" {
-			d.AuthPass = vrrpPassword(a.psk, fmt.Sprintf("dns:vrid:%d", dns.VRRPID))
-		}
-		data.DNS = d
 	}
 	var buf bytes.Buffer
 	if err := mgmtVIPTmpl.Execute(&buf, data); err != nil {

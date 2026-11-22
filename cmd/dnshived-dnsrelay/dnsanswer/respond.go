@@ -130,11 +130,25 @@ func parseQuery(q []byte) (query, bool) {
 	return p, true
 }
 
+// gref points at one name's records: the table that holds the group and its index. A nil table means no such name.
+type gref struct {
+	t *Table
+	i int32
+}
+
+func (g gref) ok() bool     { return g.t != nil }
+func (g gref) flags() uint8 { return g.t.groups[g.i].flags }
+func (g gref) hasRRs() bool { return g.t.groups[g.i].nRR > 0 }
+func (g gref) name() []byte { return g.t.name(&g.t.groups[g.i]) }
+func (g gref) rrs() []rrEnt { return g.t.groupRRs(&g.t.groups[g.i]) }
+
+func (t *Table) groupRRs(g *group) []rrEnt { return t.rrs[g.firstRR : g.firstRR+uint32(g.nRR)] }
+
 type result struct {
 	kind uint8
-	g    int
+	g    gref
 	wild bool
-	apex int
+	apex gref
 }
 
 func labelOffsets(qw []byte, offs *[128]uint8) int {
@@ -147,54 +161,55 @@ func labelOffsets(qw []byte, offs *[128]uint8) int {
 }
 
 func (t *Table) resolve(qw []byte) result {
-	if g := t.find(qw); g >= 0 && t.groups[g].nRR > 0 {
-		return result{kind: rAnswer, g: g, apex: -1}
+	if g := t.find(qw); g.ok() && g.hasRRs() {
+		return result{kind: rAnswer, g: g}
 	}
 	var offs [128]uint8
 	n := labelOffsets(qw, &offs)
-	zi, zg := -1, -1
+	zi := -1
+	var zone gref
 	for i := 0; i < n; i++ {
-		if g := t.find(qw[offs[i]:]); g >= 0 && t.groups[g].flags&flagZone != 0 {
-			zi, zg = i, g
+		if g := t.find(qw[offs[i]:]); g.ok() && g.flags()&flagZone != 0 {
+			zi, zone = i, g
 			break
 		}
 	}
-	if zi < 0 || t.groups[zg].flags&flagFwd != 0 {
+	if zi < 0 || zone.flags()&flagFwd != 0 {
 		return result{kind: rForward}
 	}
-	if g := t.find(qw); g >= 0 {
-		return result{kind: rNoData, apex: zg}
+	if g := t.find(qw); g.ok() {
+		return result{kind: rNoData, apex: zone}
 	}
 	var wc [258]byte
 	for i := 1; i <= zi; i++ {
-		if t.find(qw[offs[i]:]) < 0 {
+		if !t.find(qw[offs[i]:]).ok() {
 			continue
 		}
 		wc[0], wc[1] = 1, '*'
 		w := append(wc[:2], qw[offs[i]:]...)
-		if g := t.find(w); g >= 0 && t.groups[g].nRR > 0 {
-			return result{kind: rAnswer, g: g, wild: true, apex: zg}
+		if g := t.find(w); g.ok() && g.hasRRs() {
+			return result{kind: rAnswer, g: g, wild: true, apex: zone}
 		}
 		break
 	}
-	return result{kind: rNXDomain, apex: zg}
+	return result{kind: rNXDomain, apex: zone}
 }
 
-func (t *Table) zoneApex(qw []byte) int {
+func (t *Table) zoneApex(qw []byte) gref {
 	var offs [128]uint8
 	n := labelOffsets(qw, &offs)
 	for i := 0; i < n; i++ {
-		if g := t.find(qw[offs[i]:]); g >= 0 && t.groups[g].flags&flagZone != 0 {
-			if t.groups[g].flags&flagFwd != 0 {
-				return -1
+		if g := t.find(qw[offs[i]:]); g.ok() && g.flags()&flagZone != 0 {
+			if g.flags()&flagFwd != 0 {
+				return gref{}
 			}
 			return g
 		}
 	}
-	return -1
+	return gref{}
 }
 
-func (t *Table) emit(out []byte, name []byte, r rrEnt) []byte {
+func emit(out []byte, t *Table, name []byte, r rrEnt) []byte {
 	if name == nil {
 		out = append(out, 0xC0, 0x0C)
 	} else {
@@ -207,17 +222,14 @@ func (t *Table) emit(out []byte, name []byte, r rrEnt) []byte {
 	return append(out, t.arena[r.rdOff:r.rdOff+uint32(r.rdLen)]...)
 }
 
-func (t *Table) groupRRs(g *group) []rrEnt { return t.rrs[g.firstRR : g.firstRR+uint32(g.nRR)] }
-
-// writeAnswer appends the records for qtype at group gi (following CNAMEs inside the table) and counts them.
-func (t *Table) writeAnswer(out []byte, gi int, qtype uint16, an *int) []byte {
-	g := &t.groups[gi]
-	rrs := t.groupRRs(g)
+// writeAnswer appends the records for qtype at g (following CNAMEs inside the table) and counts them.
+func (t *Table) writeAnswer(out []byte, g gref, qtype uint16, an *int) []byte {
+	rrs := g.rrs()
 	if qtype == TypeANY && len(rrs) > 0 {
 		first := rrs[0].typ
 		for _, r := range rrs {
 			if r.typ == first {
-				out = t.emit(out, nil, r)
+				out = emit(out, g.t, nil, r)
 				*an++
 			}
 		}
@@ -226,7 +238,7 @@ func (t *Table) writeAnswer(out []byte, gi int, qtype uint16, an *int) []byte {
 	start := *an
 	for _, r := range rrs {
 		if r.typ == qtype {
-			out = t.emit(out, nil, r)
+			out = emit(out, g.t, nil, r)
 			*an++
 		}
 	}
@@ -243,20 +255,20 @@ func (t *Table) writeAnswer(out []byte, gi int, qtype uint16, an *int) []byte {
 	if cn == nil {
 		return out
 	}
-	out = t.emit(out, nil, *cn)
+	out = emit(out, g.t, nil, *cn)
 	*an++
+	src := g.t
 	for hop := 0; hop < maxChain; hop++ {
-		target := t.arena[cn.rdOff : cn.rdOff+uint32(cn.rdLen)]
-		ti := t.find(target)
-		if ti < 0 {
+		target := src.arena[cn.rdOff : cn.rdOff+uint32(cn.rdLen)]
+		tg := t.find(target)
+		if !tg.ok() {
 			break
 		}
-		tg := &t.groups[ti]
-		trrs := t.groupRRs(tg)
+		trrs := tg.rrs()
 		found := false
 		for _, r := range trrs {
 			if r.typ == qtype || qtype == TypeANY && r.typ == trrs[0].typ {
-				out = t.emit(out, t.name(tg), r)
+				out = emit(out, tg.t, tg.name(), r)
 				*an++
 				found = true
 			}
@@ -274,14 +286,15 @@ func (t *Table) writeAnswer(out []byte, gi int, qtype uint16, an *int) []byte {
 		if cn == nil {
 			break
 		}
-		out = t.emit(out, t.name(tg), *cn)
+		out = emit(out, tg.t, tg.name(), *cn)
 		*an++
+		src = tg.t
 	}
 	return out
 }
 
-func (t *Table) writeSOA(out []byte, apex int) []byte {
-	name := t.name(&t.groups[apex])
+func (t *Table) writeSOA(out []byte, apex gref) []byte {
+	name := apex.name()
 	out = append(out, name...)
 	out = be.AppendUint16(out, 6)
 	out = be.AppendUint16(out, 1)
@@ -306,6 +319,17 @@ func appendOPT(out []byte) []byte {
 	out = be.AppendUint16(out, MaxUDP)
 	out = be.AppendUint32(out, 0)
 	return be.AppendUint16(out, 0)
+}
+
+// WithOverlay returns a view of base with over (built with NewOverlayBuilder) in front of it: names in over replace or
+// hide the base's records. The view shares base's data and answers like a table; base itself is not touched.
+func WithOverlay(base, over *Table) *Table {
+	v := *base
+	v.over = over
+	if over != nil {
+		v.serial = over.serial
+	}
+	return &v
 }
 
 // Respond answers q from the table when it holds the name or owns its zone; otherwise it reports Forward and
@@ -334,10 +358,10 @@ func (t *Table) Respond(q []byte, dst []byte, tcp bool) ([]byte, Status) {
 	case rAnswer:
 		out = t.writeAnswer(out, res.g, p.qtype, &an)
 		if an == 0 {
-			if res.apex < 0 {
+			if !res.apex.ok() {
 				res.apex = t.zoneApex(qw)
 			}
-			if res.apex >= 0 {
+			if res.apex.ok() {
 				out = t.writeSOA(out, res.apex)
 				ns = 1
 			}

@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"net/netip"
 
 	"dnshived/internal/dnsstore"
@@ -34,10 +35,13 @@ type Addr struct {
 
 // Host is one device name that answers in every listed domain; the first domain owns its reverse record.
 type Host struct {
-	Label   string
-	Domains []string
-	Addrs   []Addr
-	TTL     uint32
+	Label         string
+	Domains       []string
+	Addrs         []Addr
+	TTL           uint32
+	ProbeDisabled bool
+	LastBy        string
+	LastAt        int64
 }
 
 // Record is a non-address record, attached to a host (Host and Sub) or standing alone (Owner).
@@ -60,6 +64,11 @@ type Record struct {
 	CAAFlag uint8
 	CAATag  string
 	Raw     string
+
+	Scope         string
+	ProbeDisabled bool
+	LastBy        string
+	LastAt        int64
 }
 
 type enc struct{ b []byte }
@@ -77,9 +86,11 @@ func (e *enc) str(tag byte, s string) {
 }
 
 func (e *enc) num(tag byte, v uint64) {
-	if v != 0 {
-		e.bytes(tag, binary.AppendUvarint(nil, v))
+	if v == 0 {
+		return
 	}
+	var tmp [binary.MaxVarintLen64]byte
+	e.bytes(tag, tmp[:binary.PutUvarint(tmp[:], v)])
 }
 
 type field struct {
@@ -113,7 +124,11 @@ func num(v []byte) (uint64, error) {
 }
 
 func (h *Host) Encode() []byte {
-	var e enc
+	size := 24 + len(h.Label) + len(h.LastBy) + len(h.Addrs)*19
+	for _, d := range h.Domains {
+		size += len(d) + 2
+	}
+	e := enc{b: make([]byte, 0, size)}
 	e.str(1, h.Label)
 	e.num(2, uint64(h.TTL))
 	for _, d := range h.Domains {
@@ -125,6 +140,13 @@ func (h *Host) Encode() []byte {
 			flag = 1
 		}
 		e.bytes(4, append([]byte{flag}, a.IP.AsSlice()...))
+	}
+	if h.ProbeDisabled {
+		e.num(5, 1)
+	}
+	e.str(6, h.LastBy)
+	if h.LastAt > 0 {
+		e.num(7, uint64(h.LastAt))
 	}
 	return e.b
 }
@@ -153,6 +175,20 @@ func DecodeHost(b []byte) (Host, error) {
 				return h, fmt.Errorf("%w: address", ErrRow)
 			}
 			h.Addrs = append(h.Addrs, Addr{IP: ip, PTR: f.val[0] == 1})
+		case 5:
+			v, err := num(f.val)
+			if err != nil || v > 1 {
+				return h, fmt.Errorf("%w: probe flag", ErrRow)
+			}
+			h.ProbeDisabled = v == 1
+		case 6:
+			h.LastBy = string(f.val)
+		case 7:
+			v, err := num(f.val)
+			if err != nil || v > math.MaxInt64 {
+				return h, fmt.Errorf("%w: change time", ErrRow)
+			}
+			h.LastAt = int64(v)
 		}
 	}
 	if len(h.Domains) > maxDomainsPerHost || len(h.Addrs) > maxAddrsPerHost {
@@ -162,7 +198,9 @@ func DecodeHost(b []byte) (Host, error) {
 }
 
 func (r *Record) Encode() []byte {
-	var e enc
+	size := 64 + len(r.Sub) + len(r.Owner) + len(r.Value) + len(r.Target) + len(r.Flags) + len(r.Service) + len(r.Regexp) +
+		len(r.CAATag) + len(r.Raw) + len(r.Scope) + len(r.LastBy)
+	e := enc{b: make([]byte, 0, size)}
 	e.num(1, uint64(r.Type))
 	e.num(2, uint64(r.TTL))
 	if r.Host != (dnsstore.ID{}) {
@@ -183,6 +221,14 @@ func (r *Record) Encode() []byte {
 	e.str(16, r.CAATag)
 	e.str(17, r.Raw)
 	e.num(18, uint64(r.Order))
+	e.str(19, r.Scope)
+	if r.ProbeDisabled {
+		e.num(20, 1)
+	}
+	e.str(21, r.LastBy)
+	if r.LastAt > 0 {
+		e.num(22, uint64(r.LastAt))
+	}
 	return e.b
 }
 
@@ -217,7 +263,11 @@ func DecodeRecord(b []byte) (Record, error) {
 			r.CAATag = string(f.val)
 		case 17:
 			r.Raw = string(f.val)
-		case 1, 2, 8, 9, 10, 11, 15, 18:
+		case 19:
+			r.Scope = string(f.val)
+		case 21:
+			r.LastBy = string(f.val)
+		case 1, 2, 8, 9, 10, 11, 15, 18, 20, 22:
 			v, err := num(f.val)
 			limit := uint64(65535)
 			switch f.tag {
@@ -225,6 +275,10 @@ func DecodeRecord(b []byte) (Record, error) {
 				limit = maxTTL
 			case 15:
 				limit = 255
+			case 20:
+				limit = 1
+			case 22:
+				limit = math.MaxInt64
 			}
 			if err != nil || v > limit {
 				if f.tag == 2 {
@@ -249,6 +303,10 @@ func DecodeRecord(b []byte) (Record, error) {
 				r.CAAFlag = uint8(v)
 			case 18:
 				r.Order = uint16(v)
+			case 20:
+				r.ProbeDisabled = v == 1
+			case 22:
+				r.LastAt = int64(v)
 			}
 		}
 	}

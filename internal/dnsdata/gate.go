@@ -147,10 +147,6 @@ func buildState(v *dnsstore.View, ops []dnsstore.Op, verdict *Verdict) *state {
 				if string(op.Body) != "0" && string(op.Body) != "1" {
 					verdict.errf("the cutover setting is 0 or 1")
 				}
-			case DNSVIPKey:
-				if _, _, err := ParseDNSVIP(string(op.Body)); err != nil {
-					verdict.errf("%v", err)
-				}
 			default:
 				verdict.errf("unknown setting")
 			}
@@ -213,9 +209,7 @@ func Validate(v *dnsstore.View, ops []dnsstore.Op, ctx GateContext) Verdict {
 	deleted := map[dnsstore.ID]bool{}
 	for _, op := range ops {
 		if op.Kind == dnsstore.OpDel && op.Type == TypeSetting {
-			if k, _ := SettingKey(op.ID); k != DNSVIPKey {
-				verdict.errf("only the DNS VIP setting can be removed")
-			}
+			verdict.errf("a setting cannot be removed")
 			continue
 		}
 		if op.Kind == dnsstore.OpDel {

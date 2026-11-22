@@ -319,7 +319,6 @@ type Agent struct {
 	// (reload failed), so the next render applies it again even if the file is
 	// unchanged.
 	mgmtRestartPending bool
-	dnsVIP             *DNSVIPSpec
 	topoTrunks         []string
 	topoRunner         *topobeacon.Runner
 	topoCtx            context.Context

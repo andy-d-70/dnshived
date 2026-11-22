@@ -382,32 +382,38 @@ func (d LocalDomain) fqdn(host string) string {
 // fully-qualified DNSRecord.
 func (d LocalDomain) ExpandedRecords() []DNSRecord {
 	records := make([]DNSRecord, 0, len(d.Records))
-	for _, h := range d.Records {
-		ttl := h.TTL
-		if ttl == 0 {
-			ttl = d.TTL
-		}
-		records = append(records, DNSRecord{
-			Name:          d.fqdn(h.Host),
-			Type:          h.Type,
-			Value:         h.Value,
-			Target:        h.Target,
-			Port:          h.Port,
-			Priority:      h.Priority,
-			Weight:        h.Weight,
-			NAPTROrder:    h.NAPTROrder,
-			NAPTRFlags:    h.NAPTRFlags,
-			NAPTRService:  h.NAPTRService,
-			NAPTRRegexp:   h.NAPTRRegexp,
-			CAAFlags:      h.CAAFlags,
-			CAATag:        h.CAATag,
-			RRType:        h.RRType,
-			RRDataHex:     h.RRDataHex,
-			TTL:           ttl,
-			ProbeDisabled: h.ProbeDisabled,
-		})
+	for i := range d.Records {
+		records = append(records, d.ExpandedRecord(i))
 	}
 	return records
+}
+
+// ExpandedRecord resolves the i-th host of this domain the way ExpandedRecords does, without building the others.
+func (d LocalDomain) ExpandedRecord(i int) DNSRecord {
+	h := &d.Records[i]
+	ttl := h.TTL
+	if ttl == 0 {
+		ttl = d.TTL
+	}
+	return DNSRecord{
+		Name:          d.fqdn(h.Host),
+		Type:          h.Type,
+		Value:         h.Value,
+		Target:        h.Target,
+		Port:          h.Port,
+		Priority:      h.Priority,
+		Weight:        h.Weight,
+		NAPTROrder:    h.NAPTROrder,
+		NAPTRFlags:    h.NAPTRFlags,
+		NAPTRService:  h.NAPTRService,
+		NAPTRRegexp:   h.NAPTRRegexp,
+		CAAFlags:      h.CAAFlags,
+		CAATag:        h.CAATag,
+		RRType:        h.RRType,
+		RRDataHex:     h.RRDataHex,
+		TTL:           ttl,
+		ProbeDisabled: h.ProbeDisabled,
+	}
 }
 
 func PropagateForkedDomains(domains []LocalDomain, changedName string) []LocalDomain {
