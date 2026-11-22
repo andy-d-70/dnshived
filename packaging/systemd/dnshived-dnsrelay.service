@@ -22,8 +22,8 @@ StateDirectory=dnshived-dnsrelay
 # No CAP_NET_RAW: one socket pair per address, no SO_BINDTODEVICE.
 # Logs go to the journal; no log_file is set in dnsrelay.json.
 
-# SIGHUP re-reads allowed_interfaces, interface_acls and rewrites without
-# disturbing other VLANs; every other setting needs a restart.
+# SIGHUP re-reads allowed_interfaces, interface_acls, rewrites, access, table_file
+# and feed_socket without disturbing other VLANs; every other setting needs a restart.
 
 # Each upstream holds a pool of persistent sockets and every TCP query
 # holds one fd; raised well above both configured ceilings.

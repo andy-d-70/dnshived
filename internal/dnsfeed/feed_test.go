@@ -528,3 +528,35 @@ func FuzzReadFrame(f *testing.F) {
 		}
 	})
 }
+
+func TestPublisher_AskForANewBaseWhenTooManyNamesChanged(t *testing.T) {
+	p := NewPublisher(Options{MaxRingOwners: 3})
+	if err := p.SetBase(blobOf(t, 1)); err != nil {
+		t.Fatal(err)
+	}
+	change := func(names ...string) []dnsanswer.Change {
+		var c []dnsanswer.Change
+		for _, n := range names {
+			c = append(c, dnsanswer.Change{Owner: n + ".example.lan", RRs: []dnsanswer.RR{rr(t, n+".example.lan", "10.0.0.1")}})
+		}
+		return c
+	}
+	if _, err := p.Publish(2, change("a", "b")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Publish(3, change("a", "b", "c")); err != nil {
+		t.Fatalf("changing known names again does not count twice: %v", err)
+	}
+	if _, err := p.Publish(4, change("d")); err != ErrBaseNeeded {
+		t.Fatalf("a fourth name asks for a new base: %v", err)
+	}
+	if st := p.Status(); st.Seq != 2 {
+		t.Fatalf("the refused change was not published: %+v", st)
+	}
+	if err := p.SetBase(blobOf(t, 5)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Publish(6, change("d")); err != nil {
+		t.Fatalf("a new base starts counting again: %v", err)
+	}
+}

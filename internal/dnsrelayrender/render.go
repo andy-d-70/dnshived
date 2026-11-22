@@ -71,6 +71,9 @@ func RenderRelayConfig(cluster config.Cluster) (RelayConfig, error) {
 // TableFile, when set by the daemon, is written into the relay config as the answer table to serve from.
 var TableFile string
 
+// FeedSocket, when set by the daemon, is written into the relay config as the socket to follow the table feed on.
+var FeedSocket string
+
 // WriteRelayConfig renders cluster and MERGES the result into whatever's
 // already at path, rather than overwriting the file wholesale.
 func WriteRelayConfig(path string, cluster config.Cluster) error {
@@ -102,6 +105,11 @@ func WriteRelayConfig(path string, cluster config.Cluster) error {
 	}
 	if TableFile != "" {
 		existing["table_file"] = TableFile
+	}
+	if FeedSocket != "" {
+		existing["feed_socket"] = FeedSocket
+	} else {
+		delete(existing, "feed_socket")
 	}
 	if rendered.Access != nil {
 		existing["access"] = rendered.Access

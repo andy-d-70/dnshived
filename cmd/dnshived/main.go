@@ -256,6 +256,9 @@ func main() {
 	currentConfig.Store(cfg)
 	if dnsStoreEnabled() {
 		dnsrelayrender.TableFile = filepath.Join(dataDir(cfg), "dnstable.bin")
+		if dnsFeedEnabled() {
+			dnsrelayrender.FeedSocket = filepath.Join(dataDir(cfg), "dnsfeed.sock")
+		}
 	}
 	labprofile.Start(func() string { return dataDir(currentConfig.Load()) })
 	outage.rules.active.Store(cfg.OutageRulesActive)

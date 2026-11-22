@@ -93,6 +93,9 @@ type Config struct {
 	// TableFile is the answer table the daemon publishes; names in it are answered here instead of being forwarded.
 	// Empty means the relay only forwards. A reload picks up a change.
 	TableFile string `json:"table_file,omitempty"`
+	// FeedSocket is the unix socket the daemon publishes the table and its changes on. While a table arrives through
+	// it, TableFile is not read; the file is only the copy to start from.
+	FeedSocket string `json:"feed_socket,omitempty"`
 }
 
 // ACLConfig is one interface's policy override.
@@ -1988,6 +1991,7 @@ func reloadInterfaces(configPath string) {
 	}
 	applyAccess(newCfg)
 	setTablePath(newCfg.TableFile)
+	setFeedSocket(shutdownCtx, newCfg.FeedSocket)
 	prevInterfaceACLs := cfg.InterfaceACLs
 	prevRewrites := cfg.Rewrites
 	cfg.InterfaceACLs = newCfg.InterfaceACLs
@@ -2705,6 +2709,7 @@ func main() {
 	go addrSocketReconcileLoop(shutdownCtx, addrRefreshInterval)
 	go statsFileLoop(shutdownCtx, 15*time.Second)
 	setTablePath(cfg.TableFile)
+	setFeedSocket(shutdownCtx, cfg.FeedSocket)
 	go tableLoop(shutdownCtx)
 	go accessRep.Run(shutdownCtx, accessReportPath, 10*time.Second, accessEnforcing, logger.Printf)
 
@@ -2869,6 +2874,9 @@ func tableLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+		}
+		if feedActive() {
+			continue
 		}
 		var path string
 		if p := tablePath.Load(); p != nil {

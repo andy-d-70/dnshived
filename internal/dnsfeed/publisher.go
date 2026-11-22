@@ -31,6 +31,9 @@ type Options struct {
 	QueueDepth int
 	// MaxRingBytes bounds the changes kept since the base for readers that reconnect (default 64 MiB).
 	MaxRingBytes int
+	// MaxRingOwners bounds the names changed since the base (default 2000): every reader keeps them in front of the
+	// base, and each further change costs more the more there are.
+	MaxRingOwners int
 	// HelloTimeout is how long a new connection may take to say hello (default 5 s).
 	HelloTimeout time.Duration
 	// WriteTimeout bounds a single write to a reader (default 10 s).
@@ -47,6 +50,9 @@ func (o *Options) fill() {
 	}
 	if o.MaxRingBytes <= 0 {
 		o.MaxRingBytes = 64 << 20
+	}
+	if o.MaxRingOwners <= 0 {
+		o.MaxRingOwners = 2000
 	}
 	if o.HelloTimeout <= 0 {
 		o.HelloTimeout = 5 * time.Second
@@ -79,6 +85,7 @@ type Publisher struct {
 	chain     [chainSize]byte
 	ring      [][]byte
 	ringBytes int
+	owners    map[string]struct{}
 	sessions  map[*session]struct{}
 	dropped   uint64
 }
@@ -104,7 +111,7 @@ func (p *Publisher) SetBase(blob []byte) error {
 	p.seq = 0
 	p.chain = chainSeed(p.epoch, t.Digest())
 	p.snapshot = appendFrame(nil, msgSnapshot, le.AppendUint64(nil, p.epoch), blob)
-	p.ring, p.ringBytes = nil, 0
+	p.ring, p.ringBytes, p.owners = nil, 0, map[string]struct{}{}
 	for s := range p.sessions {
 		s.send(p, p.snapshot)
 	}
@@ -126,6 +133,18 @@ func (p *Publisher) Publish(serial uint32, changes []dnsanswer.Change) (uint64, 
 	frame := appendFrame(nil, msgDelta, payload)
 	if p.ringBytes+len(frame) > p.o.MaxRingBytes {
 		return 0, ErrBaseNeeded
+	}
+	fresh := 0
+	for i := range changes {
+		if _, ok := p.owners[changes[i].Owner]; !ok {
+			fresh++
+		}
+	}
+	if len(p.owners)+fresh > p.o.MaxRingOwners {
+		return 0, ErrBaseNeeded
+	}
+	for i := range changes {
+		p.owners[changes[i].Owner] = struct{}{}
 	}
 	p.seq++
 	p.chain = chain
