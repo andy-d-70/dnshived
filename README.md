@@ -11,6 +11,9 @@ to understand, operate, and recover under pressure.
 *Design principle: When authority is uncertain, dnshived prefers temporary
 silence over contradictory authority.*
 
+**Try it:** the project page with an interactive simulator is online at
+[dnshived.dunkl.net](https://dnshived.dunkl.net/).
+
 ## Why
 
 Two DHCP servers. A network partition. Both hand out the same addresses.
