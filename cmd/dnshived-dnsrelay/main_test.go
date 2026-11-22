@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -24,17 +25,30 @@ func TestMain(m *testing.M) {
 	for i := range rateShards {
 		rateShards[i] = newRateShard()
 	}
-	cfg = Config{
-		ListenAddr:        "0.0.0.0:0",
-		CacheSize:         500,
-		MaxPacketSize:     4096,
-		RateLimit:         100,
-		RateBurst:         200,
-		RateLimitScope:    "subnet",
-		MaxTCPConnections: 100,
-		MaxTCPPerSource:   10,
-	}
+	shutdownCtx, shutdownCancel = context.WithCancel(context.Background())
+	cfgPtr.Store(&Config{
+		ListenAddr:          "0.0.0.0:0",
+		CacheSize:           500,
+		MaxPacketSize:       4096,
+		RateLimit:           100,
+		RateBurst:           200,
+		RateLimitScope:      "subnet",
+		MaxTCPConnections:   100,
+		MaxTCPPerSource:     10,
+		MaxOutstanding:      10000,
+		AddrRefreshInterval: Duration(2 * time.Second),
+	})
 	os.Exit(m.Run())
+}
+
+// setCfg replaces the running configuration with a changed copy for the rest of the test.
+func setCfg(t testing.TB, f func(*Config)) {
+	t.Helper()
+	old := conf()
+	c := *old
+	f(&c)
+	cfgPtr.Store(&c)
+	t.Cleanup(func() { cfgPtr.Store(old) })
 }
 
 // ------------------------- synthetic packet builders
@@ -556,14 +570,12 @@ func TestMatchRewrite_NilACLIsSafe(t *testing.T) {
 // ------------------------- resolveACL: rewrite merge semantics -------------------------
 
 func TestResolveACL_InterfaceRewritesAreAdditiveNotReplacing(t *testing.T) {
-	origRewrites := cfg.Rewrites
-	origACLs := cfg.InterfaceACLs
-	defer func() { cfg.Rewrites = origRewrites; cfg.InterfaceACLs = origACLs }()
-
-	cfg.Rewrites = []RewriteRule{{Match: "global.test", Rewrite: "global-target.test"}}
-	cfg.InterfaceACLs = map[string]ACLConfig{
-		"dnstest1": {Rewrites: []RewriteRule{{Match: "iface-only.test", Rewrite: "iface-target.test"}}},
-	}
+	setCfg(t, func(c *Config) {
+		c.Rewrites = []RewriteRule{{Match: "global.test", Rewrite: "global-target.test"}}
+		c.InterfaceACLs = map[string]ACLConfig{
+			"dnstest1": {Rewrites: []RewriteRule{{Match: "iface-only.test", Rewrite: "iface-target.test"}}},
+		}
+	})
 
 	withOverride, err := resolveACL("dnstest1")
 	if err != nil {
@@ -586,9 +598,7 @@ func TestResolveACL_InterfaceRewritesAreAdditiveNotReplacing(t *testing.T) {
 }
 
 func TestResolveACL_RejectsInvalidGlobalRewrite(t *testing.T) {
-	origRewrites := cfg.Rewrites
-	defer func() { cfg.Rewrites = origRewrites }()
-	cfg.Rewrites = []RewriteRule{{Match: "bad.test", Answer: "not-an-ip"}}
+	setCfg(t, func(c *Config) { c.Rewrites = []RewriteRule{{Match: "bad.test", Answer: "not-an-ip"}} })
 
 	if _, err := resolveACL("anything"); err == nil {
 		t.Fatal("expected resolveACL to reject a malformed cluster-wide rewrite rule")
@@ -744,13 +754,9 @@ func buildSizedEntry(t testing.TB, qname string, n int) ([]byte, cacheKey) {
 // returns a cleanup restoring it plus flushing the cache.
 func cacheMaxBytesTestCleanup(t *testing.T, want int) {
 	t.Helper()
-	orig := cfg.CacheMaxBytes
-	cfg.CacheMaxBytes = want
+	setCfg(t, func(c *Config) { c.CacheMaxBytes = want })
 	cacheFlushAll()
-	t.Cleanup(func() {
-		cfg.CacheMaxBytes = orig
-		cacheFlushAll()
-	})
+	t.Cleanup(func() { cacheFlushAll() })
 }
 
 func TestCacheSet_CacheMaxBytesZeroDisablesByteCeiling(t *testing.T) {
@@ -972,25 +978,27 @@ func TestReloadInterfaces_RestoresInterfaceACLsAndRewritesOnRefusal(t *testing.T
 	if ok := reconfigureInterfaces([]string{"lo"}); !ok {
 		t.Fatal("setup: reconfigureInterfaces([lo]) failed")
 	}
-	cfg.InterfaceACLs = map[string]ACLConfig{"lo": {RateLimit: intPtr(7)}}
-	cfg.Rewrites = []RewriteRule{{Match: "old-rule.test", Answer: "1.1.1.1"}}
+	setCfg(t, func(c *Config) {
+		c.InterfaceACLs = map[string]ACLConfig{"lo": {RateLimit: intPtr(7)}}
+		c.Rewrites = []RewriteRule{{Match: "old-rule.test", Answer: "1.1.1.1"}}
+	})
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dnsrelay-reload-test.json")
-	body := `{"allowed_interfaces": ["definitely-not-a-real-interface-xyz"], ` +
+	body := `{"upstreams": ["127.0.0.1"], "allowed_interfaces": ["definitely-not-a-real-interface-xyz"], ` +
 		`"interface_acls": {"lo": {"rate_limit": 999}}, ` +
 		`"rewrites": [{"match": "new-rule.test", "answer": "2.2.2.2"}]}`
 	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
 		t.Fatalf("write temp config: %v", err)
 	}
 
-	reloadInterfaces(path)
+	reloadConfig(path)
 
-	if got := cfg.InterfaceACLs["lo"].RateLimit; got == nil || *got != 7 {
-		t.Errorf("cfg.InterfaceACLs was committed despite a refused reload: %+v", cfg.InterfaceACLs)
+	if got := conf().InterfaceACLs["lo"].RateLimit; got == nil || *got != 7 {
+		t.Errorf("InterfaceACLs was committed despite a refused reload: %+v", conf().InterfaceACLs)
 	}
-	if len(cfg.Rewrites) != 1 || cfg.Rewrites[0].Match != "old-rule.test" {
-		t.Errorf("cfg.Rewrites was committed despite a refused reload: %+v", cfg.Rewrites)
+	if len(conf().Rewrites) != 1 || conf().Rewrites[0].Match != "old-rule.test" {
+		t.Errorf("Rewrites was committed despite a refused reload: %+v", conf().Rewrites)
 	}
 }
 
@@ -998,25 +1006,24 @@ func TestReloadInterfaces_CommitsInterfaceACLsAndRewritesOnSuccess(t *testing.T)
 	if ok := reconfigureInterfaces([]string{"lo"}); !ok {
 		t.Fatal("setup: reconfigureInterfaces([lo]) failed")
 	}
-	cfg.InterfaceACLs = nil
-	cfg.Rewrites = nil
+	setCfg(t, func(c *Config) { c.InterfaceACLs = nil; c.Rewrites = nil })
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "dnsrelay-reload-ok-test.json")
-	body := `{"allowed_interfaces": ["lo"], ` +
+	body := `{"upstreams": ["127.0.0.1"], "allowed_interfaces": ["lo"], ` +
 		`"interface_acls": {"lo": {"rate_limit": 55}}, ` +
 		`"rewrites": [{"match": "applied-rule.test", "answer": "3.3.3.3"}]}`
 	if err := os.WriteFile(path, []byte(body), 0644); err != nil {
 		t.Fatalf("write temp config: %v", err)
 	}
 
-	reloadInterfaces(path)
+	reloadConfig(path)
 
-	if got := cfg.InterfaceACLs["lo"].RateLimit; got == nil || *got != 55 {
-		t.Fatalf("cfg.InterfaceACLs not applied after a successful reload: %+v", cfg.InterfaceACLs)
+	if got := conf().InterfaceACLs["lo"].RateLimit; got == nil || *got != 55 {
+		t.Fatalf("InterfaceACLs not applied after a successful reload: %+v", conf().InterfaceACLs)
 	}
-	if len(cfg.Rewrites) != 1 || cfg.Rewrites[0].Match != "applied-rule.test" {
-		t.Fatalf("cfg.Rewrites not applied after a successful reload: %+v", cfg.Rewrites)
+	if len(conf().Rewrites) != 1 || conf().Rewrites[0].Match != "applied-rule.test" {
+		t.Fatalf("Rewrites not applied after a successful reload: %+v", conf().Rewrites)
 	}
 }
 
@@ -1088,7 +1095,6 @@ func TestReconcileAddrSocketsLocked_UpdatesACLWithoutReopening(t *testing.T) {
 	openSockets = make(map[uint32]*addrSocket)
 	reconcileMu.Unlock()
 	savedIfaces := allowedIfaces.Load()
-	savedGlobalRewrites := cfg.Rewrites
 	defer func() {
 		reconcileMu.Lock()
 		for _, s := range openSockets {
@@ -1097,7 +1103,6 @@ func TestReconcileAddrSocketsLocked_UpdatesACLWithoutReopening(t *testing.T) {
 		openSockets = savedOpen
 		reconcileMu.Unlock()
 		allowedIfaces.Store(savedIfaces)
-		cfg.Rewrites = savedGlobalRewrites
 	}()
 
 	if ok := reconfigureInterfaces([]string{"lo"}); !ok {
@@ -1115,7 +1120,7 @@ func TestReconcileAddrSocketsLocked_UpdatesACLWithoutReopening(t *testing.T) {
 	}
 	beforeUDP := before.udpConn
 
-	cfg.Rewrites = []RewriteRule{{Match: "acl-update-marker.test", Answer: "9.9.9.9"}}
+	setCfg(t, func(c *Config) { c.Rewrites = []RewriteRule{{Match: "acl-update-marker.test", Answer: "9.9.9.9"}} })
 	if ok := reconfigureInterfaces([]string{"lo"}); !ok {
 		t.Fatal("reconfigureInterfaces([lo]) (second call) failed")
 	}

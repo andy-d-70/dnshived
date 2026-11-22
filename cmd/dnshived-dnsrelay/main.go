@@ -222,14 +222,12 @@ func logThrottled(category string, format string, v ...any) {
 }
 
 var (
-	cfg Config
+	// cfgPtr is the running configuration, replaced as a whole on every (re)load and never modified in place.
+	cfgPtr atomic.Pointer[Config]
 
-	// raw upstream addresses (used during init)
-	upstreams []*net.UDPAddr
-
-	// upstream pools (one per upstream address, each containing multiple
-	// sockets)
-	upstreamPools []*upstreamPool
+	// upstream pools (one per upstream address, each containing multiple sockets), replaced as a whole when the
+	// upstream list or the pool size changes
+	upstreamPools atomic.Pointer[[]*upstreamPool]
 
 	allowedIfaces atomic.Pointer[map[int]*ifaceInfo]
 
@@ -254,7 +252,6 @@ var (
 	// rate limiter: fixed shards, keyed by first byte
 	rateShards [256]*rateShard
 
-	outstandingSem     chan struct{}
 	outstandingQueries atomic.Int64
 
 	logger *log.Logger
@@ -376,20 +373,20 @@ func domainListMatches(domains []string, qnameLower string) bool {
 // ready-to-enforce resolvedACL.
 func resolveACL(name string) (*resolvedACL, error) {
 	acl := &resolvedACL{
-		rateLimit:          cfg.RateLimit,
-		rateBurst:          cfg.RateBurst,
-		rateLimitScope:     cfg.RateLimitScope,
-		interfaceRateLimit: cfg.InterfaceRateLimit,
-		interfaceRateBurst: cfg.InterfaceRateBurst,
-		maxTCPConnections:  cfg.MaxTCPConnections,
-		maxTCPPerSource:    cfg.MaxTCPPerSource,
+		rateLimit:          conf().RateLimit,
+		rateBurst:          conf().RateBurst,
+		rateLimitScope:     conf().RateLimitScope,
+		interfaceRateLimit: conf().InterfaceRateLimit,
+		interfaceRateBurst: conf().InterfaceRateBurst,
+		maxTCPConnections:  conf().MaxTCPConnections,
+		maxTCPPerSource:    conf().MaxTCPPerSource,
 	}
-	globalRewrites, err := resolveRewriteRules(cfg.Rewrites)
+	globalRewrites, err := resolveRewriteRules(conf().Rewrites)
 	if err != nil {
 		return nil, fmt.Errorf("cluster-wide rewrites: %w", err)
 	}
 	acl.rewrites = globalRewrites
-	override, ok := cfg.InterfaceACLs[name]
+	override, ok := conf().InterfaceACLs[name]
 	if !ok {
 		return acl, nil
 	}
@@ -646,7 +643,7 @@ func cacheSet(key cacheKey, resp []byte, ttl uint32) {
 		removeCacheEntryFromShard(shard, key, entry)
 	}
 
-	if shard.order.Len() >= cfg.CacheSize/cacheShardCount {
+	if shard.order.Len() >= conf().CacheSize/cacheShardCount {
 		oldest := shard.order.Front()
 		if oldest != nil {
 			oldEntry := oldest.Value.(*cacheEntry)
@@ -654,11 +651,11 @@ func cacheSet(key cacheKey, resp []byte, ttl uint32) {
 		}
 	}
 
-	if cfg.CacheMaxBytes > 0 {
-		if len(resp) > cfg.CacheMaxBytes {
+	if conf().CacheMaxBytes > 0 {
+		if len(resp) > conf().CacheMaxBytes {
 			return
 		}
-		for cacheBytesUsed.Load()+int64(len(resp)) > int64(cfg.CacheMaxBytes) {
+		for cacheBytesUsed.Load()+int64(len(resp)) > int64(conf().CacheMaxBytes) {
 			oldest := shard.order.Front()
 			if oldest == nil {
 				break
@@ -802,8 +799,8 @@ func buildCacheStatsSnapshot() cacheStatsSnapshot {
 	}
 	return cacheStatsSnapshot{
 		Entries:       entries,
-		CacheSize:     cfg.CacheSize,
-		CacheMaxBytes: cfg.CacheMaxBytes,
+		CacheSize:     conf().CacheSize,
+		CacheMaxBytes: conf().CacheMaxBytes,
 		BytesUsed:     bytesUsed,
 		Hits:          hits,
 		Misses:        misses,
@@ -882,7 +879,7 @@ func newUpstreamClient(addr *net.UDPAddr) (*upstreamClient, error) {
 }
 
 func (uc *upstreamClient) readLoop() {
-	buf := make([]byte, cfg.MaxPacketSize)
+	buf := make([]byte, conf().MaxPacketSize)
 	for {
 		n, err := uc.conn.Read(buf)
 		if err != nil {
@@ -987,15 +984,30 @@ func (uc *upstreamClient) isHealthy() bool {
 
 type upstreamPool struct {
 	addr    *net.UDPAddr
+	size    int
 	clients []*upstreamClient
 	mu      sync.RWMutex
+	cancel  context.CancelFunc
 }
 
-func newUpstreamPool(addr *net.UDPAddr, size int, ctx context.Context) (*upstreamPool, error) {
-	pool := &upstreamPool{addr: addr}
+// close stops the pool's reaper and closes every socket; queries still waiting on them fail and the next one goes to
+// the new pool.
+func (p *upstreamPool) close() {
+	p.cancel()
+	p.mu.Lock()
+	for _, c := range p.clients {
+		_ = c.conn.Close()
+	}
+	p.mu.Unlock()
+}
+
+func newUpstreamPool(addr *net.UDPAddr, size int, parent context.Context) (*upstreamPool, error) {
+	ctx, cancel := context.WithCancel(parent)
+	pool := &upstreamPool{addr: addr, size: size, cancel: cancel}
 	for i := 0; i < size; i++ {
 		uc, err := newUpstreamClient(addr)
 		if err != nil {
+			cancel()
 			for _, c := range pool.clients {
 				c.conn.Close()
 			}
@@ -1751,9 +1763,9 @@ func reuseAddrControl(network, address string, c syscall.RawConn) error {
 
 // listenPort extracts just the :port suffix of cfg.ListenAddr.
 func listenPort() (int, error) {
-	_, portStr, err := net.SplitHostPort(cfg.ListenAddr)
+	_, portStr, err := net.SplitHostPort(conf().ListenAddr)
 	if err != nil {
-		return 0, fmt.Errorf("parse listen_addr %q: %w", cfg.ListenAddr, err)
+		return 0, fmt.Errorf("parse listen_addr %q: %w", conf().ListenAddr, err)
 	}
 	port, err := net.LookupPort("udp", portStr)
 	if err != nil {
@@ -1876,16 +1888,14 @@ func reconcileAddrSocketsLocked() {
 	}
 }
 
-// addrSocketReconcileLoop drives reconcileAddrSockets on a fixed interval
+// addrSocketReconcileLoop drives reconcileAddrSockets, reading the interval from the running configuration each round
 // until ctx is done.
-func addrSocketReconcileLoop(ctx context.Context, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+func addrSocketReconcileLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-time.After(conf().AddrRefreshInterval.D()):
 			reconcileAddrSockets()
 		}
 	}
@@ -1975,31 +1985,52 @@ func reconfigureInterfaces(newNames []string) bool {
 	return true
 }
 
-// reloadInterfaces re-reads configPath and applies ONLY its
-// allowed_interfaces, interface_acls, and rewrites fields, via
-// reconfigureInterfaces.
-func reloadInterfaces(configPath string) {
+// restartOnly lists the settings that are read once when the process starts: the listen port the sockets are bound
+// to, the log file and the size of the packet buffers. A reload keeps the running value of these and says so.
+var restartOnly = map[string]bool{"listen_addr": true, "log_file": true, "max_packet_size": true}
+
+// reloadConfig re-reads configPath and applies it without stopping service: the new configuration is parsed and
+// validated as a whole first, a bad one changes nothing, and every setting not in restartOnly takes effect at once.
+func reloadConfig(configPath string) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		logger.Printf("[RELOAD] read config: %v (keeping current interfaces, nothing changed)", err)
+		logger.Printf("[RELOAD] read config: %v (keeping the running configuration, nothing changed)", err)
 		return
 	}
-	var newCfg Config
-	if err := json.Unmarshal(data, &newCfg); err != nil {
-		logger.Printf("[RELOAD] parse config: %v (keeping current interfaces, nothing changed)", err)
+	next, err := parseConfig(data)
+	if err != nil {
+		logger.Printf("[RELOAD] parse config: %v (keeping the running configuration, nothing changed)", err)
 		return
 	}
-	applyAccess(newCfg)
-	setTablePath(newCfg.TableFile)
-	setFeedSocket(shutdownCtx, newCfg.FeedSocket)
-	prevInterfaceACLs := cfg.InterfaceACLs
-	prevRewrites := cfg.Rewrites
-	cfg.InterfaceACLs = newCfg.InterfaceACLs
-	cfg.Rewrites = newCfg.Rewrites
-	if !reconfigureInterfaces(newCfg.AllowedInterfaces) {
-		cfg.InterfaceACLs = prevInterfaceACLs
-		cfg.Rewrites = prevRewrites
+	old := conf()
+	var kept []string
+	if next.ListenAddr != old.ListenAddr {
+		next.ListenAddr = old.ListenAddr
+		kept = append(kept, "listen_addr")
 	}
+	if next.LogFile != old.LogFile {
+		next.LogFile = old.LogFile
+		kept = append(kept, "log_file")
+	}
+	if next.MaxPacketSize != old.MaxPacketSize {
+		next.MaxPacketSize = old.MaxPacketSize
+		kept = append(kept, "max_packet_size")
+	}
+	applyAccess(*next)
+	setTablePath(next.TableFile)
+	setFeedSocket(shutdownCtx, next.FeedSocket)
+	cfgPtr.Store(next)
+	if !reconfigureInterfaces(next.AllowedInterfaces) {
+		cfgPtr.Store(old)
+		return
+	}
+	if err := applyUpstreams(shutdownCtx, next); err != nil {
+		logger.Printf("[RELOAD] upstreams: %v (the running upstreams stay)", err)
+	}
+	if len(kept) > 0 {
+		logger.Printf("[RELOAD] needs a restart, running value kept: %s", strings.Join(kept, ", "))
+	}
+	logger.Printf("[RELOAD] configuration applied")
 }
 
 func randomUint16() uint16 {
@@ -2034,7 +2065,7 @@ func forwardTCP(upstream *net.UDPAddr, query []byte, timeout time.Duration) ([]b
 		return nil, err
 	}
 	respLen := int(binary.BigEndian.Uint16(lenBuf[:]))
-	if respLen < 12 || respLen > cfg.MaxPacketSize {
+	if respLen < 12 || respLen > conf().MaxPacketSize {
 		return nil, fmt.Errorf("invalid TCP response length %d", respLen)
 	}
 	resp := make([]byte, respLen)
@@ -2054,18 +2085,24 @@ func sendUDPReply(conn *net.UDPConn, client *net.UDPAddr, resp []byte) {
 	repliesSent.Add(1)
 }
 
+func conf() *Config { return cfgPtr.Load() }
+
+func pools() []*upstreamPool {
+	if p := upstreamPools.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
+
 func acquireOutstanding() bool {
-	select {
-	case outstandingSem <- struct{}{}:
-		outstandingQueries.Add(1)
-		return true
-	default:
+	if outstandingQueries.Add(1) > int64(conf().MaxOutstanding) {
+		outstandingQueries.Add(-1)
 		return false
 	}
+	return true
 }
 
 func releaseOutstanding() {
-	<-outstandingSem
 	outstandingQueries.Add(-1)
 }
 
@@ -2090,7 +2127,7 @@ func udpWorker(wg *sync.WaitGroup, jobs <-chan udpJob) {
 // half.
 func udpReadLoopForSocket(sock *addrSocket) {
 	defer udpReaderWG.Done()
-	buf := make([]byte, cfg.MaxPacketSize)
+	buf := make([]byte, conf().MaxPacketSize)
 	for {
 		n, remoteAddr, err := sock.udpConn.ReadFromUDP(buf)
 		if err != nil {
@@ -2245,11 +2282,11 @@ func processUDPQuery(conn *net.UDPConn, packet []byte, client *net.UDPAddr, acl 
 	binary.BigEndian.PutUint16(modified[0:2], newID)
 
 	var lastErr error
-	for _, pool := range upstreamPools {
+	for _, pool := range pools() {
 		if !pool.isHealthy() {
 			continue
 		}
-		resp, usedID, err := pool.query(modified, cfg.Timeout.D())
+		resp, usedID, err := pool.query(modified, conf().Timeout.D())
 		if err != nil {
 			upstreamErrors.Add(1)
 			lastErr = err
@@ -2271,7 +2308,7 @@ func processUDPQuery(conn *net.UDPConn, packet []byte, client *net.UDPAddr, acl 
 				copy(tcpQuery, modified)
 				binary.BigEndian.PutUint16(tcpQuery[0:2], originalID)
 			}
-			tcpResp, err := forwardTCP(pool.addr, tcpQuery, cfg.TCPTimeout.D())
+			tcpResp, err := forwardTCP(pool.addr, tcpQuery, conf().TCPTimeout.D())
 			if err == nil {
 				if validateDNSResponse(tcpResp, originalID, forwardQName, qtype, qclass) {
 					resp = tcpResp
@@ -2407,7 +2444,7 @@ func handleTCPConn(conn *net.TCPConn, ifIndex int, acl *resolvedACL) {
 			return
 		}
 		queryLen := int(binary.BigEndian.Uint16(lenBuf[:]))
-		if queryLen < 12 || queryLen > cfg.MaxPacketSize {
+		if queryLen < 12 || queryLen > conf().MaxPacketSize {
 			return
 		}
 		query := make([]byte, queryLen)
@@ -2510,7 +2547,7 @@ func handleTCPConn(conn *net.TCPConn, ifIndex int, acl *resolvedACL) {
 
 		// Held explicitly, released at every exit point below instead of deferred.
 		var upstreamAddr *net.UDPAddr
-		for _, pool := range upstreamPools {
+		for _, pool := range pools() {
 			if pool.isHealthy() {
 				upstreamAddr = pool.addr
 				break
@@ -2522,12 +2559,12 @@ func handleTCPConn(conn *net.TCPConn, ifIndex int, acl *resolvedACL) {
 			continue
 		}
 
-		resp, err := forwardTCP(upstreamAddr, queryToSend, cfg.TCPTimeout.D())
+		resp, err := forwardTCP(upstreamAddr, queryToSend, conf().TCPTimeout.D())
 		if err != nil {
 			// try other upstreams
-			for _, pool := range upstreamPools {
+			for _, pool := range pools() {
 				if pool.isHealthy() {
-					resp, err = forwardTCP(pool.addr, queryToSend, cfg.TCPTimeout.D())
+					resp, err = forwardTCP(pool.addr, queryToSend, conf().TCPTimeout.D())
 					if err == nil {
 						break
 					}
@@ -2608,7 +2645,7 @@ var packetPool = sync.Pool{}
 func getPacketBuffer() []byte {
 	buf := packetPool.Get()
 	if buf == nil {
-		return make([]byte, cfg.MaxPacketSize)
+		return make([]byte, conf().MaxPacketSize)
 	}
 	return buf.([]byte)
 }
@@ -2637,12 +2674,9 @@ func main() {
 	if err := loadConfig(*configPath); err != nil {
 		log.Fatalf("load config: %v", err)
 	}
-	if err := loadUpstreams(); err != nil {
-		log.Fatalf("load upstreams: %v", err)
-	}
 
-	if cfg.LogFile != "" {
-		f, err := os.OpenFile(cfg.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if conf().LogFile != "" {
+		f, err := os.OpenFile(conf().LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			log.Fatalf("open log: %v", err)
 		}
@@ -2658,11 +2692,11 @@ func main() {
 	}
 	tcpConnPerSrc = make(map[string]int)
 	initCacheShards()
-	applyAccess(cfg)
+	applyAccess(*conf())
 
 	// register allowed interfaces
-	initialIfaces := make(map[int]*ifaceInfo, len(cfg.AllowedInterfaces))
-	for _, name := range cfg.AllowedInterfaces {
+	initialIfaces := make(map[int]*ifaceInfo, len(conf().AllowedInterfaces))
+	for _, name := range conf().AllowedInterfaces {
 		idx, info, err := buildIfaceInfo(name)
 		if err != nil {
 			logger.Fatalf("%v", err)
@@ -2671,20 +2705,12 @@ func main() {
 	}
 	allowedIfaces.Store(&initialIfaces)
 
-	// initialize semaphore
-	outstandingSem = make(chan struct{}, cfg.MaxOutstanding)
-
 	// create shutdown context
 	shutdownCtx, shutdownCancel = context.WithCancel(context.Background())
 	defer shutdownCancel()
 
-	// create upstream pools
-	for _, u := range upstreams {
-		pool, err := newUpstreamPool(u, cfg.UpstreamSocketPoolSize, shutdownCtx)
-		if err != nil {
-			logger.Fatalf("failed to create upstream pool for %s: %v", u, err)
-		}
-		upstreamPools = append(upstreamPools, pool)
+	if err := applyUpstreams(shutdownCtx, conf()); err != nil {
+		logger.Fatalf("failed to create the upstream pools: %v", err)
 	}
 
 	sig := make(chan os.Signal, 1)
@@ -2705,21 +2731,21 @@ func main() {
 	}
 
 	reconcileAddrSockets()
-	addrRefreshInterval := cfg.AddrRefreshInterval.D()
-	go addrSocketReconcileLoop(shutdownCtx, addrRefreshInterval)
+	addrRefreshInterval := conf().AddrRefreshInterval.D()
+	go addrSocketReconcileLoop(shutdownCtx)
 	go statsFileLoop(shutdownCtx, 15*time.Second)
-	setTablePath(cfg.TableFile)
-	setFeedSocket(shutdownCtx, cfg.FeedSocket)
+	setTablePath(conf().TableFile)
+	setFeedSocket(shutdownCtx, conf().FeedSocket)
 	go tableLoop(shutdownCtx)
 	go accessRep.Run(shutdownCtx, accessReportPath, 10*time.Second, accessEnforcing, logger.Printf)
 
 	logger.Printf("dnsrelay started: listen_port=%s upstreams=%v allowed_ifaces=%v cache_size=%d cache_max_bytes=%d max_outstanding=%d rate_scope=%s socket_pool=%d addr_refresh=%s cluster_rewrites=%d",
-		cfg.ListenAddr, cfg.Upstreams, cfg.AllowedInterfaces, cfg.CacheSize, cfg.CacheMaxBytes, cfg.MaxOutstanding, cfg.RateLimitScope, cfg.UpstreamSocketPoolSize, addrRefreshInterval, len(cfg.Rewrites))
+		conf().ListenAddr, conf().Upstreams, conf().AllowedInterfaces, conf().CacheSize, conf().CacheMaxBytes, conf().MaxOutstanding, conf().RateLimitScope, conf().UpstreamSocketPoolSize, addrRefreshInterval, len(conf().Rewrites))
 
 	for s := range sig {
 		switch s {
 		case syscall.SIGHUP:
-			reloadInterfaces(*configPath)
+			reloadConfig(*configPath)
 			continue
 		case syscall.SIGUSR1:
 			entries, hits, misses, bytesUsed := cacheStats()
@@ -2728,10 +2754,10 @@ func main() {
 			if total > 0 {
 				hitRate = float64(hits) / float64(total) * 100
 			}
-			if cfg.CacheMaxBytes > 0 {
-				logger.Printf("[CACHE] entries=%d/%d bytes=%d/%d hits=%d misses=%d hit_rate=%.1f%%", entries, cfg.CacheSize, bytesUsed, cfg.CacheMaxBytes, hits, misses, hitRate)
+			if conf().CacheMaxBytes > 0 {
+				logger.Printf("[CACHE] entries=%d/%d bytes=%d/%d hits=%d misses=%d hit_rate=%.1f%%", entries, conf().CacheSize, bytesUsed, conf().CacheMaxBytes, hits, misses, hitRate)
 			} else {
-				logger.Printf("[CACHE] entries=%d/%d bytes=%d hits=%d misses=%d hit_rate=%.1f%%", entries, cfg.CacheSize, bytesUsed, hits, misses, hitRate)
+				logger.Printf("[CACHE] entries=%d/%d bytes=%d hits=%d misses=%d hit_rate=%.1f%%", entries, conf().CacheSize, bytesUsed, hits, misses, hitRate)
 			}
 			continue
 		case syscall.SIGUSR2:
@@ -2763,65 +2789,80 @@ func loadConfig(path string) error {
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	c, err := parseConfig(data)
+	if err != nil {
 		return err
 	}
-	if cfg.ListenAddr == "" {
-		cfg.ListenAddr = "0.0.0.0:53"
-	}
-	if cfg.RateLimit <= 0 {
-		cfg.RateLimit = 100
-	}
-	if cfg.RateBurst <= 0 {
-		cfg.RateBurst = cfg.RateLimit * 2
-	}
-	if cfg.InterfaceRateLimit <= 0 {
-		cfg.InterfaceRateLimit = cfg.RateLimit * 10
-	}
-	if cfg.InterfaceRateBurst <= 0 {
-		cfg.InterfaceRateBurst = cfg.InterfaceRateLimit * 2
-	}
-	if cfg.RateLimitScope == "" {
-		cfg.RateLimitScope = "subnet"
-	}
-	if cfg.RateLimitScope != "subnet" && cfg.RateLimitScope != "host" {
-		return fmt.Errorf("invalid rate_limit_scope: %q", cfg.RateLimitScope)
-	}
-	if cfg.UpstreamSocketPoolSize <= 0 {
-		cfg.UpstreamSocketPoolSize = 16
-	}
-	if cfg.CacheSize <= 0 {
-		cfg.CacheSize = 5000
-	}
-	if cfg.MaxOutstanding <= 0 {
-		cfg.MaxOutstanding = 10000
-	}
-	if cfg.MaxTCPConnections <= 0 {
-		cfg.MaxTCPConnections = 1000
-	}
-	if cfg.MaxTCPPerSource <= 0 {
-		cfg.MaxTCPPerSource = 10
-	}
-	if cfg.Timeout.D() <= 0 {
-		cfg.Timeout = Duration(2 * time.Second)
-	}
-	if cfg.TCPTimeout.D() <= 0 {
-		cfg.TCPTimeout = Duration(5 * time.Second)
-	}
-	if cfg.MaxPacketSize <= 0 {
-		cfg.MaxPacketSize = 4096
-	}
-	if cfg.MaxPacketSize > 65535 {
-		cfg.MaxPacketSize = 65535
-	}
-	if cfg.AddrRefreshInterval.D() <= 0 {
-		cfg.AddrRefreshInterval = Duration(2 * time.Second)
-	}
+	cfgPtr.Store(c)
 	return nil
 }
 
-func loadUpstreams() error {
-	for _, s := range cfg.Upstreams {
+// parseConfig decodes a configuration and fills in the defaults; the result is complete and not changed afterwards.
+func parseConfig(data []byte) (*Config, error) {
+	c := new(Config)
+	if err := json.Unmarshal(data, c); err != nil {
+		return nil, err
+	}
+	if c.ListenAddr == "" {
+		c.ListenAddr = "0.0.0.0:53"
+	}
+	if c.RateLimit <= 0 {
+		c.RateLimit = 100
+	}
+	if c.RateBurst <= 0 {
+		c.RateBurst = c.RateLimit * 2
+	}
+	if c.InterfaceRateLimit <= 0 {
+		c.InterfaceRateLimit = c.RateLimit * 10
+	}
+	if c.InterfaceRateBurst <= 0 {
+		c.InterfaceRateBurst = c.InterfaceRateLimit * 2
+	}
+	if c.RateLimitScope == "" {
+		c.RateLimitScope = "subnet"
+	}
+	if c.RateLimitScope != "subnet" && c.RateLimitScope != "host" {
+		return nil, fmt.Errorf("invalid rate_limit_scope: %q", c.RateLimitScope)
+	}
+	if c.UpstreamSocketPoolSize <= 0 {
+		c.UpstreamSocketPoolSize = 16
+	}
+	if c.CacheSize <= 0 {
+		c.CacheSize = 5000
+	}
+	if c.MaxOutstanding <= 0 {
+		c.MaxOutstanding = 10000
+	}
+	if c.MaxTCPConnections <= 0 {
+		c.MaxTCPConnections = 1000
+	}
+	if c.MaxTCPPerSource <= 0 {
+		c.MaxTCPPerSource = 10
+	}
+	if c.Timeout.D() <= 0 {
+		c.Timeout = Duration(2 * time.Second)
+	}
+	if c.TCPTimeout.D() <= 0 {
+		c.TCPTimeout = Duration(5 * time.Second)
+	}
+	if c.MaxPacketSize <= 0 {
+		c.MaxPacketSize = 4096
+	}
+	if c.MaxPacketSize > 65535 {
+		c.MaxPacketSize = 65535
+	}
+	if c.AddrRefreshInterval.D() <= 0 {
+		c.AddrRefreshInterval = Duration(2 * time.Second)
+	}
+	if _, err := parseUpstreams(c.Upstreams); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+func parseUpstreams(list []string) ([]*net.UDPAddr, error) {
+	var out []*net.UDPAddr
+	for _, s := range list {
 		s = strings.TrimSpace(s)
 		host, port, err := net.SplitHostPort(s)
 		if err != nil {
@@ -2830,19 +2871,62 @@ func loadUpstreams() error {
 		}
 		ip := net.ParseIP(host).To4()
 		if ip == nil {
-			return fmt.Errorf("invalid upstream IPv4 address: %q", s)
+			return nil, fmt.Errorf("invalid upstream IPv4 address: %q", s)
 		}
 		p, err := net.LookupPort("udp", port)
 		if err != nil {
-			return fmt.Errorf("invalid upstream port %q: %w", port, err)
+			return nil, fmt.Errorf("invalid upstream port %q: %w", port, err)
 		}
 		if p != 53 {
-			return fmt.Errorf("upstream DNS port must be 53, got %d", p)
+			return nil, fmt.Errorf("upstream DNS port must be 53, got %d", p)
 		}
-		upstreams = append(upstreams, &net.UDPAddr{IP: ip, Port: 53})
+		out = append(out, &net.UDPAddr{IP: ip, Port: 53})
 	}
-	if len(upstreams) == 0 {
-		return fmt.Errorf("no upstream DNS servers configured")
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no upstream DNS servers configured")
+	}
+	return out, nil
+}
+
+// applyUpstreams makes the pools match the configuration: a pool whose address and size are unchanged is kept, new
+// ones are opened first, the list is swapped in one step and the pools that are no longer wanted are closed.
+func applyUpstreams(parent context.Context, c *Config) error {
+	want, err := parseUpstreams(c.Upstreams)
+	if err != nil {
+		return err
+	}
+	old := pools()
+	next := make([]*upstreamPool, 0, len(want))
+	var created []*upstreamPool
+	reused := make(map[*upstreamPool]bool)
+	for _, addr := range want {
+		var found *upstreamPool
+		for _, p := range old {
+			if !reused[p] && p.addr.IP.Equal(addr.IP) && p.size == c.UpstreamSocketPoolSize {
+				found = p
+				break
+			}
+		}
+		if found != nil {
+			reused[found] = true
+			next = append(next, found)
+			continue
+		}
+		p, err := newUpstreamPool(addr, c.UpstreamSocketPoolSize, parent)
+		if err != nil {
+			for _, n := range created {
+				n.close()
+			}
+			return fmt.Errorf("upstream %s: %w", addr, err)
+		}
+		created = append(created, p)
+		next = append(next, p)
+	}
+	upstreamPools.Store(&next)
+	for _, p := range old {
+		if !reused[p] {
+			p.close()
+		}
 	}
 	return nil
 }
