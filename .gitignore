@@ -45,6 +45,7 @@
 /cmd/dnshived-dnsrelay/dnsrelay
 /cmd/dnshived-dnsrelay/dnshived-dnsrelay
 /cmd/dnshived-dnsrelay-render/dnshived-dnsrelay-render
+/cmd/dnshived/dnshived
 *.exe
 
 # Release tarballs

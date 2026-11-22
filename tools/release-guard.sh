@@ -60,12 +60,20 @@ for f in "${files[@]}"; do
 	fi
 done
 
-if [ "$checked" = 0 ]; then
-	echo "release-guard: nothing to check (no packages or binaries found)"
-	exit 2
-fi
+while IFS= read -r -d '' f; do
+	[ -f "$f" ] || continue
+	if [ "$(head -c 4 "$f" | od -An -tx1 | tr -d ' \n')" = 7f454c46 ]; then
+		echo "REFUSED: $f is a compiled file tracked by git"
+		bad=1
+	fi
+done < <(git ls-files -z)
+
 if [ "$bad" = 1 ]; then
 	echo "release-guard: FAILED, do not release these files"
 	exit 1
+fi
+if [ "$checked" = 0 ]; then
+	echo "release-guard: nothing to check (no packages or binaries found)"
+	exit 2
 fi
 echo "release-guard: $checked file(s) clean"
