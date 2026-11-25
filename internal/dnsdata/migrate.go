@@ -4,7 +4,6 @@
 package dnsdata
 
 import (
-	"cmp"
 	"crypto/sha256"
 	"fmt"
 	"net/netip"
@@ -23,6 +22,9 @@ type MigrateReport struct {
 	Hosts   int
 	Records int
 	Skipped []string
+	// DomainTTLs lists the local domains whose default TTL no longer applies: their records without an own TTL follow
+	// the store's default TTL instead.
+	DomainTTLs []string
 }
 
 // idMaker derives row ids from the row type and its encoded body, so the same configuration gives the same ids on
@@ -84,6 +86,16 @@ func recordFromConfig(r config.DNSRecord) (Record, error) {
 		return Record{}, err
 	}
 	return rec, nil
+}
+
+// ConfigRR converts one configuration record into the owner, type and wire data the table answers it with.
+func ConfigRR(r config.DNSRecord) (owner string, typ uint16, rdata []byte, err error) {
+	rec, err := recordFromConfig(r)
+	if err != nil {
+		return "", 0, nil, err
+	}
+	rd, err := recordData(&rec)
+	return rec.Owner, rec.Type, rd, err
 }
 
 type groupKey struct {
@@ -164,7 +176,7 @@ func MigrateOps(c *config.Cluster) ([]dnsstore.Op, MigrateReport) {
 			if err != nil {
 				continue
 			}
-			ttl := uint32(max(cmp.Or(r.TTL, d.ld.TTL), 0))
+			ttl := uint32(max(r.TTL, 0))
 			ls := perLabel[label]
 			if ls == nil {
 				ls = &labelSet{ok: true, ttl: ttl, probe: r.ProbeDisabled}
@@ -280,7 +292,9 @@ func MigrateOps(c *config.Cluster) ([]dnsstore.Op, MigrateReport) {
 				g = d.grp[i]
 			}
 			if g == nil {
-				record(d.ld.ExpandedRecord(i), "")
+				er := d.ld.ExpandedRecord(i)
+				er.TTL = d.ld.Records[i].TTL
+				record(er, "")
 				continue
 			}
 			if ip, err := netip.ParseAddr(strings.TrimSpace(d.ld.Records[i].Value)); err == nil && !ptrDone[ip.Unmap()] {
@@ -294,6 +308,20 @@ func MigrateOps(c *config.Cluster) ([]dnsstore.Op, MigrateReport) {
 				g.done = true
 				hosts = append(hosts, g)
 			}
+		}
+	}
+	for _, d := range doms {
+		if d.ld.TTL <= 0 {
+			continue
+		}
+		n := 0
+		for i := range d.ld.Records {
+			if d.ld.Records[i].TTL <= 0 {
+				n++
+			}
+		}
+		if n > 0 {
+			rep.DomainTTLs = append(rep.DomainTTLs, fmt.Sprintf("%s: its default TTL %d no longer applies to %d record(s) without their own TTL; they follow the store's default TTL", d.canon, d.ld.TTL, n))
 		}
 	}
 	for _, g := range hosts {

@@ -38,10 +38,7 @@ import (
 
 const dnsStoreEnableFile = "/etc/dnshived/dns-store.enable"
 
-const (
-	dnsStoreDefaultTTL = 300
-	dnsStoreNegTTL     = 60
-)
+const dnsStoreNegTTL = 60
 
 var dnsStoreSvc atomic.Pointer[dnsservice.Service]
 
@@ -65,7 +62,7 @@ func dnsStoreEnabled() bool {
 
 func dnsStoreInput() dnsservice.CompileInput {
 	cfg := currentConfig.Load()
-	in := dnsservice.CompileInput{DefaultTTL: dnsStoreDefaultTTL, NegTTL: dnsStoreNegTTL, Reserved: map[string]string{}}
+	in := dnsservice.CompileInput{NegTTL: dnsStoreNegTTL, Reserved: map[string]string{}}
 	in.ReservedNames = dnsdata.ReservedNames(cfg)
 	var domains []string
 	for _, d := range cfg.LocalDomains {

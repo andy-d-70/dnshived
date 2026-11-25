@@ -52,7 +52,7 @@ func openRigWith(t testing.TB, dir string, tableMode os.FileMode, mod func(*Opti
 	o := Options{
 		Dir: filepath.Join(dir, "dnsstore"), TablePath: filepath.Join(dir, "dnstable.bin"), TableMode: tableMode, Keys: keys,
 		Input: func() CompileInput {
-			in := CompileInput{Zones: []dnsanswer.Zone{{Name: "example.lan"}}, Reserved: map[string]string{"printer.example.lan": "office"}, DefaultTTL: 300, NegTTL: 60}
+			in := CompileInput{Zones: []dnsanswer.Zone{{Name: "example.lan"}}, Reserved: map[string]string{"printer.example.lan": "office"}, NegTTL: 60}
 			if p := r.resv.Load(); p != nil {
 				in.ReservedNames = *p
 			}
@@ -314,4 +314,77 @@ func FuzzDecodeTable(f *testing.F) {
 	f.Add(dnsanswer.EncodeTable(spec, tb.Digest()))
 	f.Add([]byte("DHTB"))
 	f.Fuzz(func(t *testing.T, b []byte) { _, _, _ = dnsanswer.DecodeTable(b) })
+}
+
+func (r *rig) answerTTL(name string, typ uint16) (uint32, bool) { return ttlOf(r.table(), name, typ) }
+
+func ttlOf(tb *dnsanswer.Table, name string, typ uint16) (uint32, bool) {
+	q := query(name, typ)
+	out, st := tb.Respond(q, nil, false)
+	if st != dnsanswer.Answered || len(out) < len(q) || int(out[6])<<8|int(out[7]) == 0 {
+		return 0, false
+	}
+	p := len(q)
+	for p < len(out) {
+		if out[p]&0xC0 == 0xC0 {
+			p += 2
+			break
+		}
+		if out[p] == 0 {
+			p++
+			break
+		}
+		p += 1 + int(out[p])
+	}
+	if p+8 > len(out) {
+		return 0, false
+	}
+	return uint32(out[p+4])<<24 | uint32(out[p+5])<<16 | uint32(out[p+6])<<8 | uint32(out[p+7]), true
+}
+
+func TestService_DefaultTTLSetting(t *testing.T) {
+	r := newRig(t)
+	resv := []dnsdata.ReservedName{{Name: "printer.example.lan", IP: netip.MustParseAddr("10.0.0.7"), Scope: "office"}}
+	r.resv.Store(&resv)
+	leases := []dnsdata.LeaseName{{Name: "pc.example.lan", IP: netip.MustParseAddr("10.0.5.9"), MAC: "aa:02", LeasedAt: 5, Scope: "office"}}
+	r.leases.Store(&leases)
+	own := `{"author":"t","ops":[{"op":"put","kind":"host","id":"00000000000000000000000000000002","host":{"label":"never","domains":["example.lan"],"addrs":[{"ip":"10.0.0.8"}],"own_ttl":true}}]}`
+	for _, body := range []string{hostBody("00000000000000000000000000000001"), own} {
+		if code, out := r.do("POST", "/api/v1/dnsstore/commit", body); code != 200 {
+			t.Fatalf("commit: %d %v", code, out)
+		}
+	}
+	names := []string{"cam-1.example.lan", "printer.example.lan", "pc.example.lan"}
+	check := func(want uint32) {
+		t.Helper()
+		for _, n := range names {
+			if got, ok := r.answerTTL(n, dnsanswer.TypeA); !ok || got != want {
+				t.Errorf("%s: ttl %d (answered %v), want %d", n, got, ok, want)
+			}
+		}
+		if got, ok := r.answerTTL("never.example.lan", dnsanswer.TypeA); !ok || got != 0 {
+			t.Errorf("an own TTL of 0 stays 0, got %d (answered %v)", got, ok)
+		}
+	}
+	check(0)
+	code, out := r.do("POST", "/api/v1/dnsstore/settings", `{"default_ttl":600,"author":"t"}`)
+	if code != 200 || out["default_ttl"].(float64) != 600 {
+		t.Fatalf("settings: %d %v", code, out)
+	}
+	check(600)
+	if _, st := r.do("GET", "/api/v1/dnsstore/status", ""); st["default_ttl"].(float64) != 600 || st["authoritative"] != false {
+		t.Fatalf("status: %v", st)
+	}
+	_, items := r.do("GET", "/api/v1/dnsstore/hosts?q=never", "")
+	if list, _ := items["items"].([]any); len(list) != 1 || list[0].(map[string]any)["own_ttl"] != true {
+		t.Fatalf("the host list shows the own TTL: %v", items)
+	}
+	for _, bad := range []string{`{}`, `{"default_ttl":-1}`, `{"default_ttl":"300"}`, `{"default_ttl":300,"extra":1}`} {
+		if code, _ := r.do("POST", "/api/v1/dnsstore/settings", bad); code != 400 {
+			t.Errorf("%s: %d, want 400", bad, code)
+		}
+	}
+	if code, _ := r.do("POST", "/api/v1/dnsstore/settings", `{"default_ttl":2147483648}`); code == 200 {
+		t.Error("a default TTL above the DNS limit must be refused")
+	}
 }

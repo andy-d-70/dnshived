@@ -15,7 +15,8 @@ import (
 
 // CompileConfig carries what the compilation takes from the cluster configuration.
 type CompileConfig struct {
-	Zones      []dnsanswer.Zone
+	Zones []dnsanswer.Zone
+	// DefaultTTL is the TTL of every row without its own TTL (the store's default_ttl setting).
 	DefaultTTL uint32
 	NegTTL     uint32
 	// Authoritative off marks every zone as forwarded, so only the records held are answered.
@@ -37,11 +38,11 @@ type Report struct {
 	Errors   []RowError
 }
 
-func (c *CompileConfig) ttl(v uint32) uint32 {
-	if v == 0 {
-		return c.DefaultTTL
+func (c *CompileConfig) ttl(own bool, v uint32) uint32 {
+	if own || v != 0 {
+		return v
 	}
-	return v
+	return c.DefaultTTL
 }
 
 func join(parts ...string) string {
@@ -116,7 +117,7 @@ func Compile(v *dnsstore.View, cfg CompileConfig) (*dnsanswer.Spec, Report) {
 		h := hosts[id]
 		rep.Hosts++
 		owners := hostOwners(h, zones, &rep, id)
-		ttl := cfg.ttl(h.TTL)
+		ttl := cfg.ttl(h.OwnTTL, h.TTL)
 		var first string
 		if len(owners) > 0 {
 			first = owners[0]
@@ -190,7 +191,7 @@ func Compile(v *dnsstore.View, cfg CompileConfig) (*dnsanswer.Spec, Report) {
 		}
 		rd, err := recordData(&r)
 		for _, o := range owners {
-			add(o, r.Type, cfg.ttl(r.TTL), rd, err, TypeRecord, id)
+			add(o, r.Type, cfg.ttl(r.OwnTTL, r.TTL), rd, err, TypeRecord, id)
 			if err != nil {
 				break
 			}

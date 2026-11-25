@@ -40,7 +40,6 @@ type CompileInput struct {
 	Zones         []dnsanswer.Zone
 	Reserved      map[string]string
 	ReservedNames []dnsdata.ReservedName
-	DefaultTTL    uint32
 	NegTTL        uint32
 	MaxNames      int
 }
@@ -85,6 +84,7 @@ type buildState struct {
 	err        string
 
 	baseFP   [32]byte
+	ttl      uint32
 	authored map[string]struct{}
 	leaseRRs map[string][]dnsanswer.RR
 	deltas   int
@@ -178,7 +178,7 @@ func (s *Service) refreshLoop() {
 
 func fingerprint(rev uint64, in CompileInput, leases []dnsdata.LeaseName) [32]byte {
 	h := sha256.New()
-	fmt.Fprintf(h, "%d|%d|%d|%d|", rev, in.DefaultTTL, in.NegTTL, in.MaxNames)
+	fmt.Fprintf(h, "%d|%d|%d|", rev, in.NegTTL, in.MaxNames)
 	for _, z := range in.Zones {
 		fmt.Fprintf(h, "z:%s:%v|", z.Name, z.Forward)
 	}
@@ -213,12 +213,13 @@ func (s *Service) Rebuild(force bool) error {
 	}
 	baseFP := fingerprint(view.Rev(), in, nil)
 	if s.o.Feed != nil && !force && old != nil && old.err == "" && old.authored != nil && old.baseFP == baseFP {
-		if ok := s.leaseDelta(old, view.Rev(), in, leases, fp); ok {
+		if ok := s.leaseDelta(old, view.Rev(), leases, fp); ok {
 			return nil
 		}
 	}
-	spec, rep := dnsdata.Compile(view, dnsdata.CompileConfig{Zones: in.Zones, DefaultTTL: in.DefaultTTL, NegTTL: in.NegTTL, Authoritative: dnsdata.ReadSettings(view).Authoritative})
-	dnsdata.MergeReserved(spec, in.ReservedNames, in.DefaultTTL)
+	set := dnsdata.ReadSettings(view)
+	spec, rep := dnsdata.Compile(view, dnsdata.CompileConfig{Zones: in.Zones, DefaultTTL: set.DefaultTTL, NegTTL: in.NegTTL, Authoritative: set.Authoritative})
+	dnsdata.MergeReserved(spec, in.ReservedNames, set.DefaultTTL)
 	var authored map[string]struct{}
 	authoredCount := len(spec.RRs)
 	if s.o.Feed != nil {
@@ -227,13 +228,13 @@ func (s *Service) Rebuild(force bool) error {
 			authored[rr.Owner] = struct{}{}
 		}
 	}
-	cols := dnsdata.MergeLeases(spec, leases, in.DefaultTTL)
+	cols := dnsdata.MergeLeases(spec, leases, set.DefaultTTL)
 	tb, err := spec.Build()
 	if err != nil {
 		s.fail(old, fp, view.Rev(), err)
 		return err
 	}
-	st := &buildState{rev: view.Rev(), digest: tb.Digest(), names: tb.Names(), records: tb.Records(), report: rep, collisions: cols, builtAt: time.Now(), fp: fp, baseFP: baseFP, authored: authored}
+	st := &buildState{rev: view.Rev(), digest: tb.Digest(), names: tb.Names(), records: tb.Records(), report: rep, collisions: cols, builtAt: time.Now(), fp: fp, baseFP: baseFP, ttl: set.DefaultTTL, authored: authored}
 	if s.o.Feed != nil {
 		st.leaseRRs = groupByOwner(spec.RRs[authoredCount:])
 	}
@@ -285,9 +286,10 @@ func sameRRs(a, b []dnsanswer.RR) bool {
 }
 
 // leaseDelta publishes the change of the DHCP names since the last build as owner-level changes instead of building
-// the table again. It reports false when the caller has to build a full table.
-func (s *Service) leaseDelta(old *buildState, rev uint64, in CompileInput, leases []dnsdata.LeaseName, fp [32]byte) bool {
-	rrs, cols := dnsdata.LeaseRRs(func(o string) bool { _, ok := old.authored[o]; return ok }, leases, in.DefaultTTL)
+// the table again. It reports false when the caller has to build a full table. The settings belong to the store revision
+// that baseFP covers, so old.ttl is still the default TTL.
+func (s *Service) leaseDelta(old *buildState, rev uint64, leases []dnsdata.LeaseName, fp [32]byte) bool {
+	rrs, cols := dnsdata.LeaseRRs(func(o string) bool { _, ok := old.authored[o]; return ok }, leases, old.ttl)
 	next := groupByOwner(rrs)
 	var changes []dnsanswer.Change
 	for o, now := range next {

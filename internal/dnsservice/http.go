@@ -36,6 +36,7 @@ type hostJSON struct {
 	Domains []string   `json:"domains"`
 	Addrs   []addrJSON `json:"addrs,omitempty"`
 	TTL     uint32     `json:"ttl,omitempty"`
+	OwnTTL  bool       `json:"own_ttl,omitempty"`
 }
 
 type recordJSON struct {
@@ -44,6 +45,7 @@ type recordJSON struct {
 	Owner   string `json:"owner,omitempty"`
 	Type    string `json:"type"`
 	TTL     uint32 `json:"ttl,omitempty"`
+	OwnTTL  bool   `json:"own_ttl,omitempty"`
 	Value   string `json:"value,omitempty"`
 	Target  string `json:"target,omitempty"`
 	Pref    uint16 `json:"pref,omitempty"`
@@ -138,7 +140,7 @@ func hostFromJSON(j *hostJSON) (dnsdata.Host, error) {
 	if err != nil {
 		return dnsdata.Host{}, err
 	}
-	h := dnsdata.Host{Label: label, TTL: j.TTL}
+	h := dnsdata.Host{Label: label, TTL: j.TTL, OwnTTL: j.OwnTTL}
 	for _, d := range j.Domains {
 		c, err := dnsanswer.CanonicalName(d)
 		if err != nil {
@@ -161,7 +163,7 @@ func recordFromJSON(j *recordJSON) (dnsdata.Record, error) {
 	if !ok {
 		return dnsdata.Record{}, fmt.Errorf("unknown record type %q", j.Type)
 	}
-	r := dnsdata.Record{Type: code, TTL: j.TTL, Value: j.Value, Pref: j.Pref, Prio: j.Prio, Weight: j.Weight, Port: j.Port,
+	r := dnsdata.Record{Type: code, TTL: j.TTL, OwnTTL: j.OwnTTL, Value: j.Value, Pref: j.Pref, Prio: j.Prio, Weight: j.Weight, Port: j.Port,
 		Order: j.Order, Flags: j.Flags, Service: j.Service, Regexp: j.Regexp, CAAFlag: j.CAAFlag, CAATag: j.CAATag, Raw: strings.ToLower(j.Raw)}
 	var err error
 	if j.Host != "" {
@@ -267,6 +269,7 @@ type statusJSON struct {
 	Published *publishedJSON `json:"published,omitempty"`
 	Commit    uint64         `json:"commit_index"`
 	Auth      bool           `json:"authoritative"`
+	TTL       uint32         `json:"default_ttl"`
 	Serving   bool           `json:"serving"`
 	Hosts     int            `json:"hosts"`
 	Records   int            `json:"records"`
@@ -301,7 +304,8 @@ func (s *Service) Status() statusJSON {
 	v := s.store.View()
 	id := s.store.ID()
 	head, _, _ := s.store.Head()
-	out := statusJSON{Rev: v.Rev(), Term: v.Term(), Chain: hex32(v.Chain()), Manifest: hex32(v.Manifest()), Rows: v.Len(), Tombs: v.Tombstones(), StoreID: hex.EncodeToString(id[:]), Commit: s.store.CommitIndex(), Head: head, Auth: dnsdata.ReadSettings(v).Authoritative, Serving: s.Serving(), Hosts: v.CountOf(dnsdata.TypeHost), Records: v.CountOf(dnsdata.TypeRecord)}
+	set := dnsdata.ReadSettings(v)
+	out := statusJSON{Rev: v.Rev(), Term: v.Term(), Chain: hex32(v.Chain()), Manifest: hex32(v.Manifest()), Rows: v.Len(), Tombs: v.Tombstones(), StoreID: hex.EncodeToString(id[:]), Commit: s.store.CommitIndex(), Head: head, Auth: set.Authoritative, TTL: set.DefaultTTL, Serving: s.Serving(), Hosts: v.CountOf(dnsdata.TypeHost), Records: v.CountOf(dnsdata.TypeRecord)}
 	if s.o.ReplStatus != nil {
 		out.Repl = s.o.ReplStatus()
 	}
@@ -332,6 +336,7 @@ type hostItem struct {
 	Domains []string   `json:"domains"`
 	Addrs   []addrJSON `json:"addrs,omitempty"`
 	TTL     uint32     `json:"ttl,omitempty"`
+	OwnTTL  bool       `json:"own_ttl,omitempty"`
 }
 
 type recordItem struct {
@@ -360,7 +365,7 @@ func (s *Service) listHosts(q string, limit, offset int) (int, []hostItem) {
 		if err != nil {
 			return true
 		}
-		it := hostItem{ID: hex.EncodeToString(id[:]), Rev: rev, Label: h.Label, Domains: h.Domains, TTL: h.TTL}
+		it := hostItem{ID: hex.EncodeToString(id[:]), Rev: rev, Label: h.Label, Domains: h.Domains, TTL: h.TTL, OwnTTL: h.OwnTTL}
 		match := q == "" || strings.Contains(h.Label, q) || strings.Contains(it.ID, q)
 		for _, d := range h.Domains {
 			match = match || strings.Contains(d, q)
@@ -390,7 +395,7 @@ func (s *Service) listRecords(q string, limit, offset int) (int, []recordItem) {
 		if err != nil {
 			return true
 		}
-		j := recordJSON{Sub: r.Sub, Owner: r.Owner, Type: typeName(r.Type), TTL: r.TTL, Value: r.Value, Target: r.Target, Pref: r.Pref,
+		j := recordJSON{Sub: r.Sub, Owner: r.Owner, Type: typeName(r.Type), TTL: r.TTL, OwnTTL: r.OwnTTL, Value: r.Value, Target: r.Target, Pref: r.Pref,
 			Prio: r.Prio, Weight: r.Weight, Port: r.Port, Order: r.Order, Flags: r.Flags, Service: r.Service, Regexp: r.Regexp, CAAFlag: r.CAAFlag, CAATag: r.CAATag, Raw: r.Raw}
 		if r.Host != (dnsstore.ID{}) {
 			j.Host = hex.EncodeToString(r.Host[:])
@@ -455,22 +460,31 @@ func (s *Service) Routes(mux *http.ServeMux, admin func(http.HandlerFunc) http.H
 	}))
 	mux.HandleFunc("POST /api/v1/dnsstore/settings", admin(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
-			Authoritative *bool  `json:"authoritative"`
-			Author        string `json:"author"`
+			Authoritative *bool   `json:"authoritative"`
+			DefaultTTL    *uint32 `json:"default_ttl"`
+			Author        string  `json:"author"`
 		}
 		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
 		dec.DisallowUnknownFields()
-		if err := dec.Decode(&req); err != nil || req.Authoritative == nil {
-			plainError(w, http.StatusBadRequest, "send {\"authoritative\": true or false}")
+		if err := dec.Decode(&req); err != nil || (req.Authoritative == nil && req.DefaultTTL == nil) {
+			plainError(w, http.StatusBadRequest, "send {\"authoritative\": true or false} and/or {\"default_ttl\": seconds}")
 			return
 		}
-		if *req.Authoritative && len(s.o.Input().Zones) == 0 {
+		if req.Authoritative != nil && *req.Authoritative && len(s.o.Input().Zones) == 0 {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"errors": []string{"no local domain is configured, so there is nothing to answer for"}})
 			return
 		}
-		op := dnsdata.SettingOp(dnsdata.AuthoritativeKey, *req.Authoritative)
-		out := map[string]any{"authoritative": *req.Authoritative}
-		res, err := s.Commit(CommitRequest{Author: req.Author, Origin: OriginAPI, Ops: []dnsstore.Op{op}})
+		var ops []dnsstore.Op
+		out := map[string]any{}
+		if req.Authoritative != nil {
+			ops = append(ops, dnsdata.SettingOp(dnsdata.AuthoritativeKey, *req.Authoritative))
+			out["authoritative"] = *req.Authoritative
+		}
+		if req.DefaultTTL != nil {
+			ops = append(ops, dnsdata.DefaultTTLOp(*req.DefaultTTL))
+			out["default_ttl"] = *req.DefaultTTL
+		}
+		res, err := s.Commit(CommitRequest{Author: req.Author, Origin: OriginAPI, Ops: ops})
 		if s.writeCommitError(w, err) {
 			return
 		}

@@ -93,7 +93,7 @@ func (c *cluster) start(id string) *clusterNode {
 	svc, err := New(Options{
 		Dir: filepath.Join(dir, "dnsstore"), TablePath: filepath.Join(dir, "dnstable.bin"), Store: st,
 		Input: func() CompileInput {
-			return CompileInput{Zones: []dnsanswer.Zone{{Name: "example.lan"}}, DefaultTTL: 300, NegTTL: 60}
+			return CompileInput{Zones: []dnsanswer.Zone{{Name: "example.lan"}}, NegTTL: 60}
 		},
 		Leases:  func() []dnsdata.LeaseName { return nil },
 		Propose: n.drv.Propose,

@@ -103,12 +103,12 @@ func answers(t testing.TB, tb *dnsanswer.Table, name string, typ uint16) (rcode 
 }
 
 func TestCodec_RoundTrip(t *testing.T) {
-	h := Host{Label: "cam-1", Domains: []string{"example.lan", "lab.example.lan"}, Addrs: []Addr{ip("10.0.0.5"), {IP: netip.MustParseAddr("fd00::5")}}, TTL: 600}
+	h := Host{Label: "cam-1", Domains: []string{"example.lan", "lab.example.lan"}, Addrs: []Addr{ip("10.0.0.5"), {IP: netip.MustParseAddr("fd00::5")}}, TTL: 600, OwnTTL: true}
 	got, err := DecodeHost(h.Encode())
 	if err != nil || fmt.Sprint(got) != fmt.Sprint(h) {
 		t.Fatalf("host: %+v %v", got, err)
 	}
-	r := Record{Host: id(7), Sub: "_svc", Type: dnsanswer.TypeSRV, TTL: 120, Target: "x.example.lan", Prio: 1, Weight: 2, Port: 4440, Raw: "legacy"}
+	r := Record{Host: id(7), Sub: "_svc", Type: dnsanswer.TypeSRV, TTL: 120, OwnTTL: true, Target: "x.example.lan", Prio: 1, Weight: 2, Port: 4440, Raw: "legacy"}
 	gr, err := DecodeRecord(r.Encode())
 	if err != nil || gr != r {
 		t.Fatalf("record: %+v %v", gr, err)
@@ -404,6 +404,83 @@ func TestSettings_RoundTripAndGate(t *testing.T) {
 	}
 	if vd := Validate(s.View(), []dnsstore.Op{{Kind: dnsstore.OpPut, Type: TypeSetting, ID: settingID(AuthoritativeKey), Body: []byte("maybe")}}, ctx()); vd.OK() {
 		t.Fatal("a setting value other than 0 or 1 must be refused")
+	}
+}
+
+func TestSettings_DefaultTTL(t *testing.T) {
+	s := newStore(t)
+	if got := ReadSettings(s.View()).DefaultTTL; got != 0 {
+		t.Fatalf("without the setting the default TTL is 0, got %d", got)
+	}
+	put := func(body string) dnsstore.Op {
+		return dnsstore.Op{Kind: dnsstore.OpPut, Type: TypeSetting, ID: settingID(DefaultTTLKey), Body: []byte(body)}
+	}
+	tests := []struct {
+		name, body string
+		ok         bool
+		warning    string
+	}{
+		{"zero", "0", true, ""},
+		{"five minutes", "300", true, ""},
+		{"largest", "2147483647", true, "long-ttl"},
+		{"short", "30", true, "short-ttl"},
+		{"empty", "", false, ""},
+		{"text", "abc", false, ""},
+		{"leading zero", "0300", false, ""},
+		{"sign", "+300", false, ""},
+		{"negative", "-1", false, ""},
+		{"too large", "2147483648", false, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vd := Validate(s.View(), []dnsstore.Op{put(tt.body)}, ctx())
+			if vd.OK() != tt.ok {
+				t.Fatalf("gate ok %v, want %v: %v", vd.OK(), tt.ok, vd.Errors)
+			}
+			if tt.warning != "" && (len(vd.Warnings) != 1 || vd.Warnings[0].Code != tt.warning) {
+				t.Fatalf("warnings %v, want %s", vd.Warnings, tt.warning)
+			}
+		})
+	}
+	commit(t, s, DefaultTTLOp(600))
+	if got := ReadSettings(s.View()); got.DefaultTTL != 600 || got.Authoritative {
+		t.Fatalf("settings after the commit: %+v", got)
+	}
+	if k, ok := SettingKey(settingID(DefaultTTLKey)); !ok || k != DefaultTTLKey {
+		t.Fatal("the default TTL row is a setting")
+	}
+	del := dnsstore.Op{Kind: dnsstore.OpDel, Type: TypeSetting, ID: settingID(DefaultTTLKey)}
+	if vd := Validate(s.View(), []dnsstore.Op{del}, ctx()); vd.OK() {
+		t.Fatal("the default TTL cannot be removed")
+	}
+}
+
+func TestCompile_OwnTTLElseTheDefault(t *testing.T) {
+	s := newStore(t)
+	commit(t, s,
+		putHost(1, Host{Label: "none", Domains: []string{"example.lan"}, Addrs: []Addr{ip("10.0.0.1")}}),
+		putHost(2, Host{Label: "zero", Domains: []string{"example.lan"}, Addrs: []Addr{ip("10.0.0.2")}, OwnTTL: true}),
+		putHost(3, Host{Label: "own", Domains: []string{"example.lan"}, Addrs: []Addr{ip("10.0.0.3")}, TTL: 120}),
+		putRec(4, Record{Owner: "txt-none.example.lan", Type: dnsanswer.TypeTXT, Value: "a"}),
+		putRec(5, Record{Owner: "txt-zero.example.lan", Type: dnsanswer.TypeTXT, Value: "b", OwnTTL: true}),
+	)
+	c := cfg
+	c.DefaultTTL = 3600
+	spec, rep := Compile(s.View(), c)
+	if len(rep.Errors) != 0 {
+		t.Fatalf("compile: %+v", rep.Errors)
+	}
+	want := map[string]uint32{"none.example.lan": 3600, "zero.example.lan": 0, "own.example.lan": 120, "txt-none.example.lan": 3600, "txt-zero.example.lan": 0}
+	for _, rr := range spec.RRs {
+		if w, ok := want[rr.Owner]; ok {
+			if rr.TTL != w {
+				t.Errorf("%s: ttl %d, want %d", rr.Owner, rr.TTL, w)
+			}
+			delete(want, rr.Owner)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("names missing from the table: %v", want)
 	}
 }
 

@@ -33,12 +33,14 @@ type Addr struct {
 	PTR bool
 }
 
-// Host is one device name that answers in every listed domain; the first domain owns its reverse record.
+// Host is one device name that answers in every listed domain; the first domain owns its reverse record. OwnTTL keeps
+// an own TTL of 0 apart from no own TTL (Record has the same field); a TTL above 0 is always the row's own.
 type Host struct {
 	Label         string
 	Domains       []string
 	Addrs         []Addr
 	TTL           uint32
+	OwnTTL        bool
 	ProbeDisabled bool
 	LastBy        string
 	LastAt        int64
@@ -51,6 +53,7 @@ type Record struct {
 	Owner   string
 	Type    uint16
 	TTL     uint32
+	OwnTTL  bool
 	Value   string
 	Target  string
 	Pref    uint16
@@ -89,8 +92,18 @@ func (e *enc) num(tag byte, v uint64) {
 	if v == 0 {
 		return
 	}
+	e.uvarint(tag, v)
+}
+
+func (e *enc) uvarint(tag byte, v uint64) {
 	var tmp [binary.MaxVarintLen64]byte
 	e.bytes(tag, tmp[:binary.PutUvarint(tmp[:], v)])
+}
+
+func (e *enc) ttl(own bool, v uint32) {
+	if own || v != 0 {
+		e.uvarint(2, uint64(v))
+	}
 }
 
 type field struct {
@@ -130,7 +143,7 @@ func (h *Host) Encode() []byte {
 	}
 	e := enc{b: make([]byte, 0, size)}
 	e.str(1, h.Label)
-	e.num(2, uint64(h.TTL))
+	e.ttl(h.OwnTTL, h.TTL)
 	for _, d := range h.Domains {
 		e.str(3, d)
 	}
@@ -166,7 +179,7 @@ func DecodeHost(b []byte) (Host, error) {
 			if err != nil || v > maxTTL {
 				return h, fmt.Errorf("%w: ttl", ErrRow)
 			}
-			h.TTL = uint32(v)
+			h.TTL, h.OwnTTL = uint32(v), true
 		case 3:
 			h.Domains = append(h.Domains, string(f.val))
 		case 4:
@@ -202,7 +215,7 @@ func (r *Record) Encode() []byte {
 		len(r.CAATag) + len(r.Raw) + len(r.Scope) + len(r.LastBy)
 	e := enc{b: make([]byte, 0, size)}
 	e.num(1, uint64(r.Type))
-	e.num(2, uint64(r.TTL))
+	e.ttl(r.OwnTTL, r.TTL)
 	if r.Host != (dnsstore.ID{}) {
 		e.bytes(3, r.Host[:])
 	}
@@ -290,7 +303,7 @@ func DecodeRecord(b []byte) (Record, error) {
 			case 1:
 				r.Type = uint16(v)
 			case 2:
-				r.TTL = uint32(v)
+				r.TTL, r.OwnTTL = uint32(v), true
 			case 8:
 				r.Pref = uint16(v)
 			case 9:

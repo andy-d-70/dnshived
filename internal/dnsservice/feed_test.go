@@ -84,9 +84,10 @@ func (f *feedRig) settle() {
 func (f *feedRig) reference() *dnsanswer.Table {
 	f.t.Helper()
 	view, in := f.svc.store.View(), f.svc.o.Input()
-	spec, _ := dnsdata.Compile(view, dnsdata.CompileConfig{Zones: in.Zones, DefaultTTL: in.DefaultTTL, NegTTL: in.NegTTL, Authoritative: dnsdata.ReadSettings(view).Authoritative})
-	dnsdata.MergeReserved(spec, in.ReservedNames, in.DefaultTTL)
-	dnsdata.MergeLeases(spec, f.svc.o.Leases(), in.DefaultTTL)
+	set := dnsdata.ReadSettings(view)
+	spec, _ := dnsdata.Compile(view, dnsdata.CompileConfig{Zones: in.Zones, DefaultTTL: set.DefaultTTL, NegTTL: in.NegTTL, Authoritative: set.Authoritative})
+	dnsdata.MergeReserved(spec, in.ReservedNames, set.DefaultTTL)
+	dnsdata.MergeLeases(spec, f.svc.o.Leases(), set.DefaultTTL)
 	tb, err := spec.Build()
 	if err != nil {
 		f.t.Fatal(err)
@@ -222,5 +223,27 @@ func TestService_FeedFallsBackToANewBaseWhenTheChangesPileUp(t *testing.T) {
 	f.sameAsReference([]string{"n30.example.lan", "n1.example.lan", "30.1.0.10.in-addr.arpa"})
 	if f.pub.Status().Epoch <= first {
 		t.Fatal("the full ring must have produced a new base")
+	}
+}
+
+func TestService_FeedLeaseChangeUsesTheDefaultTTL(t *testing.T) {
+	f := newFeedRig(t, dnsfeed.Options{})
+	f.settle()
+	if code, out := f.do("POST", "/api/v1/dnsstore/settings", `{"default_ttl":900}`); code != 200 {
+		t.Fatalf("settings: %d %v", code, out)
+	}
+	f.settle()
+	epoch := f.pub.Status().Epoch
+	leases := []dnsdata.LeaseName{{Name: "phone.example.lan", IP: netip.MustParseAddr("10.0.0.50"), MAC: "02:00:00:00:00:01", LeasedAt: 1}}
+	f.leases.Store(&leases)
+	if err := f.svc.Rebuild(false); err != nil {
+		t.Fatal(err)
+	}
+	if st := f.pub.Status(); st.Epoch != epoch || st.Seq != 1 {
+		t.Fatalf("the lease name must travel as a change on top of the base: %+v", st)
+	}
+	f.sameAsReference([]string{"phone.example.lan", "50.0.0.10.in-addr.arpa"})
+	if ttl, ok := ttlOf(f.view.Load(), "phone.example.lan", dnsanswer.TypeA); !ok || ttl != 900 {
+		t.Fatalf("the reader answers the lease with ttl %d (answered %v), want 900", ttl, ok)
 	}
 }

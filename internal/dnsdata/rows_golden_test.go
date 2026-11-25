@@ -21,3 +21,41 @@ func TestRowEncoding_IsStable(t *testing.T) {
 		t.Fatalf("record encoding changed:\n%s", got)
 	}
 }
+
+func TestRowEncoding_OwnTTLZeroIsKeptApartFromNoTTL(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    []byte
+		want    string
+		decode  func([]byte) (uint32, bool, error)
+		wantTTL uint32
+		wantOwn bool
+	}{
+		{"host without own ttl", (&Host{Label: "a"}).Encode(), "010161", hostTTL, 0, false},
+		{"host with own ttl 0", (&Host{Label: "a", OwnTTL: true}).Encode(), "010161020100", hostTTL, 0, true},
+		{"host with ttl 120", (&Host{Label: "a", TTL: 120}).Encode(), "010161020178", hostTTL, 120, true},
+		{"record without own ttl", (&Record{Type: 16}).Encode(), "010110", recordTTL, 0, false},
+		{"record with own ttl 0", (&Record{Type: 16, OwnTTL: true}).Encode(), "010110020100", recordTTL, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hex.EncodeToString(tt.body); got != tt.want {
+				t.Fatalf("bytes %s, want %s", got, tt.want)
+			}
+			ttl, own, err := tt.decode(tt.body)
+			if err != nil || ttl != tt.wantTTL || own != tt.wantOwn {
+				t.Fatalf("decoded ttl %d own %v err %v, want %d %v", ttl, own, err, tt.wantTTL, tt.wantOwn)
+			}
+		})
+	}
+}
+
+func hostTTL(b []byte) (uint32, bool, error) {
+	h, err := DecodeHost(b)
+	return h.TTL, h.OwnTTL, err
+}
+
+func recordTTL(b []byte) (uint32, bool, error) {
+	r, err := DecodeRecord(b)
+	return r.TTL, r.OwnTTL, err
+}

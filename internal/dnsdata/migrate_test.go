@@ -373,3 +373,48 @@ func TestMigrate_RandomConfigurationsKeepTheirMeaning(t *testing.T) {
 		})
 	}
 }
+
+func TestMigrate_DomainDefaultTTLIsNotCopiedIntoRows(t *testing.T) {
+	c := &config.Cluster{LocalDomains: []config.LocalDomain{
+		{Name: "a.lan", TTL: 3600, Records: []config.LocalDomainHost{
+			{Host: "none", Type: "A", Value: "10.0.0.1"},
+			{Host: "own", Type: "A", Value: "10.0.0.2", TTL: 120},
+			{Host: "txt", Type: "TXT", Value: "x"},
+		}},
+		{Name: "b.lan", Records: []config.LocalDomainHost{{Host: "plain", Type: "A", Value: "10.0.0.3"}}},
+		{Name: "c.lan", TTL: 600, Records: []config.LocalDomainHost{{Host: "all-own", Type: "A", Value: "10.0.0.4", TTL: 60}}},
+	}}
+	ops, rep := MigrateOps(c)
+	type got struct {
+		ttl uint32
+		own bool
+	}
+	rows := map[string]got{}
+	for _, op := range ops {
+		switch op.Type {
+		case TypeHost:
+			h, err := DecodeHost(op.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows[h.Label] = got{h.TTL, h.OwnTTL}
+		case TypeRecord:
+			r, err := DecodeRecord(op.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Type == dnsanswer.TypeTXT {
+				rows[r.Owner] = got{r.TTL, r.OwnTTL}
+			}
+		}
+	}
+	want := map[string]got{"none": {0, false}, "own": {120, true}, "txt.a.lan": {0, false}, "plain": {0, false}, "all-own": {60, true}}
+	for k, w := range want {
+		if rows[k] != w {
+			t.Errorf("%s: ttl %d own %v, want %d %v", k, rows[k].ttl, rows[k].own, w.ttl, w.own)
+		}
+	}
+	if len(rep.DomainTTLs) != 1 || !strings.Contains(rep.DomainTTLs[0], "a.lan") || !strings.Contains(rep.DomainTTLs[0], "3600") || !strings.Contains(rep.DomainTTLs[0], "2 record(s)") {
+		t.Fatalf("report: %q", rep.DomainTTLs)
+	}
+}

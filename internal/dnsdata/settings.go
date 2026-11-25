@@ -5,6 +5,7 @@ package dnsdata
 
 import (
 	"crypto/sha256"
+	"strconv"
 
 	"dnshived/internal/dnsstore"
 )
@@ -17,10 +18,16 @@ const (
 	// forwards everything else (overlay mode); once on, names inside the served domains that the table lacks get an
 	// authoritative negative answer.
 	AuthoritativeKey = "authoritative"
+	// DefaultTTLKey names the TTL of every record without its own TTL and of reservation and lease names, in seconds as
+	// decimal text. Without the row it is 0, the TTL the central dnsmasq gives its local data.
+	DefaultTTLKey = "default_ttl"
 )
+
+var settingKeys = []string{AuthoritativeKey, DefaultTTLKey}
 
 type Settings struct {
 	Authoritative bool
+	DefaultTTL    uint32
 }
 
 func settingID(key string) dnsstore.ID {
@@ -32,7 +39,7 @@ func settingID(key string) dnsstore.ID {
 
 // SettingKey reports which setting a row id belongs to.
 func SettingKey(id dnsstore.ID) (string, bool) {
-	for _, k := range []string{AuthoritativeKey} {
+	for _, k := range settingKeys {
 		if id == settingID(k) {
 			return k, true
 		}
@@ -46,7 +53,23 @@ func ReadSettings(v *dnsstore.View) Settings {
 	var s Settings
 	body, _, ok := v.Get(TypeSetting, settingID(AuthoritativeKey))
 	s.Authoritative = ok && string(body) == "1"
+	if body, _, ok := v.Get(TypeSetting, settingID(DefaultTTLKey)); ok {
+		s.DefaultTTL, _ = parseTTLSetting(body)
+	}
 	return s
+}
+
+// parseTTLSetting accepts only the canonical decimal form, so every core stores and compares the same bytes.
+func parseTTLSetting(b []byte) (uint32, bool) {
+	v, err := strconv.ParseUint(string(b), 10, 32)
+	if err != nil || v > maxTTL || strconv.FormatUint(v, 10) != string(b) {
+		return 0, false
+	}
+	return uint32(v), true
+}
+
+func DefaultTTLOp(ttl uint32) dnsstore.Op {
+	return dnsstore.Op{Kind: dnsstore.OpPut, Type: TypeSetting, ID: settingID(DefaultTTLKey), Body: strconv.AppendUint(nil, uint64(ttl), 10)}
 }
 
 func SettingOp(key string, on bool) dnsstore.Op {

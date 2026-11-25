@@ -244,11 +244,13 @@ func handleDNSStoreCutover(ref *configRef) http.HandlerFunc {
 type dsHostRow struct {
 	ID, Label, Domains, Addrs string
 	TTL                       uint32
+	OwnTTL                    bool
 }
 
 type dsRecRow struct {
 	ID, Owner, Type, Data string
 	TTL                   uint32
+	OwnTTL                bool
 }
 
 type dsNodeRow struct{ Name, Role, Head, Commit, Err string }
@@ -348,7 +350,8 @@ func handleDNSStore(ref *configRef) http.HandlerFunc {
 					Addrs   []struct {
 						IP string `json:"ip"`
 					} `json:"addrs"`
-					TTL uint32 `json:"ttl"`
+					TTL    uint32 `json:"ttl"`
+					OwnTTL bool   `json:"own_ttl"`
 				}
 				_ = json.Unmarshal(resp.Items, &items)
 				data.Hosts = nil
@@ -357,7 +360,7 @@ func handleDNSStore(ref *configRef) http.HandlerFunc {
 					for _, a := range it.Addrs {
 						ips = append(ips, a.IP)
 					}
-					data.Hosts = append(data.Hosts, dsHostRow{ID: it.ID, Label: it.Label, Domains: strings.Join(it.Domains, ", "), Addrs: strings.Join(ips, ", "), TTL: it.TTL})
+					data.Hosts = append(data.Hosts, dsHostRow{ID: it.ID, Label: it.Label, Domains: strings.Join(it.Domains, ", "), Addrs: strings.Join(ips, ", "), TTL: it.TTL, OwnTTL: it.OwnTTL})
 				}
 			} else {
 				var items []struct {
@@ -374,6 +377,7 @@ func handleDNSStore(ref *configRef) http.HandlerFunc {
 					Port   int    `json:"port"`
 					Raw    string `json:"raw"`
 					TTL    uint32 `json:"ttl"`
+					OwnTTL bool   `json:"own_ttl"`
 				}
 				_ = json.Unmarshal(resp.Items, &items)
 				data.Records = nil
@@ -392,7 +396,7 @@ func handleDNSStore(ref *configRef) http.HandlerFunc {
 					if it.Raw != "" {
 						d = "hex " + it.Raw
 					}
-					data.Records = append(data.Records, dsRecRow{ID: it.ID, Owner: owner, Type: it.Type, Data: d, TTL: it.TTL})
+					data.Records = append(data.Records, dsRecRow{ID: it.ID, Owner: owner, Type: it.Type, Data: d, TTL: it.TTL, OwnTTL: it.OwnTTL})
 				}
 			}
 			return resp.Total, nil
@@ -448,7 +452,7 @@ var dsTmpl = template.Must(template.New("dnsstore").Parse(`<!doctype html>
 <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{.Label}}">{{.Label}}</td>
 <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{.Domains}}">{{.Domains}}</td>
 <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums" title="{{.Addrs}}">{{.Addrs}}</td>
-<td style="font-variant-numeric:tabular-nums">{{if .TTL}}{{.TTL}}{{else}}<span class="dim">default</span>{{end}}</td>
+<td style="font-variant-numeric:tabular-nums">{{if or .TTL .OwnTTL}}{{.TTL}}{{else}}<span class="dim">default</span>{{end}}</td>
 </tr>{{end}}
 </table>
 {{else}}
@@ -459,7 +463,7 @@ var dsTmpl = template.Must(template.New("dnsstore").Parse(`<!doctype html>
 <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{.Owner}}">{{.Owner}}</td>
 <td>{{.Type}}</td>
 <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{.Data}}">{{.Data}}</td>
-<td style="font-variant-numeric:tabular-nums">{{if .TTL}}{{.TTL}}{{else}}<span class="dim">default</span>{{end}}</td>
+<td style="font-variant-numeric:tabular-nums">{{if or .TTL .OwnTTL}}{{.TTL}}{{else}}<span class="dim">default</span>{{end}}</td>
 </tr>{{end}}
 </table>
 {{end}}

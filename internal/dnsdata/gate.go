@@ -147,6 +147,13 @@ func buildState(v *dnsstore.View, ops []dnsstore.Op, verdict *Verdict) *state {
 				if string(op.Body) != "0" && string(op.Body) != "1" {
 					verdict.errf("the cutover setting is 0 or 1")
 				}
+			case DefaultTTLKey:
+				v, ok := parseTTLSetting(op.Body)
+				if !ok {
+					verdict.errf("the default TTL is a whole number of seconds from 0 to %d", maxTTL)
+					break
+				}
+				ttlCheck(verdict, "default TTL", v)
 			default:
 				verdict.errf("unknown setting")
 			}
