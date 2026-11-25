@@ -2,6 +2,11 @@
 
 ## 0.9.8.11 — in development
 
+**Bug fixes**
+
+- Saving the configuration now waits until it is really on disk before it reports success. Before, a power cut shortly after a save could leave the configuration file empty or at its old state although the save had been confirmed. With the configuration stored in several files (the default since 0.9.8.10), a crash in the middle of a save could leave old and new files mixed, and the node could not load its configuration any more; a save now completes or is undone as a whole, and an interrupted save is finished when the configuration is next read.
+- Operations on cluster nodes (replacing a node, changing a peer's address, the list of trusted hosts) could run at the same moment as a configuration change and silently undo it; they now wait for each other.
+
 **Internal**
 
 - A purpose-built storage engine for DNS data (`internal/dnsstore`): an append-only log with checksums and a keyed hash chain, atomic snapshots, crash recovery, key rotation and a consistency check, built on the standard library only. It is not wired into the daemon yet and changes nothing at runtime.
@@ -20,6 +25,9 @@
 - DHCP leases carry the time they were first leased (`leased_at`, optional, ignored by older cores) so every core agrees which client keeps a contested name.
 - DNS store: one cluster-wide default TTL (`default_ttl` setting) is the TTL of every record that has no TTL of its own, and of reservation and lease names. Without the setting it is 0, which is what the central dnsmasq answers today, so switching to the store does not change how long clients cache. A record can now have its own TTL of 0 ("never cache"), stored apart from "no TTL of its own". The converter no longer copies a local domain's default TTL into every record; it lists each domain whose default no longer applies.
 - Preparation for the DNS cutover (nothing calls it yet): a verification that checks whether the DNS store says exactly what the configuration says. It compares the store's rows with the converted configuration in both directions, compares every answer the table would give (including reservation and lease names and the TTL rules) with what the configuration means, runs the write gate over the configuration's data and lists everything it refuses, checks that every core holds the same store at the same revision, and that the published table is the verified one. Each failed check says why and gives a few examples. Checks of parts that are not built yet (live comparison, forwarder, query log) report "not available yet", so the cutover cannot be offered before they exist. A full check of 100,000 records and 10,200 reservations takes about 1.6 to 1.9 seconds.
+- Pending changes: comparing large configurations is much faster; with 1,000 changed records in a domain of 100,000 the comparison took about 50 seconds and now takes under half a second.
+- The configuration change journal can run in the cluster behind a switch file (`/etc/dnshived/config-journal.enable`, off by default): one core orders every change of the cluster-wide configuration, every core applies the same changes in the same order, a change made on an outdated view is refused and kept for an operator instead of overwriting, and the same change sent to every core is applied once. Secrets and the cluster's identity are not recorded.
+- Groundwork for a change journal of the configuration (nothing uses it yet): every change is recorded item by item with its old and new value, so any change can be undone exactly; a change is applied only when the item still has the value it was based on, so a change made on an outdated view can never replace someone else's work; the configuration file is written atomically and a change interrupted by a crash is completed when the node starts again.
 
 ## 0.9.8.10 — released
 

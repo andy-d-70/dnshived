@@ -1490,6 +1490,7 @@ func main() {
 	})
 
 	startDNSStore(mux, authMw, ag, machine, observer, trustedHostsWithFallback)
+	startConfigJournal(mux, *cfgPath, ag, engine, authMw, observer, trustedHostsWithFallback)
 
 	// Wrap all routes with auth middleware (no-op when api_tokens is empty).
 	handler := authMw.Wrap(mux)
@@ -2179,6 +2180,9 @@ func (u configUpdate) applyTo(c *config.Cluster) {
 func applyConfigUpdate(cfgPath string, upd configUpdate, ag *agent.Agent, engine *desired.Engine, authMw *auth.Middleware) (status int, body interface{}) {
 	cfgWriteMu.Lock()
 	defer cfgWriteMu.Unlock()
+	if upd.ConfigCatchUp && cfgJournal.Load() != nil {
+		return http.StatusConflict, map[string]string{"error": "the configuration journal keeps every core in step; a catch-up push is not used"}
+	}
 	current, err := config.Load(cfgPath)
 	if err != nil {
 		return http.StatusInternalServerError, map[string]string{"error": "load current config: " + err.Error()}
@@ -2204,12 +2208,34 @@ func applyConfigUpdate(cfgPath string, upd configUpdate, ag *agent.Agent, engine
 		return http.StatusBadRequest, result
 	}
 
+	if j := cfgJournal.Load(); j != nil {
+		before, err := config.Load(cfgPath)
+		if err != nil {
+			return http.StatusInternalServerError, map[string]string{"error": "load current config: " + err.Error()}
+		}
+		if err := j.saveThroughJournal(before, current, upd.Author); err != nil {
+			return proposeStatus(err), proposeError(err)
+		}
+		if current, err = config.Load(cfgPath); err != nil {
+			return http.StatusInternalServerError, map[string]string{"error": "reload: " + err.Error()}
+		}
+		currentConfig.Store(current)
+		applyLiveConfig(current, clusterChanged, ag, engine, authMw)
+		return http.StatusOK, map[string]interface{}{"ok": true, "warnings": result.Warnings, "restart_needed": clusterChanged}
+	}
+
 	current.StampRevision(upd.ConfigRevision, upd.ConfigRevisionAt, upd.ConfigRevisionOrigin, time.Now)
 	if err := config.Save(cfgPath, current); err != nil {
 		return http.StatusInternalServerError, map[string]string{"error": "save: " + err.Error()}
 	}
 	currentConfig.Store(current)
+	applyLiveConfig(current, clusterChanged, ag, engine, authMw)
+	return http.StatusOK, map[string]interface{}{"ok": true, "warnings": result.Warnings, "restart_needed": clusterChanged}
+}
 
+// applyLiveConfig hands a saved configuration to the running daemon. An identity change (cluster key, certificate,
+// platform) needs a restart instead.
+func applyLiveConfig(current *config.Cluster, clusterChanged bool, ag *agent.Agent, engine *desired.Engine, authMw *auth.Middleware) {
 	if !clusterChanged && ag != nil {
 		applyAccessToAgent(ag, current)
 		ag.HotReloadScopes(current.Scopes)
@@ -2243,8 +2269,6 @@ func applyConfigUpdate(cfgPath string, upd configUpdate, ag *agent.Agent, engine
 			authMw.SetTokens(current.APITokens)
 		}
 	}
-
-	return http.StatusOK, map[string]interface{}{"ok": true, "warnings": result.Warnings, "restart_needed": clusterChanged}
 }
 
 func clusterIdentityFieldsChanged(c *config.Cluster, upd configUpdate) bool {

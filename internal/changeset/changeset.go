@@ -185,13 +185,12 @@ func asAny(g *group) any {
 	return g.elems
 }
 
-func find(gs []group, key string) *group {
+func byKey(gs []group) map[string]*group {
+	m := make(map[string]*group, len(gs))
 	for i := range gs {
-		if gs[i].key == key {
-			return &gs[i]
-		}
+		m[gs[i].key] = &gs[i]
 	}
-	return nil
+	return m
 }
 
 func ignored(spath, key string) bool {
@@ -232,7 +231,8 @@ func walk(live, cand any, path, spath string, emit func(path string, live, cand 
 		return
 	}
 	if r, lg, cg, ok := keyedLists(live, cand, spath); ok {
-		keys := map[string]bool{}
+		li, ci := byKey(lg), byKey(cg)
+		keys := make(map[string]bool, len(lg)+len(cg))
 		for _, g := range lg {
 			keys[g.key] = true
 		}
@@ -240,7 +240,7 @@ func walk(live, cand any, path, spath string, emit func(path string, live, cand 
 			keys[g.key] = true
 		}
 		for k := range keys {
-			l, c := find(lg, k), find(cg, k)
+			l, c := li[k], ci[k]
 			p := joinKey(path, k)
 			if r.atomic {
 				if !reflect.DeepEqual(asAny(l), asAny(c)) {
@@ -330,10 +330,11 @@ func mergeKeyed(r rule, lg, cg []group, path, spath string, pick func(string) bo
 			out = append(out, v)
 		}
 	}
-	done := map[string]bool{}
+	ci := byKey(cg)
+	done := make(map[string]bool, len(lg))
 	for i := range lg {
 		done[lg[i].key] = true
-		emit(lg[i].key, &lg[i], find(cg, lg[i].key))
+		emit(lg[i].key, &lg[i], ci[lg[i].key])
 	}
 	for i := range cg {
 		if !done[cg[i].key] {

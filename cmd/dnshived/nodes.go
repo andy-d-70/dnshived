@@ -370,6 +370,8 @@ func matchCandidateInterfaces(ctx context.Context, cfg *config.Cluster, addr str
 // save/reload counterpart, mirroring updateTrustedHostsInConfig's own
 // exact shape.
 func resetRoleAddressingInConfig(cfgPath, role, newAddr string, ri *roleInterfaces) (config.Cluster, error) {
+	cfgWriteMu.Lock()
+	defer cfgWriteMu.Unlock()
 	current, err := config.Load(cfgPath)
 	if err != nil {
 		return config.Cluster{}, fmt.Errorf("load current config: %w", err)
@@ -380,6 +382,12 @@ func resetRoleAddressingInConfig(cfgPath, role, newAddr string, ri *roleInterfac
 	}
 	if result := updated.ValidateExtended(); !result.OK() {
 		return config.Cluster{}, fmt.Errorf("updated config failed validation: %v", result.Errors)
+	}
+	if j := cfgJournal.Load(); j != nil {
+		if err := j.saveThroughJournal(current, &updated, "node-operation"); err != nil {
+			return config.Cluster{}, fmt.Errorf("save through the configuration journal: %w", err)
+		}
+		return updated, nil
 	}
 	if err := config.Save(cfgPath, &updated); err != nil {
 		return config.Cluster{}, fmt.Errorf("save: %w", err)
@@ -573,6 +581,8 @@ func applyLiveTrustedHosts(cfgPath string, hosts []string, observer *cluster.Obs
 }
 
 func updateTrustedHostsInConfig(cfgPath string, hosts []string) error {
+	cfgWriteMu.Lock()
+	defer cfgWriteMu.Unlock()
 	current, err := config.Load(cfgPath)
 	if err != nil {
 		return fmt.Errorf("load current config: %w", err)
@@ -591,6 +601,8 @@ func updateTrustedHostsInConfig(cfgPath string, hosts []string) error {
 // removePeerInConfig drops addr from cfgPath's own Peers list, saves, and
 // refreshes currentConfig.
 func removePeerInConfig(cfgPath, addr string) (updated bool, err error) {
+	cfgWriteMu.Lock()
+	defer cfgWriteMu.Unlock()
 	current, err := config.Load(cfgPath)
 	if err != nil {
 		return false, fmt.Errorf("load current config: %w", err)
@@ -1079,6 +1091,8 @@ func replaceNodeHandler(cfgPath string, observer *cluster.Observer, ag *agent.Ag
 // updatePeerInConfig reconciles cfgPath's own Peers list against (oldAddr,
 // newAddr), saves, and refreshes currentConfig.
 func updatePeerInConfig(cfgPath, oldAddr, newAddr string) (updated bool, err error) {
+	cfgWriteMu.Lock()
+	defer cfgWriteMu.Unlock()
 	current, err := config.Load(cfgPath)
 	if err != nil {
 		return false, fmt.Errorf("load current config: %w", err)

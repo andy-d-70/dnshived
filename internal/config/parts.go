@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -313,8 +314,24 @@ func SplitDir(path string) string { return path + SplitDirSuffix }
 
 // LoadSplit reads and validates a split configuration directory.
 func LoadSplit(dir string) (*Cluster, error) {
-	raw, err := readCapped(filepath.Join(dir, manifestFileName), maxManifestBytes)
-	if err != nil {
+	in, ierr := readIntent(dir)
+	if ierr == nil {
+		if recoverSplit(dir) == nil {
+			in = nil
+		}
+	} else if !errors.Is(ierr, fs.ErrNotExist) {
+		return nil, ierr
+	}
+	pending := map[string]bool{}
+	var raw []byte
+	var err error
+	if in != nil {
+		// Another process is finishing the save, or this one may not write: read the saved state through the intent.
+		raw = in.Manifest
+		for _, p := range in.Parts {
+			pending[p] = true
+		}
+	} else if raw, err = readCapped(filepath.Join(dir, manifestFileName), maxManifestBytes); err != nil {
 		return nil, fmt.Errorf("read split config manifest: %w", err)
 	}
 	var m Manifest
@@ -322,7 +339,13 @@ func LoadSplit(dir string) (*Cluster, error) {
 		return nil, fmt.Errorf("parse split config manifest: %w", err)
 	}
 	c, err := Assemble(m, func(p string) ([]byte, error) {
-		return readCapped(filepath.Join(dir, filepath.FromSlash(p)), maxPartBytes)
+		full := filepath.Join(dir, filepath.FromSlash(p))
+		if pending[p] {
+			if b, err := readCapped(full+newSuffix, maxPartBytes); err == nil {
+				return b, nil
+			}
+		}
+		return readCapped(full, maxPartBytes)
 	})
 	if err != nil {
 		return nil, err
@@ -331,31 +354,6 @@ func LoadSplit(dir string) (*Cluster, error) {
 		return nil, err
 	}
 	return c, nil
-}
-
-func writeAtomic(path string, data []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	os.Remove(tmp)
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	_, werr := f.Write(data)
-	if cerr := f.Close(); werr == nil {
-		werr = cerr
-	}
-	if werr != nil {
-		os.Remove(tmp)
-		return werr
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
 }
 
 // SaveSplit writes the parts that differ from what the directory holds, then
@@ -369,6 +367,20 @@ func SaveSplit(dir string, c *Cluster) error {
 	m, files, err := c.Split()
 	if err != nil {
 		return err
+	}
+	l, err := lockDir(dir, true)
+	if err != nil {
+		return fmt.Errorf("lock %s: %w", dir, err)
+	}
+	defer l.release()
+	if in, err := readIntent(dir); err == nil {
+		if err := finishSplit(dir, in); err != nil {
+			return fmt.Errorf("finish the interrupted save: %w", err)
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	} else if err := removeStray(dir); err != nil {
+		return fmt.Errorf("remove parts of an interrupted save: %w", err)
 	}
 	known := map[string]string{}
 	if raw, err := readCapped(filepath.Join(dir, manifestFileName), maxManifestBytes); err == nil {
@@ -391,25 +403,29 @@ func SaveSplit(dir string, c *Cluster) error {
 			newHash[rel] = ref.Hash
 		}
 	}
-	for p, data := range files {
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	var changed []string
+	for _, p := range paths {
 		full := filepath.Join(dir, filepath.FromSlash(p))
 		if isDomainPart(p) && known[p] != "" && known[p] == newHash[p] && fileExists(full) {
 			continue
 		}
-		if old, err := readCapped(full, maxPartBytes); err == nil && string(old) == string(data) {
+		if old, err := readCapped(full, maxPartBytes); err == nil && string(old) == string(files[p]) {
 			continue
 		}
-		if err := writeAtomic(full, data); err != nil {
+		if err := writeDurable(full+newSuffix, files[p], 0o600); err != nil {
 			return fmt.Errorf("write part %s: %w", p, err)
 		}
+		if err := step("write " + p); err != nil {
+			return err
+		}
+		changed = append(changed, p)
 	}
-	raw, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal manifest: %w", err)
-	}
-	if err := writeAtomic(filepath.Join(dir, manifestFileName), raw); err != nil {
-		return fmt.Errorf("write manifest: %w", err)
-	}
+	var stale []string
 	for _, sub := range []string{"scopes", "domains", "parked"} {
 		entries, err := os.ReadDir(filepath.Join(dir, sub))
 		if err != nil {
@@ -418,11 +434,25 @@ func SaveSplit(dir string, c *Cluster) error {
 		for _, e := range entries {
 			rel := sub + "/" + e.Name()
 			if _, keep := files[rel]; !keep && strings.HasSuffix(e.Name(), ".json") {
-				os.Remove(filepath.Join(dir, sub, e.Name()))
+				stale = append(stale, rel)
 			}
 		}
 	}
-	return nil
+	raw, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal manifest: %w", err)
+	}
+	in, err := json.Marshal(saveIntent{Manifest: raw, Parts: changed, Remove: stale})
+	if err != nil {
+		return err
+	}
+	if err := writeDurable(filepath.Join(dir, intentFileName), in, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", intentFileName, err)
+	}
+	if err := step("intent"); err != nil {
+		return err
+	}
+	return finishSplit(dir, &saveIntent{Manifest: raw, Parts: changed, Remove: stale})
 }
 
 // ConfigFormats lists the configuration formats this build reads.

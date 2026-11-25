@@ -236,7 +236,7 @@ func TestLive_PeerEndpointsNeedTheToken(t *testing.T) {
 	}
 	addr := l.addr["core1"]
 	for name, token := range map[string]string{"none": "", "wrong": "nope"} {
-		req, _ := http.NewRequest("POST", "http://"+addr+pathVote, bytes.NewReader([]byte(`{"Term":99,"Candidate":"core2","Membership":1}`)))
+		req, _ := http.NewRequest("POST", "http://"+addr+DefaultPrefix+pathVote, bytes.NewReader([]byte(`{"Term":99,"Candidate":"core2","Membership":1}`)))
 		req.Header.Set(TokenHeader, token)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -250,7 +250,7 @@ func TestLive_PeerEndpointsNeedTheToken(t *testing.T) {
 	if l.get("core1").n.Term() >= 99 {
 		t.Fatal("an unauthenticated vote request must not move the term")
 	}
-	req, _ := http.NewRequest("POST", "http://"+addr+pathAppend, bytes.NewReader([]byte(`{"Term":1,"Bogus":1}`)))
+	req, _ := http.NewRequest("POST", "http://"+addr+DefaultPrefix+pathAppend, bytes.NewReader([]byte(`{"Term":1,"Bogus":1}`)))
 	req.Header.Set(TokenHeader, liveToken)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

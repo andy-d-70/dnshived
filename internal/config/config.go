@@ -1144,23 +1144,8 @@ func saveSingle(path string, c *Cluster) error {
 	if err != nil {
 		return fmt.Errorf("marshal cluster config: %w", err)
 	}
-	tmp := path + ".tmp"
-	os.Remove(tmp)
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
+	if err := writeDurable(path, data, 0o600); err != nil {
 		return fmt.Errorf("write cluster config: %w", err)
-	}
-	_, werr := f.Write(data)
-	if cerr := f.Close(); werr == nil {
-		werr = cerr
-	}
-	if werr != nil {
-		os.Remove(tmp)
-		return fmt.Errorf("write cluster config: %w", werr)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return fmt.Errorf("rename cluster config into place: %w", err)
 	}
 	return nil
 }

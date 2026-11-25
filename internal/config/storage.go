@@ -90,12 +90,18 @@ func copyFileExcl(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+	_, err = io.Copy(out, in)
+	if err == nil {
+		err = out.Sync()
+	}
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
 		os.Remove(dst)
 		return err
 	}
-	return out.Close()
+	return syncDir(filepath.Dir(dst))
 }
 
 func canonical(c *Cluster) ([]byte, error) { return json.Marshal(c) }
@@ -138,6 +144,9 @@ func MigrateToSplit(path string) (bool, error) {
 	}
 	if err := os.Remove(path); err != nil {
 		return false, fmt.Errorf("remove the single file: %w", err)
+	}
+	if err := syncDir(filepath.Dir(path)); err != nil {
+		return false, fmt.Errorf("sync after removing the single file: %w", err)
 	}
 	return true, nil
 }

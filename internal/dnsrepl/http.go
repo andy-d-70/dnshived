@@ -14,10 +14,12 @@ import (
 )
 
 const (
-	TokenHeader  = "X-Dnsrepl-Token"
-	pathVote     = "/internal/dnsrepl/vote"
-	pathAppend   = "/internal/dnsrepl/append"
-	pathSnapshot = "/internal/dnsrepl/snapshot"
+	TokenHeader = "X-Dnsrepl-Token"
+	// DefaultPrefix is where the DNS store's replication lives; another replicated store uses its own prefix.
+	DefaultPrefix = "/internal/dnsrepl"
+	pathVote      = "/vote"
+	pathAppend    = "/append"
+	pathSnapshot  = "/snapshot"
 
 	maxVoteBody   = 16 << 10
 	maxAppendBody = 256 << 20
@@ -30,6 +32,15 @@ type HTTPTransport struct {
 	Scheme string
 	Addr   func(peer string) (string, bool)
 	Token  string
+	// Prefix of the peer's routes; empty means DefaultPrefix.
+	Prefix string
+}
+
+func prefixOr(p string) string {
+	if p == "" {
+		return DefaultPrefix
+	}
+	return p
 }
 
 func (t *HTTPTransport) post(ctx context.Context, peer, path string, in, out any) error {
@@ -41,7 +52,7 @@ func (t *HTTPTransport) post(ctx context.Context, peer, path string, in, out any
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.Scheme+"://"+addr+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.Scheme+"://"+addr+prefixOr(t.Prefix)+path, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -74,8 +85,14 @@ func (t *HTTPTransport) Snapshot(ctx context.Context, peer string, req SnapReq) 
 	return out, t.post(ctx, peer, pathSnapshot, req, &out)
 }
 
-// Routes registers the three receiving endpoints. allow gates the caller (trusted hosts); the token is the shared secret.
+// Routes registers the three receiving endpoints under DefaultPrefix. allow gates the caller (trusted hosts); the token is
+// the shared secret.
 func (d *Driver) Routes(mux *http.ServeMux, token string, allow func(*http.Request) bool) {
+	d.RoutesAt(mux, DefaultPrefix, token, allow)
+}
+
+// RoutesAt is Routes under another prefix, for a second replicated store next to the DNS store.
+func (d *Driver) RoutesAt(mux *http.ServeMux, prefix, token string, allow func(*http.Request) bool) {
 	guard := func(limit int64, h func(body []byte) (any, error)) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			if allow != nil && !allow(r) || subtle.ConstantTimeCompare([]byte(r.Header.Get(TokenHeader)), []byte(token)) != 1 {
@@ -101,21 +118,21 @@ func (d *Driver) Routes(mux *http.ServeMux, token string, allow func(*http.Reque
 		dec.DisallowUnknownFields()
 		return dec.Decode(v)
 	}
-	mux.HandleFunc("POST "+pathVote, guard(maxVoteBody, func(b []byte) (any, error) {
+	mux.HandleFunc("POST "+prefix+pathVote, guard(maxVoteBody, func(b []byte) (any, error) {
 		var req VoteReq
 		if err := decode(b, &req); err != nil {
 			return nil, err
 		}
 		return d.HandleVote(req)
 	}))
-	mux.HandleFunc("POST "+pathAppend, guard(maxAppendBody, func(b []byte) (any, error) {
+	mux.HandleFunc("POST "+prefix+pathAppend, guard(maxAppendBody, func(b []byte) (any, error) {
 		var req AppendReq
 		if err := decode(b, &req); err != nil {
 			return nil, err
 		}
 		return d.HandleAppend(req)
 	}))
-	mux.HandleFunc("POST "+pathSnapshot, guard(maxSnapBody, func(b []byte) (any, error) {
+	mux.HandleFunc("POST "+prefix+pathSnapshot, guard(maxSnapBody, func(b []byte) (any, error) {
 		var req SnapReq
 		if err := decode(b, &req); err != nil {
 			return nil, err
