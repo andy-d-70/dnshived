@@ -6,6 +6,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -138,5 +139,34 @@ func TestTemplateShare_RefreshNeverDropsAnUnsavedChange(t *testing.T) {
 	w1.refresh(s1)
 	if got := tplIDs(s1); !strings.Contains(got, "new=N") || !strings.Contains(got, "other=O") {
 		t.Fatalf("both changes end up shared: %s", got)
+	}
+}
+
+func TestTemplateShare_AFailedJoinKeepsTheLocalTemplatesAndRetries(t *testing.T) {
+	f := newFakeShared()
+	w := f.share()
+	fail := true
+	post := w.post
+	w.post = func(author string, changes []cfgjournal.Entry) error {
+		if fail {
+			return errors.New("the leading core does not know the templates document yet")
+		}
+		return post(author, changes)
+	}
+	s := storeWith(Template{ID: "cams", Name: "Cams", Kind: "dns", Body: "A"})
+	w.refresh(s)
+	if got := tplIDs(s); got != "cams=A" || w.joined {
+		t.Fatalf("a failed join must keep the local templates and not join: %q joined=%v", got, w.joined)
+	}
+	if err := w.save(s, "ann"); err != nil {
+		t.Fatal(err)
+	}
+	fail = false
+	w.refresh(s)
+	if got := tplIDs(s); got != "cams=A" || !w.joined {
+		t.Fatalf("the next refresh joins with the local templates: %q joined=%v", got, w.joined)
+	}
+	if _, remote, _ := w.get(); !strings.Contains(fmt.Sprint(remote), "cams") {
+		t.Fatalf("the shared document now holds the template: %v", remote)
 	}
 }

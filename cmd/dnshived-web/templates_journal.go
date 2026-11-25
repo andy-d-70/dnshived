@@ -105,7 +105,8 @@ func (sh *templateShare) refresh(store *TemplateStore) {
 		}
 		if len(add) > 0 {
 			if err := sh.post("web", add); err != nil {
-				log.Printf("[TEMPLATES] contributing local templates: %v", err)
+				log.Printf("[TEMPLATES] contributing local templates failed, keeping them locally and trying again: %v", err)
+				return
 			}
 			if rev, remote, err = sh.get(); err != nil {
 				return
