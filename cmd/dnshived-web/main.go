@@ -92,6 +92,7 @@ func main() {
 	log.Printf("[INIT] polling %d cluster node(s)", len(cfg.Nodes))
 
 	ref := newConfigRef(cfg)
+	useTemplateShare(templates, func() []NodeConfig { return nodesIncludingSelf(ref.Load()) })
 	tlspin.SetFile(cfg.TLSCert)
 
 	repl := newAuthSync(store, ref)

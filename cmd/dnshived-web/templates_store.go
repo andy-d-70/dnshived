@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -109,6 +110,9 @@ func LoadTemplates(path string) (*TemplateStore, error) {
 }
 
 func (s *TemplateStore) Save(path string) error {
+	if err := templatesShare.save(s, "web"); err != nil {
+		return err
+	}
 	s.mu.RLock()
 	data, err := json.MarshalIndent(s, "", "  ")
 	s.mu.RUnlock()
@@ -143,6 +147,11 @@ func templatesAtomicWriteFile(path string, data []byte, perm os.FileMode) error 
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
+		return err
+	}
+	if d, err := os.Open(filepath.Dir(path)); err == nil {
+		err = d.Sync()
+		d.Close()
 		return err
 	}
 	return nil

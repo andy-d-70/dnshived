@@ -236,7 +236,7 @@ func TestConfigVerdict_UsesTheSecondHashWhenBothSidesHaveIt(t *testing.T) {
 func TestEveryPushedSettingIsHashedOrMarkedAsMetadata(t *testing.T) {
 	metadata := map[string]bool{
 		"config_revision": true, "config_revision_at": true, "config_revision_origin": true,
-		"config_catchup": true, "config_base_revision": true, "author": true,
+		"config_catchup": true, "config_base_revision": true, "author": true, "base": true,
 	}
 	_, hashed := config.HashedKeys()
 	covered := map[string]bool{}

@@ -4,6 +4,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -267,5 +269,47 @@ func TestConfigJournal_StatusShowsRoleAndAppliedRevision(t *testing.T) {
 	_, rev, _, _ := j.doc.Load()
 	if st == nil || st["role"] != "leader" || st["leader"] != config.RoleCore1 || st["applied_rev"] != rev || st["last_error"] != "" {
 		t.Fatalf("status %v, file at %d", st, rev)
+	}
+}
+
+func TestSharedDoc_TemplatesMergeByItemAndCollideOnTheSameOne(t *testing.T) {
+	path := writeBaseConfig(t)
+	j := singleCoreJournal(t, path)
+	change := func(author string, changes []cfgjournal.Entry) int {
+		raw, _ := json.Marshal(docChangeRequest{Author: author, Changes: changes})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/journal/docs/templates/changes", bytes.NewReader(raw))
+		req.SetPathValue("name", "templates")
+		rec := httptest.NewRecorder()
+		j.handleDocChange(rec, req)
+		return rec.Code
+	}
+	base := emptyTemplates()
+	withTemplate := func(id, body string) any {
+		return map[string]any{"templates": []any{map[string]any{"id": id, "name": id, "kind": "dns", "body": body}}, "option_sets": []any{}, "scope_groups": []any{}}
+	}
+	a, _ := cfgjournal.FromChange(templatesDoc, base, withTemplate("cams", "A"), 0)
+	b, _ := cfgjournal.FromChange(templatesDoc, base, withTemplate("mics", "B"), 0)
+	if change("ann", a) != http.StatusOK || change("bob", b) != http.StatusOK {
+		t.Fatal("two people adding different templates on the same base must both succeed")
+	}
+	c, _ := cfgjournal.FromChange(templatesDoc, withTemplate("cams", "OLD"), withTemplate("cams", "C"), 0)
+	if code := change("cy", c); code != http.StatusConflict {
+		t.Fatalf("a change of a template someone else changed must collide: %d", code)
+	}
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/journal/docs/templates", nil)
+	req.SetPathValue("name", "templates")
+	j.handleDocGet(rec, req)
+	var ans docAnswer
+	_ = json.Unmarshal(rec.Body.Bytes(), &ans)
+	if !bytes.Contains(ans.Tree, []byte(`"cams"`)) || !bytes.Contains(ans.Tree, []byte(`"mics"`)) || ans.Rev == 0 {
+		t.Fatalf("both templates are in the shared document: %s", ans.Tree)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/journal/docs/users", nil)
+	req.SetPathValue("name", "users")
+	rec = httptest.NewRecorder()
+	j.handleDocGet(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatal("documents with secrets are never served through the journal")
 	}
 }

@@ -1280,6 +1280,22 @@ func main() {
 		status, body := applyCandidateUpdate(dataDir(currentConfig.Load()), *cfgPath, upd)
 		writeJSON(w, status, body)
 	}))
+	mux.HandleFunc("GET /api/v1/journal/docs/{name}", authMw.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		j := cfgJournal.Load()
+		if j == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "the configuration journal is off on this core"})
+			return
+		}
+		j.handleDocGet(w, r)
+	}))
+	mux.HandleFunc("POST /api/v1/journal/docs/{name}/changes", authMw.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		j := cfgJournal.Load()
+		if j == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "the configuration journal is off on this core"})
+			return
+		}
+		j.handleDocChange(w, r)
+	}))
 	mux.HandleFunc("POST /api/v1/pending/stage", authMw.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
 		j := cfgJournal.Load()
 		if j == nil {

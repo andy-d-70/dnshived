@@ -29,6 +29,10 @@ var rules = map[string]rule{
 	"parked_scopes.{}.reservations": {key: reservationKey, atomic: true},
 	"api_tokens":                    {key: field("name"), atomic: true},
 	"default_dns_checks":            {key: field("name", "type"), atomic: true},
+	// The web's templates document (configuration journal): each entry is its own item.
+	"templates":    {key: field("id")},
+	"option_sets":  {key: field("id")},
+	"scope_groups": {key: field("id")},
 }
 
 var ignoredTop = map[string]bool{

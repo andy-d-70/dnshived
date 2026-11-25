@@ -64,13 +64,16 @@ type cfgJournalRuntime struct {
 
 	pendingWriter *cfgjournal.Writer
 	pendingDoc    *cfgjournal.Document
-	token         string
-	scheme        string
-	client        *http.Client
-	addrOf        func(role string) (string, bool)
-	kick          chan struct{}
-	errMu         sync.Mutex
-	lastErr       string
+
+	templatesWriter *cfgjournal.Writer
+	templatesDoc    *cfgjournal.Document
+	token           string
+	scheme          string
+	client          *http.Client
+	addrOf          func(role string) (string, bool)
+	kick            chan struct{}
+	errMu           sync.Mutex
+	lastErr         string
 
 	ag      *agent.Agent
 	engine  *desired.Engine
@@ -201,6 +204,8 @@ func (j *cfgJournalRuntime) build() *dnsrepl.Driver {
 	j.writer = cfgjournal.NewWriter(journal, j.doc, j.store.View)
 	j.pendingDoc = &cfgjournal.Document{FS: vfs.OS{}, Name: cfgjournal.PendingDoc, Path: filepath.Join(j.dataDir, "pending.json"), Mode: 0o600, Empty: cfgjournal.EmptyPending}
 	j.pendingWriter = cfgjournal.NewWriter(journal, j.pendingDoc, j.store.View)
+	j.templatesDoc = &cfgjournal.Document{FS: vfs.OS{}, Name: templatesDoc, Path: filepath.Join(j.dataDir, "templates.json"), Mode: 0o600, Empty: emptyTemplates}
+	j.templatesWriter = cfgjournal.NewWriter(journal, j.templatesDoc, j.store.View)
 	j.writer.Validate = func(tree any) error {
 		c, err := j.doc.Candidate(tree)
 		if err != nil {
@@ -268,6 +273,9 @@ func (j *cfgJournalRuntime) syncLocked() (uint64, error) {
 	if err == nil {
 		_, _, err = j.pendingWriter.Sync()
 	}
+	if err == nil {
+		_, _, err = j.templatesWriter.Sync()
+	}
 	j.noteErr(err)
 	if err != nil {
 		return 0, err
@@ -319,6 +327,8 @@ func (j *cfgJournalRuntime) writerFor(entries []cfgjournal.Entry) (*cfgjournal.W
 		return j.writer, j.doc, nil
 	case cfgjournal.PendingDoc:
 		return j.pendingWriter, j.pendingDoc, nil
+	case templatesDoc:
+		return j.templatesWriter, j.templatesDoc, nil
 	}
 	return nil, nil, fmt.Errorf("%w: unknown document %q", cfgjournal.ErrEntry, entries[0].Doc)
 }
