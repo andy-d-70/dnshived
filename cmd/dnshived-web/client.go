@@ -61,6 +61,8 @@ func (rt reachabilityRoundTripper) RoundTrip(req *http.Request) (*http.Response,
 
 // nodeStatus mirrors the subset of /api/v1/status's fields this UI needs.
 type nodeStatus struct {
+	// ConfigJournal is the configuration journal's state; absent or null when it is off or the daemon is older.
+	ConfigJournal json.RawMessage `json:"config_journal"`
 	// ConfigStorage is the format the node keeps its configuration in (absent on an older daemon).
 	ConfigStorage string   `json:"config_storage"`
 	NodeID        string   `json:"node_id"`

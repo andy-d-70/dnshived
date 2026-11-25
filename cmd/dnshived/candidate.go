@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"dnshived/internal/cfgjournal"
 	"dnshived/internal/config"
 )
 
@@ -126,8 +127,29 @@ func applyCandidateThroughJournal(j *cfgJournalRuntime, dataDir, cfgPath string,
 	if !result.OK() {
 		return http.StatusBadRequest, result
 	}
-	if err := j.stageLocked(dataDir, &next, upd.Author); err != nil {
+	if len(upd.Base) == 0 {
+		if err := j.stageLocked(dataDir, &next, upd.Author); err != nil {
+			return proposeStatus(err), proposeError(err)
+		}
+		return http.StatusOK, map[string]interface{}{"ok": true, "warnings": result.Warnings}
+	}
+	base, err := cfgjournal.DecodeTree(upd.Base)
+	if err != nil {
+		return http.StatusBadRequest, map[string]string{"error": "base: " + err.Error()}
+	}
+	nt, err := cfgjournal.Replicated(&next)
+	if err != nil {
+		return http.StatusInternalServerError, map[string]string{"error": err.Error()}
+	}
+	changes, err := cfgjournal.FromChange(cfgJournalDoc, base, nt, 0)
+	if err != nil {
+		return http.StatusInternalServerError, map[string]string{"error": err.Error()}
+	}
+	if err := j.stageChangesLocked(changes, upd.Author); err != nil {
 		return proposeStatus(err), proposeError(err)
+	}
+	if err := j.stageOwnLocked(dataDir, &next, upd.Author); err != nil {
+		return http.StatusInternalServerError, map[string]string{"error": "stage this core's own fields: " + err.Error()}
 	}
 	return http.StatusOK, map[string]interface{}{"ok": true, "warnings": result.Warnings}
 }

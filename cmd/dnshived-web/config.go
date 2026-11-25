@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"dnshived/internal/cfgjournal"
 	"dnshived/internal/config"
 	"dnshived/internal/discovery"
 	"dnshived/internal/webauth"
@@ -37,7 +38,10 @@ const newTokenSlots = 5
 // (field-for-field).
 type configPushPayload struct {
 	// Author names the admin who stages the change; the daemon records it per changed field.
-	Author                string                         `json:"author,omitempty"`
+	Author string `json:"author,omitempty"`
+	// Base is the cluster-wide part of the document this change was made on; a daemon with the configuration journal
+	// stages only the items that differ between Base and this payload. Commits do not carry it.
+	Base                  json.RawMessage                `json:"base,omitempty"`
 	PSK                   string                         `json:"psk"`
 	TrustedHosts          []string                       `json:"trusted_hosts"`
 	TLSCert               string                         `json:"tls_cert"`
@@ -493,7 +497,8 @@ func handleScopesConfigPost(ref *configRef) http.HandlerFunc {
 				scopes[name] = sc
 			}
 		}
-		payload := clusterPushPayloadFrom(current)
+		payload := clusterPushPayloadNoBase(current)
+		payload.Base = replicatedBase(baseWithPageLoadRecords(current, r.PostForm, ""))
 		payload.Scopes = scopes
 
 		user, _ := userFromContext(r)
@@ -553,7 +558,8 @@ func handleDNSConfigPost(ref *configRef) http.HandlerFunc {
 			http.Error(w, "could not read current config: "+err.Error(), http.StatusBadGateway)
 			return
 		}
-		payload := clusterPushPayloadFrom(current)
+		payload := clusterPushPayloadNoBase(current)
+		payload.Base = replicatedBase(baseWithPageLoadRecords(current, r.PostForm, ""))
 		payload.Scopes = current.Scopes
 		payload.GlobalDNSRecords = globalRecords
 
@@ -670,6 +676,7 @@ const saveDoneMarkerHTML = `<span id="save-done" hidden></span>
 // pushConfigAndRenderResult is the shared concurrent push-to-every-node +
 // per-node audit entry + result-page rendering logic.
 func pushConfigAndRenderResult(w http.ResponseWriter, cfg *WebConfig, payload configPushPayload, user webauth.User, backLink, backText string, onFullSuccess func()) {
+	payload.Base = nil
 	payload = withNextRevision(nodesIncludingSelf(cfg), payload)
 	if cfg.CoordinatorNode != nil {
 		pushConfigViaCoordinator(w, cfg, payload, user, backLink, backText, onFullSuccess)
@@ -1275,6 +1282,52 @@ func parentChoices(c config.Cluster) []string {
 // clusterPushPayloadFrom carries every cluster-wide field of an
 // already-loaded config.Cluster into a configPushPayload UNEDITED.
 func clusterPushPayloadFrom(c config.Cluster) configPushPayload {
+	p := clusterPushPayloadNoBase(c)
+	p.Base = replicatedBase(c)
+	return p
+}
+
+// replicatedBase is the cluster-wide part of c as the configuration journal compares it; nil if it cannot be built.
+func replicatedBase(c config.Cluster) json.RawMessage {
+	t, err := cfgjournal.Replicated(&c)
+	if err != nil {
+		return nil
+	}
+	b, err := json.Marshal(t)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// baseWithPageLoadRecords is current with the DNS record lists replaced by the copies the form carried from when
+// the page was loaded (hidden orig_* fields), so a text box that holds a whole list counts only the lines the operator
+// changed, not the ones others changed in the meantime.
+func baseWithPageLoadRecords(current config.Cluster, form url.Values, scopeEdit string) config.Cluster {
+	base := current
+	if v, ok := form["orig_global_dns_records"]; ok {
+		if recs, err := parseDNSRecordLines(first(v)); err == nil {
+			base.GlobalDNSRecords = recs
+		}
+	}
+	scopes := make(map[string]config.ScopeConfig, len(current.Scopes))
+	for name, sc := range current.Scopes {
+		key := "orig_scope_dns_records_" + name
+		if name == scopeEdit {
+			key = "orig_dns_records"
+		}
+		if v, ok := form[key]; ok {
+			if recs, err := parseDNSRecordLines(first(v)); err == nil {
+				sc.DNSRecords = recs
+			}
+		}
+		scopes[name] = sc
+	}
+	base.Scopes = scopes
+	return base
+}
+
+func clusterPushPayloadNoBase(c config.Cluster) configPushPayload {
 	access, _ := marshalAccess(c.Access)
 	parked := make(map[string]config.ScopeConfig, len(c.ParkedScopes))
 	for name, sc := range c.ParkedScopes {

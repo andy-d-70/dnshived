@@ -378,3 +378,6 @@ func FromChange(doc string, live, cand any, base uint64) ([]Entry, error) {
 	})
 	return out, bad
 }
+
+// DecodeTree parses a JSON document into the generic form the journal works on (numbers kept exact).
+func DecodeTree(b []byte) (any, error) { return decodeTree(b) }

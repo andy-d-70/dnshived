@@ -375,3 +375,22 @@ func pushCandidateAndRenderResult(w http.ResponseWriter, cfg *WebConfig, payload
 }
 
 const pendingBannerHTML = `{{if .Pending}}<p class="warn">Editing a PENDING change, not what's currently live — see <a href="/pending">pending changes</a> to review, discard, or commit it.</p>{{end}}`
+
+// postNodeJSON sends a JSON body to node with its admin token and returns the answer.
+func postNodeJSON(node NodeConfig, path string, body []byte) (status int, respBody []byte, err error) {
+	req, err := http.NewRequest(http.MethodPost, node.baseURL()+path, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if node.AdminToken != "" {
+		req.Header.Set("Authorization", "Bearer "+node.AdminToken)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	respBody, err = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return resp.StatusCode, respBody, err
+}

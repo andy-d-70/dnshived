@@ -147,7 +147,7 @@ func (c *catchUp) pass() {
 // a commit derives them, and where nothing can be derived lag keeps the one it
 // has (never the leader's address).
 func catchUpPayload(leaderCfg, lagCfg config.Cluster, lag NodeConfig) configPushPayload {
-	p := clusterPushPayloadFrom(leaderCfg)
+	p := clusterPushPayloadNoBase(leaderCfg)
 	p.Scopes = make(map[string]config.ScopeConfig, len(leaderCfg.Scopes))
 	for name, sc := range leaderCfg.Scopes {
 		sc.NodeIP = ""

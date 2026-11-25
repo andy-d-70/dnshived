@@ -201,7 +201,7 @@ to <select id="dns-copy-to" class="js-combo">{{range .ScopeNamesForCopy}}<option
 </select></td>
 <td><input class="narrow" type="number" min="0" max="255000" name="scope_advert_int_ms_{{.Name}}" id="advert_{{.Name}}" value="{{.AdvertIntMS}}"></td>
 <td><input class="narrow" type="number" min="0" max="3" name="scope_vrrp_version_{{.Name}}" id="vrrpver_{{.Name}}" value="{{.VRRPVersion}}"></td>
-<td><textarea name="scope_dns_records_{{.Name}}" id="dns_{{.Name}}" rows="2">{{.DNSRecordsText}}</textarea></td>
+<td><textarea name="scope_dns_records_{{.Name}}" id="dns_{{.Name}}" rows="2">{{.DNSRecordsText}}</textarea><textarea name="orig_scope_dns_records_{{.Name}}" hidden>{{.DNSRecordsText}}</textarea></td>
 <td><textarea name="scope_dhcp_options_{{.Name}}" id="dhcpopt_{{.Name}}" rows="2">{{.DHCPOptionsText}}</textarea></td>
 </tr>
 {{end}}

@@ -729,7 +729,7 @@ var scopeDetailTmpl = template.Must(template.New("scope-detail").Parse(`<!doctyp
 <tr><td>advert_int_ms</td><td><input name="advert_int_ms" value="{{.EditScope.AdvertIntMS}}"> (0/blank = default 1000ms)</td></tr>
 <tr><td>vrrp_version</td><td><input name="vrrp_version" value="{{.EditScope.VRRPVersion}}"> (0/blank = default v2; sub-second advert_int_ms requires 3)</td></tr>
 <tr><td>dns_records<br><small>text mode, one per line — see <a href="/config/scopes">the scope editor</a> for the full format reference</small><br>{{.DNSTemplatePicker}}</td>
-<td><textarea name="dns_records" id="scope_dns_records" rows="4" cols="40">{{.DNSRecordsText}}</textarea></td></tr>
+<td><textarea name="dns_records" id="scope_dns_records" rows="4" cols="40">{{.DNSRecordsText}}</textarea><textarea name="orig_dns_records" hidden>{{.DNSRecordsText}}</textarea></td></tr>
 <tr><td>dhcp_options<br><small>raw dnsmasq dhcp-option values, one per line — blank = use the cluster default</small><br>{{.DHCPTemplatePicker}}</td>
 <td><textarea name="dhcp_options" id="scope_dhcp_options" rows="3" cols="40">{{.DHCPOptionsText}}</textarea></td></tr>
 <tr><td>color tag</td><td>
@@ -1529,7 +1529,8 @@ func handleScopeConfigPost(ref *configRef) http.HandlerFunc {
 		}
 		newScopes[targetName] = edited
 
-		payload := clusterPushPayloadFrom(c)
+		payload := clusterPushPayloadNoBase(c)
+		payload.Base = replicatedBase(baseWithPageLoadRecords(c, r.PostForm, scope))
 		payload.Scopes = newScopes
 
 		user, _ := userFromContext(r)

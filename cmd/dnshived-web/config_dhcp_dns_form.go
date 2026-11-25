@@ -37,7 +37,7 @@ better. Named boilerplate lives under <a href="#templates">Templates</a>
 — apply per-scope from that scope's page or the
 <a href="/scopes/wizard">wizard</a>, not here.</p>
 {{.GlobalDNSBuilder}}
-<textarea name="global_dns_records" id="global_dns_records" rows="6" cols="70" data-line-list>{{.DNS.GlobalDNSRecordsText}}</textarea>
+<textarea name="global_dns_records" id="global_dns_records" rows="6" cols="70" data-line-list>{{.DNS.GlobalDNSRecordsText}}</textarea><textarea name="orig_global_dns_records" hidden>{{.DNS.GlobalDNSRecordsText}}</textarea>
 
 <p><input type="submit" value="Stage DNS defaults as pending change"></p>
 </form>

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -731,12 +732,24 @@ func handlePendingCommit(cfgPath string, ref *configRef) http.HandlerFunc {
 		}
 		authors := view.summary(user.Name)
 
-		if r.FormValue("scope") == "mine" {
-			commitMine(w, r, cfg, cfgPath, ref, view, user)
+		mine := r.FormValue("scope") == "mine"
+		if !mine && authors.OtherCount > 0 && r.FormValue("confirm") != confirmCommitAll {
+			http.Redirect(w, r, "/pending/confirm?action=commit", http.StatusSeeOther)
 			return
 		}
-		if authors.OtherCount > 0 && r.FormValue("confirm") != confirmCommitAll {
-			http.Redirect(w, r, "/pending/confirm?action=commit", http.StatusSeeOther)
+		if journalActive(nodes) {
+			if refuseOutsideRights(w, cfg, user, candidate, "commit") {
+				return
+			}
+			commitThroughJournal(w, r, cfg, user, mine, func() {
+				if authors.Supported {
+					auditPending(cfg, user.Name, "pending.commit", "committed pending changes through the configuration journal: "+authors.describe())
+				}
+			})
+			return
+		}
+		if mine {
+			commitMine(w, r, cfg, cfgPath, ref, view, user)
 			return
 		}
 		if refuseOutsideRights(w, cfg, user, candidate, "commit") {
@@ -952,4 +965,42 @@ func sortedScopeKeys(m map[string]config.ScopeConfig) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// journalActive reports whether the cores keep the configuration in the configuration journal.
+func journalActive(nodes []NodeConfig) bool {
+	for _, st := range fetchStatuses(nodes) {
+		if len(st.ConfigJournal) > 0 && string(st.ConfigJournal) != "null" {
+			return true
+		}
+	}
+	return false
+}
+
+// commitThroughJournal commits the staged items (all, or the user's own) on the cores: the first core commits them
+// through the journal, each core saves its own staged secret and identity fields. A refused item (someone changed it
+// since it was staged) stops the commit and is shown on the Pending page.
+func commitThroughJournal(w http.ResponseWriter, r *http.Request, cfg *WebConfig, user webauth.User, mine bool, afterOK func()) {
+	body, _ := json.Marshal(map[string]any{"author": user.Name, "mine": mine})
+	for _, n := range nodesIncludingSelf(cfg) {
+		status, resp, err := postNodeJSON(n, "/api/v1/pending/commit", body)
+		if err != nil {
+			continue
+		}
+		if status != http.StatusOK {
+			var ans struct {
+				Error string `json:"error"`
+			}
+			_ = json.Unmarshal(resp, &ans)
+			if ans.Error == "" {
+				ans.Error = strings.TrimSpace(string(resp))
+			}
+			renderTemplate(w, pendingTmpl, pendingPageData{Error: "Commit refused by " + n.Name + ": " + ans.Error}, "pending")
+			return
+		}
+		pushAudit(n, user.Name, "pending.commit", "committed staged changes through the configuration journal")
+	}
+	afterOK()
+	backLink, _ := returnTarget(r)
+	http.Redirect(w, r, backLink, http.StatusSeeOther)
 }

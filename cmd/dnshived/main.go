@@ -1280,6 +1280,22 @@ func main() {
 		status, body := applyCandidateUpdate(dataDir(currentConfig.Load()), *cfgPath, upd)
 		writeJSON(w, status, body)
 	}))
+	mux.HandleFunc("POST /api/v1/pending/stage", authMw.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		j := cfgJournal.Load()
+		if j == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "the configuration journal is off on this core"})
+			return
+		}
+		j.handlePendingStage(func() string { return dataDir(currentConfig.Load()) })(w, r)
+	}))
+	mux.HandleFunc("POST /api/v1/pending/commit", authMw.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		j := cfgJournal.Load()
+		if j == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "the configuration journal is off on this core"})
+			return
+		}
+		j.handlePendingCommit(func() string { return dataDir(currentConfig.Load()) })(w, r)
+	}))
 	mux.HandleFunc("DELETE /api/v1/candidate", authMw.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
 		if j := cfgJournal.Load(); j != nil {
 			cfgWriteMu.Lock()
@@ -2169,6 +2185,10 @@ type configUpdate struct {
 	// ConfigBaseRevision is the revision the change was staged on; nil means the sender does
 	// not say (an older web UI), and nothing is checked.
 	ConfigBaseRevision *int64 `json:"config_base_revision"`
+	// Base is the cluster-wide part of the document the web read before it made this change (cfgjournal.Replicated);
+	// with the configuration journal only the items that differ between Base and this update are staged. Older
+	// daemons ignore it.
+	Base json.RawMessage `json:"base,omitempty"`
 }
 
 // applyTo overwrites every editable field on c with u's values.
