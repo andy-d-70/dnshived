@@ -884,6 +884,7 @@ func main() {
 			"config_revision":   fresh.ConfigRevision,
 			"membership_epoch":  fresh.MembershipEpoch,
 			"outage_rules":      outageStatus(),
+			"config_journal":    cfgJournalStatus(),
 			"configured_scopes": configuredScopes,
 			"iot_scopes":        iotScopes,
 			"disabled_scopes":   disabledScopes,

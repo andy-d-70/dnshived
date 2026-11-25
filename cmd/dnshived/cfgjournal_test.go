@@ -253,3 +253,19 @@ func TestConfigJournal_AChangeAtAFollowerReachesEveryCore(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigJournal_StatusShowsRoleAndAppliedRevision(t *testing.T) {
+	if cfgJournalStatus() != nil {
+		t.Fatal("the status has no journal part while the journal is off")
+	}
+	path := writeBaseConfig(t)
+	j := singleCoreJournal(t, path)
+	if status, body := applyConfigUpdate(path, officeUpdate("info"), nil, nil, nil); status != http.StatusOK {
+		t.Fatalf("push: %d %v", status, body)
+	}
+	st := cfgJournalStatus()
+	_, rev, _, _ := j.doc.Load()
+	if st == nil || st["role"] != "leader" || st["leader"] != config.RoleCore1 || st["applied_rev"] != rev || st["last_error"] != "" {
+		t.Fatalf("status %v, file at %d", st, rev)
+	}
+}

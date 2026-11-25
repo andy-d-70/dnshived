@@ -533,3 +533,7 @@ func strip(v any, spath string) {
 // IgnoredField reports whether Changes ignores field key at the top level (spath "") or inside a scope
 // (spath "scopes.{}" or "parked_scopes.{}").
 func IgnoredField(spath, key string) bool { return ignored(spath, key) }
+
+// Join appends one object key to a path, escaped the way Changes writes it, so any string (another path too) can
+// be a key.
+func Join(path, key string) string { return join(path, key) }

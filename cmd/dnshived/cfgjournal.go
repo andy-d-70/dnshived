@@ -72,6 +72,31 @@ type cfgJournalRuntime struct {
 	engine  *desired.Engine
 	authMw  *auth.Middleware
 	liveRev uint64
+	fileRev atomic.Uint64
+	// seenRev is the journal revision the last successful sync covered; a sync with nothing newer is skipped, so an
+	// idle core never reads its configuration files. Guarded by cfgWriteMu.
+	seenRev uint64
+}
+
+// cfgJournalStatus is the journal's part of /api/v1/status; nil while the journal is off. It reads only values kept
+// in memory, so a status poll never touches the configuration files.
+func cfgJournalStatus() map[string]any {
+	j := cfgJournal.Load()
+	if j == nil {
+		return nil
+	}
+	j.errMu.Lock()
+	lastErr := j.lastErr
+	j.errMu.Unlock()
+	return map[string]any{
+		"role":         j.node.Role().String(),
+		"leader":       j.node.Leader(),
+		"term":         j.node.Term(),
+		"journal_rev":  j.store.View().Rev(),
+		"commit_index": j.store.CommitIndex(),
+		"applied_rev":  j.fileRev.Load(),
+		"last_error":   lastErr,
+	}
 }
 
 func cfgJournalEnabled() bool {
@@ -209,8 +234,12 @@ func (j *cfgJournalRuntime) noteErr(err error) {
 // daemon runs on, whichever path applied it. The caller holds cfgWriteMu.
 func (j *cfgJournalRuntime) refreshLocked() (uint64, error) {
 	_, rev, _, err := j.doc.Load()
-	if err != nil || rev <= j.liveRev {
+	if err != nil {
 		return rev, err
+	}
+	j.fileRev.Store(rev)
+	if rev <= j.liveRev {
+		return rev, nil
 	}
 	cur, err := config.Load(j.path)
 	if err != nil {
@@ -224,12 +253,20 @@ func (j *cfgJournalRuntime) refreshLocked() (uint64, error) {
 
 // syncLocked applies committed changes to cluster.json and to the running daemon. The caller holds cfgWriteMu.
 func (j *cfgJournalRuntime) syncLocked() (uint64, error) {
+	head := j.store.View().Rev()
+	if head == j.seenRev && j.seenRev != 0 {
+		return j.fileRev.Load(), nil
+	}
 	_, _, err := j.writer.Sync()
 	j.noteErr(err)
 	if err != nil {
 		return 0, err
 	}
-	return j.refreshLocked()
+	rev, err := j.refreshLocked()
+	if err == nil {
+		j.seenRev = head
+	}
+	return rev, err
 }
 
 func (j *cfgJournalRuntime) applyLoop() {
