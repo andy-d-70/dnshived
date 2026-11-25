@@ -40,6 +40,12 @@ var exemptPaths = map[string]bool{
 	"/internal/dnsrepl/vote":     true,
 	"/internal/dnsrepl/append":   true,
 	"/internal/dnsrepl/snapshot": true,
+	// The configuration journal's replication and its change hand-over to the leading core, gated the same way
+	// (trusted_hosts and a token derived from the cluster PSK) in cmd/dnshived.
+	"/internal/cfgrepl/vote":       true,
+	"/internal/cfgrepl/append":     true,
+	"/internal/cfgrepl/snapshot":   true,
+	"/internal/cfgjournal/propose": true,
 }
 
 // resolvedToken pairs a config.APIToken with its expiry pre-parsed once at

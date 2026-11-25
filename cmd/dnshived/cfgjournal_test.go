@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"dnshived/internal/auth"
 	"dnshived/internal/cfgjournal"
 	"dnshived/internal/config"
 	"dnshived/internal/dnsrepl"
@@ -164,7 +165,8 @@ func threeCores(t *testing.T) []*testCore {
 		allow := func(*http.Request) bool { return true }
 		drv.RoutesAt(mux, cfgJournalReplPrefix, token, allow)
 		mux.HandleFunc("POST "+cfgJournalProposePath, j.handlePropose(allow))
-		srv := httptest.NewServer(mux)
+		authMw := auth.New([]config.APIToken{{Name: "admin", Token: "admin-token-for-the-test-only-0123456789", Role: "admin"}})
+		srv := httptest.NewServer(authMw.Wrap(mux))
 		mu.Lock()
 		addrs[role] = srv.Listener.Addr().String()
 		mu.Unlock()
