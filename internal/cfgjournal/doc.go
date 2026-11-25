@@ -69,6 +69,8 @@ type Document struct {
 	Name string
 	Path string
 	Mode os.FileMode
+	// Empty, when set, is the document's content before its file exists; otherwise an empty object.
+	Empty func() any
 }
 
 type stamp struct {
@@ -198,6 +200,9 @@ func (d *Document) Load() (tree any, rev uint64, contentSum string, err error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		if _, serr := readFile(d.FS, d.stampPath()); serr == nil {
 			return nil, 0, "", fmt.Errorf("%w: %s is missing but its stamp exists", ErrOutside, d.Path)
+		}
+		if d.Empty != nil {
+			return d.Empty(), 0, "", nil
 		}
 		return map[string]any{}, 0, "", nil
 	}

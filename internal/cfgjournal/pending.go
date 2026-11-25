@@ -29,6 +29,9 @@ type Pending map[string]Staged
 
 func pendingPath(p string) string { return changeset.Join("items", p) }
 
+// EmptyPending is the pending document before anything was staged.
+func EmptyPending() any { return map[string]any{"items": map[string]any{}} }
+
 // PendingFromTree reads the pending document's tree.
 func PendingFromTree(t any) (Pending, error) {
 	m, _ := t.(map[string]any)
@@ -190,4 +193,14 @@ func (pd Pending) Commit(doc string, pick func(path string, s Staged) bool) []En
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
+}
+
+// Committed picks the staged items whose value the live configuration already holds, so they can leave Pending after
+// a commit.
+func (pd Pending) Committed(live any) func(path string, s Staged) bool {
+	return func(p string, s Staged) bool {
+		v, ok := changeset.Get(live, p)
+		same, err := sameValue(v, ok, s.New)
+		return err == nil && same
+	}
 }

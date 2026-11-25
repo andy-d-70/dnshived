@@ -87,6 +87,9 @@ func configStampHandler(cfgPath, dir func() string) http.HandlerFunc {
 		if s, err := statStamp(candidatePath(dir())); err == nil {
 			out["candidate_stamp"] = s.String()
 		}
+		if j := cfgJournal.Load(); j != nil {
+			out["candidate_stamp"] = j.pendingStamp() + "|" + out["candidate_stamp"]
+		}
 		writeJSON(w, http.StatusOK, out)
 	}
 }

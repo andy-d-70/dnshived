@@ -60,13 +60,17 @@ type cfgJournalRuntime struct {
 	node    *dnsrepl.Node
 	writer  *cfgjournal.Writer
 	doc     *cfgjournal.ConfigDoc
-	token   string
-	scheme  string
-	client  *http.Client
-	addrOf  func(role string) (string, bool)
-	kick    chan struct{}
-	errMu   sync.Mutex
-	lastErr string
+	dataDir string
+
+	pendingWriter *cfgjournal.Writer
+	pendingDoc    *cfgjournal.Document
+	token         string
+	scheme        string
+	client        *http.Client
+	addrOf        func(role string) (string, bool)
+	kick          chan struct{}
+	errMu         sync.Mutex
+	lastErr       string
 
 	ag      *agent.Agent
 	engine  *desired.Engine
@@ -168,7 +172,7 @@ func startConfigJournal(mux *http.ServeMux, cfgPath string, ag *agent.Agent, eng
 		ok, addr := observer.RoleReachable(role)
 		return addr, ok && addr != ""
 	}
-	j := &cfgJournalRuntime{path: cfgPath, store: st, node: node, token: token, scheme: scheme, client: client, addrOf: addrOf, kick: make(chan struct{}, 1), ag: ag, engine: engine, authMw: authMw}
+	j := &cfgJournalRuntime{path: cfgPath, dataDir: dataDir(cfg), store: st, node: node, token: token, scheme: scheme, client: client, addrOf: addrOf, kick: make(chan struct{}, 1), ag: ag, engine: engine, authMw: authMw}
 	drv := j.build()
 	allowed := trustedhosts.New(trusted)
 	allow := func(r *http.Request) bool { return allowed.Allowed(r.RemoteAddr) }
@@ -189,11 +193,14 @@ func (j *cfgJournalRuntime) build() *dnsrepl.Driver {
 		OnCommit: j.poke,
 		Log:      func(f string, a ...any) { loglevel.Infof("[CFGJOURNAL] "+f, a...) },
 	})
-	j.writer = cfgjournal.NewWriter(cfgjournal.New(func(b dnsstore.Batch) (uint64, error) {
+	journal := cfgjournal.New(func(b dnsstore.Batch) (uint64, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), proposeWait)
 		defer cancel()
 		return drv.Propose(ctx, b)
-	}), j.doc, j.store.View)
+	})
+	j.writer = cfgjournal.NewWriter(journal, j.doc, j.store.View)
+	j.pendingDoc = &cfgjournal.Document{FS: vfs.OS{}, Name: cfgjournal.PendingDoc, Path: filepath.Join(j.dataDir, "pending.json"), Mode: 0o600, Empty: cfgjournal.EmptyPending}
+	j.pendingWriter = cfgjournal.NewWriter(journal, j.pendingDoc, j.store.View)
 	j.writer.Validate = func(tree any) error {
 		c, err := j.doc.Candidate(tree)
 		if err != nil {
@@ -258,6 +265,9 @@ func (j *cfgJournalRuntime) syncLocked() (uint64, error) {
 		return j.fileRev.Load(), nil
 	}
 	_, _, err := j.writer.Sync()
+	if err == nil {
+		_, _, err = j.pendingWriter.Sync()
+	}
 	j.noteErr(err)
 	if err != nil {
 		return 0, err
@@ -300,11 +310,27 @@ type proposeAnswer struct {
 
 // propose orders a change: on the leading core directly, otherwise through the leader. It returns once the change is
 // committed and applied on this core too. The caller holds cfgWriteMu.
+func (j *cfgJournalRuntime) writerFor(entries []cfgjournal.Entry) (*cfgjournal.Writer, cfgjournal.Target, error) {
+	if len(entries) == 0 {
+		return nil, nil, fmt.Errorf("%w: no entries", cfgjournal.ErrEntry)
+	}
+	switch entries[0].Doc {
+	case cfgJournalDoc:
+		return j.writer, j.doc, nil
+	case cfgjournal.PendingDoc:
+		return j.pendingWriter, j.pendingDoc, nil
+	}
+	return nil, nil, fmt.Errorf("%w: unknown document %q", cfgjournal.ErrEntry, entries[0].Doc)
+}
+
 func (j *cfgJournalRuntime) propose(m cfgjournal.Meta, entries []cfgjournal.Entry) (cfgjournal.Result, error) {
+	w, target, err := j.writerFor(entries)
+	if err != nil {
+		return cfgjournal.Result{}, err
+	}
 	var res cfgjournal.Result
-	var err error
 	if j.node.Role() == dnsrepl.Leader {
-		res, err = j.writer.Propose(m, entries)
+		res, err = w.Propose(m, entries)
 	} else {
 		res, err = j.forward(m, entries)
 	}
@@ -313,7 +339,11 @@ func (j *cfgJournalRuntime) propose(m cfgjournal.Meta, entries []cfgjournal.Entr
 	}
 	deadline := time.Now().Add(proposeWait)
 	for {
-		rev, serr := j.syncLocked()
+		_, serr := j.syncLocked()
+		rev := uint64(0)
+		if serr == nil {
+			_, rev, _, serr = target.Load()
+		}
 		if serr != nil {
 			return res, fmt.Errorf("committed at revision %d but not applied here: %w", res.Rev, serr)
 		}
@@ -385,8 +415,13 @@ func (j *cfgJournalRuntime) handlePropose(allow func(*http.Request) bool) http.H
 			writeJSON(w, http.StatusConflict, proposeAnswer{Code: "not_leader", Error: "this core does not lead the configuration journal"})
 			return
 		}
+		wr, _, werr := j.writerFor(req.Entries)
+		if werr != nil {
+			writeJSON(w, http.StatusBadRequest, proposeAnswer{Error: werr.Error()})
+			return
+		}
 		cfgWriteMu.Lock()
-		res, err := j.writer.Propose(cfgjournal.Meta{Author: req.Author, Origin: req.Origin, TimeMs: req.TimeMs}, req.Entries)
+		res, err := wr.Propose(cfgjournal.Meta{Author: req.Author, Origin: req.Origin, TimeMs: req.TimeMs}, req.Entries)
 		if err == nil {
 			if _, rerr := j.refreshLocked(); rerr != nil {
 				loglevel.Warnf("[CFGJOURNAL:ERROR] reload after revision %d: %v", res.Rev, rerr)
@@ -440,6 +475,9 @@ func (j *cfgJournalRuntime) saveThroughJournal(before, after *config.Cluster, au
 	if len(entries) > 0 {
 		if _, err := j.propose(cfgjournal.Meta{Author: author, Origin: 1, TimeMs: time.Now().UnixMilli()}, entries); err != nil {
 			return err
+		}
+		if err := j.pruneCommittedLocked(); err != nil {
+			loglevel.Warnf("[CFGJOURNAL:ERROR] committed, but the committed items are still listed as pending: %v", err)
 		}
 	}
 	cur, err := config.Load(j.path)

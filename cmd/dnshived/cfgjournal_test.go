@@ -33,7 +33,7 @@ func singleCoreJournal(t *testing.T, path string) *cfgJournalRuntime {
 	if err != nil {
 		t.Fatal(err)
 	}
-	j := &cfgJournalRuntime{path: path, store: st, node: node, token: token, scheme: "http", client: &http.Client{}, addrOf: func(string) (string, bool) { return "", false }, kick: make(chan struct{}, 1)}
+	j := &cfgJournalRuntime{path: path, dataDir: t.TempDir(), store: st, node: node, token: token, scheme: "http", client: &http.Client{}, addrOf: func(string) (string, bool) { return "", false }, kick: make(chan struct{}, 1)}
 	drv := j.build()
 	drv.Start()
 	deadline := time.Now().Add(10 * time.Second)
@@ -159,7 +159,7 @@ func threeCores(t *testing.T) []*testCore {
 			a, ok := addrs[r]
 			return a, ok
 		}
-		j := &cfgJournalRuntime{path: path, store: st, node: node, token: token, scheme: "http", client: &http.Client{Timeout: 5 * time.Second}, addrOf: addrOf, kick: make(chan struct{}, 1)}
+		j := &cfgJournalRuntime{path: path, dataDir: t.TempDir(), store: st, node: node, token: token, scheme: "http", client: &http.Client{Timeout: 5 * time.Second}, addrOf: addrOf, kick: make(chan struct{}, 1)}
 		drv := j.build()
 		mux := http.NewServeMux()
 		allow := func(*http.Request) bool { return true }

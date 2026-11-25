@@ -31,6 +31,7 @@ import (
 	"dnshived/internal/auditlog"
 	"dnshived/internal/auth"
 	"dnshived/internal/backup"
+	"dnshived/internal/cfgjournal"
 	"dnshived/internal/cliguard"
 	"dnshived/internal/cluster"
 	"dnshived/internal/config"
@@ -1262,7 +1263,14 @@ func main() {
 		writeJSON(w, status, body)
 	}))
 
-	mux.HandleFunc("GET /api/v1/candidate", authMw.RequireAdmin(candidateGetHandler(func() string { return dataDir(currentConfig.Load()) }, &candidateResponses)))
+	legacyCandidateGet := candidateGetHandler(func() string { return dataDir(currentConfig.Load()) }, &candidateResponses)
+	mux.HandleFunc("GET /api/v1/candidate", authMw.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		if j := cfgJournal.Load(); j != nil {
+			j.handleCandidateGet(func() string { return dataDir(currentConfig.Load()) })(w, r)
+			return
+		}
+		legacyCandidateGet(w, r)
+	}))
 	mux.HandleFunc("POST /api/v1/candidate", authMw.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
 		var upd configUpdate
 		if err := json.NewDecoder(r.Body).Decode(&upd); err != nil {
@@ -1273,6 +1281,17 @@ func main() {
 		writeJSON(w, status, body)
 	}))
 	mux.HandleFunc("DELETE /api/v1/candidate", authMw.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		if j := cfgJournal.Load(); j != nil {
+			cfgWriteMu.Lock()
+			err := j.discardLocked(dataDir(currentConfig.Load()), func(string, cfgjournal.Staged) bool { return true }, true)
+			cfgWriteMu.Unlock()
+			if err != nil {
+				writeJSON(w, proposeStatus(err), proposeError(err))
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"status": "discarded"})
+			return
+		}
 		if err := discardCandidateConfig(dataDir(currentConfig.Load())); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "discard candidate: " + err.Error()})
 			return
@@ -1281,6 +1300,17 @@ func main() {
 	}))
 	mux.HandleFunc("DELETE /api/v1/candidate/scopes/{scope}", authMw.RequireAdmin(func(w http.ResponseWriter, r *http.Request) {
 		scope := r.PathValue("scope")
+		if j := cfgJournal.Load(); j != nil {
+			cfgWriteMu.Lock()
+			err := j.discardLocked(dataDir(currentConfig.Load()), scopePick(scope), false)
+			cfgWriteMu.Unlock()
+			if err != nil {
+				writeJSON(w, proposeStatus(err), proposeError(err))
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"status": "reverted"})
+			return
+		}
 		if err := discardCandidateScope(dataDir(currentConfig.Load()), *cfgPath, scope); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "revert scope: " + err.Error()})
 			return

@@ -44,6 +44,9 @@ func discardCandidateConfig(dataDir string) error {
 // applyCandidateUpdate is POST /api/v1/candidate's core logic — the
 // staged-config counterpart to applyConfigUpdate.
 func applyCandidateUpdate(dataDir, cfgPath string, upd configUpdate) (status int, body interface{}) {
+	if j := cfgJournal.Load(); j != nil {
+		return applyCandidateThroughJournal(j, dataDir, cfgPath, upd)
+	}
 	candidateMu.Lock()
 	defer candidateMu.Unlock()
 	live, err := config.Load(cfgPath)
@@ -101,4 +104,30 @@ func discardCandidateScope(dataDir, cfgPath, scope string) error {
 	}
 	pruneCandidateAuthors(dataDir, live, candidate)
 	return nil
+}
+
+// applyCandidateThroughJournal stages a whole candidate as the existing web sends it while the configuration journal
+// runs: the cluster-wide part as staged items, secrets and identity in the per-core candidate file.
+func applyCandidateThroughJournal(j *cfgJournalRuntime, dataDir, cfgPath string, upd configUpdate) (int, interface{}) {
+	cfgWriteMu.Lock()
+	defer cfgWriteMu.Unlock()
+	live, err := config.Load(cfgPath)
+	if err != nil {
+		return http.StatusInternalServerError, map[string]string{"error": "load live config: " + err.Error()}
+	}
+	accessUpd, err := parseAccessUpdate(upd.Access)
+	if err != nil {
+		return http.StatusBadRequest, map[string]string{"error": err.Error()}
+	}
+	next := *live
+	upd.applyTo(&next)
+	accessUpd.applyTo(&next)
+	result := next.ValidateExtended()
+	if !result.OK() {
+		return http.StatusBadRequest, result
+	}
+	if err := j.stageLocked(dataDir, &next, upd.Author); err != nil {
+		return proposeStatus(err), proposeError(err)
+	}
+	return http.StatusOK, map[string]interface{}{"ok": true, "warnings": result.Warnings}
 }
