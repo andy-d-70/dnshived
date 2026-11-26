@@ -27,8 +27,6 @@ type Staged struct {
 // another.
 type Pending map[string]Staged
 
-func pendingPath(p string) string { return changeset.Join("items", p) }
-
 // EmptyPending is the pending document before anything was staged.
 func EmptyPending() any { return map[string]any{"items": map[string]any{}} }
 
