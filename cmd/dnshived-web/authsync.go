@@ -42,6 +42,9 @@ type authSync struct {
 
 	syncer *repldoc.Syncer
 
+	strict   *usersStrict
+	strictMu sync.Mutex
+
 	startedAt time.Time
 	synced    atomic.Bool
 }
@@ -61,7 +64,7 @@ func (a *authSync) waitingForFirstSync() bool {
 }
 
 func newAuthSync(store *webauth.Store, ref *configRef) *authSync {
-	a := &authSync{store: store, ref: ref, startedAt: time.Now()}
+	a := &authSync{store: store, ref: ref, startedAt: time.Now(), strict: newUsersStrict(ref)}
 	a.syncer = &repldoc.Syncer{
 		Name:       "AUTHSYNC",
 		Path:       "/internal/auth-doc",
@@ -71,8 +74,11 @@ func newAuthSync(store *webauth.Store, ref *configRef) *authSync {
 		Do:         replDo(ref),
 		DecodeMeta: decodeMeta,
 		OnConflict: replConflict(ref, "users"),
-		AfterPass:  func() { a.synced.Store(true) },
-		Logf:       log.Printf,
+		AfterPass: func() {
+			a.synced.Store(true)
+			a.settle()
+		},
+		Logf: log.Printf,
 	}
 	return a
 }
@@ -95,6 +101,9 @@ func (a *authSync) selfName() string {
 
 // change applies fn as a new revision, saves it and pushes it.
 func (a *authSync) change(fn func(d *webauth.Store) error) error {
+	if a.strict.active() {
+		return a.strictChange(fn)
+	}
 	if err := a.store.Mutate(a.selfName(), fn); err != nil {
 		return err
 	}
@@ -136,6 +145,9 @@ func (d usersDoc) Adopt(raw []byte, from string) (adopted, spread bool, err erro
 	}
 	if err := validateUsersDoc(remote); err != nil {
 		return false, false, invalidDocError{err.Error()}
+	}
+	if a.strict.active() {
+		return a.strictAdopt(remote, from)
 	}
 	before := a.store.Meta()
 	adopted, kept := a.store.Adopt(remote, a.selfName())
@@ -181,6 +193,7 @@ func startsFirstRevision(self string, legacyPeers []string) bool {
 }
 
 func (a *authSync) run() {
+	go a.strict.refresh()
 	a.syncer.Run(context.Background(), 5*time.Second, authSyncInterval)
 }
 

@@ -169,6 +169,17 @@ its own admin token. It never writes `cluster.json` itself.
   oversized (more than 2,000 users, 20,000 reset tokens, fields over
   8 KiB). The probe-host list of `web.json` is replicated the same way
   over `/internal/docs/probe-hosts`, TLS only, with the same token.
+  Once every core offers the configuration journal's `secret-index`
+  document, changes of the users document are ordered by the cores: a
+  change names, per user, reset link and setting, the sha256 of the
+  version it was based on; the first change wins and a later one from
+  the same version is refused with the name of who changed it. A change
+  is kept on disk until the cores confirm it. Without a majority of the
+  cores no user change is accepted. A received document is taken item by
+  item, only where it holds what the index names. The journal holds the
+  hashes only, never the content. `dnshived-web -reset-user` on the
+  console stays possible without a majority and is ordered as a forced
+  change once the cores answer.
 - **Sessions:** a login form issues an HMAC-SHA256-signed cookie
   (`HttpOnly`, `SameSite=Lax`, `Secure` over TLS) naming the user and a
   per-user session epoch; it is valid on every core (shared key), for

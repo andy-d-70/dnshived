@@ -116,7 +116,12 @@ func main() {
 	labprofile.Start(func() string { return "/var/lib/dnshived" })
 	startPendingSummaryTicker(ref)
 	startVerifyCacheCleanup()
-	watchUsersFile(store, cfg.UsersFile, func() { go repl.pushAll() })
+	watchUsersFile(store, cfg.UsersFile, func() {
+		go func() {
+			repl.settle()
+			repl.pushAll()
+		}()
+	})
 	go refreshSnapshotLoop(ref)
 	go updates.run(ref)
 

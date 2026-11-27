@@ -85,6 +85,9 @@ func runResetUser(cfgPath, usersFileFlag, name, role, password, email string) {
 	if err := store.Save(usersFile); err != nil {
 		log.Fatalf("%v", err)
 	}
+	if err := markForced(usersFile, "user/"+name); err != nil {
+		log.Printf("warning: %v — once the cores order user changes, this reset may be replaced by their version", err)
+	}
 
 	verb := "added"
 	if existed {

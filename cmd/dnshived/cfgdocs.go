@@ -19,9 +19,17 @@ func emptyTemplates() any {
 	return map[string]any{"templates": []any{}, "option_sets": []any{}, "scope_groups": []any{}}
 }
 
+// secretIndexDoc orders changes of the web's secret-bearing documents (users, probe hosts, nodes): per item only a
+// sha256 of its content and who changed it when. The content itself never enters the journal.
+const secretIndexDoc = "secret-index"
+
+func emptySecretIndex() any {
+	return map[string]any{"users": map[string]any{}, "probe_hosts": map[string]any{}, "nodes": map[string]any{}}
+}
+
 // sharedDocs are the documents the web may read and change through the journal; documents with secrets are never
 // among them.
-var sharedDocs = map[string]bool{templatesDoc: true}
+var sharedDocs = map[string]bool{templatesDoc: true, secretIndexDoc: true}
 
 type docAnswer struct {
 	Rev  uint64          `json:"rev"`
@@ -35,7 +43,7 @@ func (j *cfgJournalRuntime) handleDocGet(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such shared document"})
 		return
 	}
-	ans, err := j.templatesAnswer()
+	ans, err := j.docAnswerFor(name)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -43,18 +51,22 @@ func (j *cfgJournalRuntime) handleDocGet(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, ans)
 }
 
-// templatesAnswer reads the templates document only when the journal moved since the last answer; an idle cluster
-// answers every web's refresh from memory.
-func (j *cfgJournalRuntime) templatesAnswer() (docAnswer, error) {
+// docAnswerFor reads a shared document only when the journal moved since its last answer; an idle cluster answers
+// every web's refresh from memory.
+func (j *cfgJournalRuntime) docAnswerFor(name string) (docAnswer, error) {
 	cfgWriteMu.Lock()
 	defer cfgWriteMu.Unlock()
 	_, serr := j.syncLocked()
 	head := j.store.View().Rev()
-	if serr == nil && j.docCacheOK && j.docCacheHead == head {
-		return j.docCache, nil
+	if c, ok := j.docCache[name]; serr == nil && ok && c.head == head {
+		return c.ans, nil
 	}
-	j.docCacheOK = false
-	tree, rev, _, err := j.templatesDoc.Load()
+	delete(j.docCache, name)
+	_, doc, err := j.sharedDoc(name)
+	if err != nil {
+		return docAnswer{}, err
+	}
+	tree, rev, _, err := doc.Load()
 	if err != nil {
 		return docAnswer{}, err
 	}
@@ -64,9 +76,17 @@ func (j *cfgJournalRuntime) templatesAnswer() (docAnswer, error) {
 	}
 	ans := docAnswer{Rev: rev, Tree: raw}
 	if serr == nil {
-		j.docCache, j.docCacheHead, j.docCacheOK = ans, head, true
+		if j.docCache == nil {
+			j.docCache = map[string]cachedDoc{}
+		}
+		j.docCache[name] = cachedDoc{ans: ans, head: head}
 	}
 	return ans, nil
+}
+
+type cachedDoc struct {
+	ans  docAnswer
+	head uint64
 }
 
 type docChangeRequest struct {

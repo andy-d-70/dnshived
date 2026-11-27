@@ -21,6 +21,7 @@ import (
 	"dnshived/internal/dnsrepl"
 	"dnshived/internal/dnsstore"
 	"dnshived/internal/dnsstore/vfs"
+	"dnshived/internal/secretindex"
 )
 
 // singleCoreJournal runs the journal of a one-core cluster against the config at path, as the daemon does.
@@ -376,5 +377,49 @@ func TestSharedDoc_AnswerComesFromMemoryUntilTheJournalMoves(t *testing.T) {
 	}
 	if after := get(); after.Rev <= first.Rev || !bytes.Contains(after.Tree, []byte(`"mics"`)) {
 		t.Fatalf("a change moves the journal and the next answer shows it: rev %d -> %d %s", first.Rev, after.Rev, after.Tree)
+	}
+}
+
+func TestSharedDoc_SecretIndexOrdersFirstWinsAndHoldsOnlyHashes(t *testing.T) {
+	path := writeBaseConfig(t)
+	j := singleCoreJournal(t, path)
+	post := func(changes []cfgjournal.Entry) int {
+		raw, _ := json.Marshal(docChangeRequest{Author: "core1", Changes: changes})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/journal/docs/secret-index/changes", bytes.NewReader(raw))
+		req.SetPathValue("name", secretIndexDoc)
+		rec := httptest.NewRecorder()
+		j.handleDocChange(rec, req)
+		return rec.Code
+	}
+	tree := emptySecretIndex()
+	before := map[string][]byte{"user/bob": []byte(`{"name":"bob","password_hash":"h1"}`)}
+	a := map[string][]byte{"user/bob": []byte(`{"name":"bob","password_hash":"h2"}`)}
+	b := map[string][]byte{"user/bob": []byte(`{"name":"bob","password_hash":"h3"}`)}
+	first, err := secretindex.Plan(tree, "users", before, a, nil, "core1", time.Now(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := secretindex.Plan(tree, "users", before, b, nil, "core2", time.Now(), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := post(first); code != http.StatusOK {
+		t.Fatalf("first change: %d", code)
+	}
+	if code := post(second); code != http.StatusConflict {
+		t.Fatalf("a second change from the same version is refused: %d", code)
+	}
+	ans, err := j.docAnswerFor(secretIndexDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(ans.Tree, []byte("h2")) || !bytes.Contains(ans.Tree, []byte(secretindex.Hash(a["user/bob"]))) {
+		t.Fatalf("the index holds the hash of the winner and no content: %s", ans.Tree)
+	}
+	prev := cfgJournal.Swap(j)
+	st := cfgJournalStatus()
+	cfgJournal.Store(prev)
+	if docs, _ := st["docs"].([]string); len(docs) == 0 || docs[0] != secretIndexDoc {
+		t.Fatalf("status lists the shared documents: %v", st["docs"])
 	}
 }

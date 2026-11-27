@@ -67,6 +67,8 @@ type cfgJournalRuntime struct {
 
 	templatesWriter *cfgjournal.Writer
 	templatesDoc    *cfgjournal.Document
+	secretIdxWriter *cfgjournal.Writer
+	secretIdxDoc    *cfgjournal.Document
 	token           string
 	scheme          string
 	client          *http.Client
@@ -83,11 +85,9 @@ type cfgJournalRuntime struct {
 	// seenRev is the journal revision the last successful sync covered; a sync with nothing newer is skipped, so an
 	// idle core never reads its configuration files. Guarded by cfgWriteMu.
 	seenRev uint64
-	// docCache is the last templates answer and the journal head it was read at, set only right after a successful
-	// sync. Guarded by cfgWriteMu.
-	docCache     docAnswer
-	docCacheHead uint64
-	docCacheOK   bool
+	// docCache is the last answer per shared document and the journal head it was read at, set only right after a
+	// successful sync. Guarded by cfgWriteMu.
+	docCache map[string]cachedDoc
 }
 
 // cfgJournalStatus is the journal's part of /api/v1/status; nil while the journal is off. It reads only values kept
@@ -108,6 +108,7 @@ func cfgJournalStatus() map[string]any {
 		"commit_index": j.store.CommitIndex(),
 		"applied_rev":  j.fileRev.Load(),
 		"last_error":   lastErr,
+		"docs":         []string{secretIndexDoc, templatesDoc},
 	}
 }
 
@@ -211,6 +212,8 @@ func (j *cfgJournalRuntime) build() *dnsrepl.Driver {
 	j.pendingWriter = cfgjournal.NewWriter(journal, j.pendingDoc, j.store.View)
 	j.templatesDoc = &cfgjournal.Document{FS: vfs.OS{}, Name: templatesDoc, Path: filepath.Join(j.dataDir, "templates.json"), Mode: 0o600, Empty: emptyTemplates}
 	j.templatesWriter = cfgjournal.NewWriter(journal, j.templatesDoc, j.store.View)
+	j.secretIdxDoc = &cfgjournal.Document{FS: vfs.OS{}, Name: secretIndexDoc, Path: filepath.Join(j.dataDir, "secret-index.json"), Mode: 0o600, Empty: emptySecretIndex}
+	j.secretIdxWriter = cfgjournal.NewWriter(journal, j.secretIdxDoc, j.store.View)
 	j.writer.Validate = func(tree any) error {
 		c, err := j.doc.Candidate(tree)
 		if err != nil {
@@ -281,6 +284,9 @@ func (j *cfgJournalRuntime) syncLocked() (uint64, error) {
 	if err == nil {
 		_, _, err = j.templatesWriter.Sync()
 	}
+	if err == nil {
+		_, _, err = j.secretIdxWriter.Sync()
+	}
 	j.noteErr(err)
 	if err != nil {
 		return 0, err
@@ -332,10 +338,21 @@ func (j *cfgJournalRuntime) writerFor(entries []cfgjournal.Entry) (*cfgjournal.W
 		return j.writer, j.doc, nil
 	case cfgjournal.PendingDoc:
 		return j.pendingWriter, j.pendingDoc, nil
-	case templatesDoc:
-		return j.templatesWriter, j.templatesDoc, nil
+	case templatesDoc, secretIndexDoc:
+		w, d, err := j.sharedDoc(entries[0].Doc)
+		return w, d, err
 	}
 	return nil, nil, fmt.Errorf("%w: unknown document %q", cfgjournal.ErrEntry, entries[0].Doc)
+}
+
+func (j *cfgJournalRuntime) sharedDoc(name string) (*cfgjournal.Writer, *cfgjournal.Document, error) {
+	switch name {
+	case templatesDoc:
+		return j.templatesWriter, j.templatesDoc, nil
+	case secretIndexDoc:
+		return j.secretIdxWriter, j.secretIdxDoc, nil
+	}
+	return nil, nil, fmt.Errorf("%w: unknown shared document %q", cfgjournal.ErrEntry, name)
 }
 
 func (j *cfgJournalRuntime) propose(m cfgjournal.Meta, entries []cfgjournal.Entry) (cfgjournal.Result, error) {
