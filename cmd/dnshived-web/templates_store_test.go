@@ -56,7 +56,7 @@ func TestTemplateStore_SaveLoadRoundTrip(t *testing.T) {
 	if id != "dante" {
 		t.Errorf("expected slugified id %q, got %q", "dante", id)
 	}
-	if err := s.Save(path); err != nil {
+	if err := s.Save(path, "test"); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	reloaded, err := LoadTemplates(path)

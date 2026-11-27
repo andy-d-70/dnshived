@@ -130,7 +130,7 @@ func handleOptionSetNew(ref *configRef, store *TemplateStore) http.HandlerFunc {
 			return
 		}
 		store.UpsertOptionSet("", data.Name, data.Color, refs)
-		if err := store.Save(cfg.TemplatesFile); err != nil {
+		if err := store.Save(cfg.TemplatesFile, templateAuthor(r)); err != nil {
 			log.Printf("[ERROR] save templates: %v", err)
 			http.Error(w, "save failed: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -167,7 +167,7 @@ func handleOptionSetEdit(ref *configRef, store *TemplateStore) http.HandlerFunc 
 			return
 		}
 		store.UpsertOptionSet(id, name, color, refs)
-		if err := store.Save(cfg.TemplatesFile); err != nil {
+		if err := store.Save(cfg.TemplatesFile, templateAuthor(r)); err != nil {
 			log.Printf("[ERROR] save templates: %v", err)
 			http.Error(w, "save failed: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -184,7 +184,7 @@ func handleOptionSetDelete(ref *configRef, store *TemplateStore) http.HandlerFun
 		cfg := ref.Load()
 		id := r.PathValue("id")
 		store.DeleteOptionSet(id)
-		if err := store.Save(cfg.TemplatesFile); err != nil {
+		if err := store.Save(cfg.TemplatesFile, templateAuthor(r)); err != nil {
 			log.Printf("[ERROR] save templates: %v", err)
 			http.Error(w, "save failed: "+err.Error(), http.StatusInternalServerError)
 			return

@@ -4,14 +4,19 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"unicode/utf8"
 
 	"dnshived/internal/cfgjournal"
+	"dnshived/internal/webauth"
 )
 
 // fakeShared is the daemon's shared document as two web instances see it, with the journal's apply rules.
@@ -277,5 +282,35 @@ func TestTemplateShare_RefusedSaveKeepsEveryChangeThatDoesNotCollide(t *testing.
 	}
 	if got := sharedTpls(t, w2); !strings.Contains(got, "late=L") || !strings.Contains(got, "mine=M") || !strings.Contains(got, "cams=A2") {
 		t.Fatalf("the changes that did not collide reach the shared document: %s", got)
+	}
+}
+
+func TestTemplateShare_ChangesCarryTheLoggedInUser(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/templates", nil)
+	if got := templateAuthor(r); got != "web" {
+		t.Fatalf("without a session the author is web: %q", got)
+	}
+	r = r.WithContext(context.WithValue(r.Context(), userContextKey{}, webauth.User{Name: "ann"}))
+	f := newFakeShared()
+	w := f.share()
+	post := w.post
+	var author string
+	w.post = func(a string, changes []cfgjournal.Entry) error {
+		author = a
+		return post(a, changes)
+	}
+	s := &TemplateStore{}
+	w.refresh(s)
+	s.Upsert("", "cams", "", "dns", "A")
+	if err := w.save(s, templateAuthor(r)); err != nil {
+		t.Fatal(err)
+	}
+	if author != "ann" {
+		t.Fatalf("the journal entry names the user: %q", author)
+	}
+	long := strings.Repeat("ä", 200)
+	r = r.WithContext(context.WithValue(r.Context(), userContextKey{}, webauth.User{Name: long}))
+	if got := templateAuthor(r); len(got) > 255 || !utf8.ValidString(got) || !strings.HasPrefix(long, got) {
+		t.Fatalf("a long name is cut to 255 bytes on a character boundary: %d bytes", len(got))
 	}
 }

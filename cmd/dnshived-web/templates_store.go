@@ -109,8 +109,8 @@ func LoadTemplates(path string) (*TemplateStore, error) {
 	return &s, nil
 }
 
-func (s *TemplateStore) Save(path string) error {
-	if err := templatesShare.save(s, "web"); err != nil {
+func (s *TemplateStore) Save(path, author string) error {
+	if err := templatesShare.save(s, author); err != nil {
 		return err
 	}
 	s.mu.RLock()

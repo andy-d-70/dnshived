@@ -502,7 +502,7 @@ func handleScopeWizard(ref *configRef, store *TemplateStore) http.HandlerFunc {
 			if name != "" && data.DHCPOptionsText != "" {
 				if err := validateTemplateBody(TemplateKindDHCP, data.DHCPOptionsText); err == nil {
 					store.Upsert("", name, scopeColorPalette[0], TemplateKindDHCP, data.DHCPOptionsText)
-					store.Save(cfg.TemplatesFile)
+					store.Save(cfg.TemplatesFile, templateAuthor(r))
 					data.DHCPTemplates = buildTemplateRows(store.ByKind(TemplateKindDHCP))
 				}
 			}
@@ -512,7 +512,7 @@ func handleScopeWizard(ref *configRef, store *TemplateStore) http.HandlerFunc {
 			if name != "" && data.ClientDNSServerText != "" {
 				if err := validateTemplateBody(TemplateKindClientDNS, data.ClientDNSServerText); err == nil {
 					store.Upsert("", name, scopeColorPalette[1], TemplateKindClientDNS, data.ClientDNSServerText)
-					store.Save(cfg.TemplatesFile)
+					store.Save(cfg.TemplatesFile, templateAuthor(r))
 					data.ClientDNSTemplates = buildTemplateRows(store.ByKind(TemplateKindClientDNS))
 				}
 			}
@@ -522,7 +522,7 @@ func handleScopeWizard(ref *configRef, store *TemplateStore) http.HandlerFunc {
 			if name != "" && data.DNSRecordsText != "" {
 				if err := validateTemplateBody(TemplateKindDNS, data.DNSRecordsText); err == nil {
 					store.Upsert("", name, scopeColorPalette[2], TemplateKindDNS, data.DNSRecordsText)
-					store.Save(cfg.TemplatesFile)
+					store.Save(cfg.TemplatesFile, templateAuthor(r))
 					data.DNSTemplates = buildTemplateRows(store.ByKind(TemplateKindDNS))
 				}
 			}

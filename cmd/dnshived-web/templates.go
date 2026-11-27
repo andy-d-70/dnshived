@@ -234,7 +234,7 @@ func handleTemplateNew(ref *configRef, store *TemplateStore) http.HandlerFunc {
 				return
 			}
 			store.Upsert("", data.Name, data.Color, TemplateKind(data.Kind), data.Body)
-			if err := store.Save(cfg.TemplatesFile); err != nil {
+			if err := store.Save(cfg.TemplatesFile, templateAuthor(r)); err != nil {
 				log.Printf("[ERROR] save templates: %v", err)
 				http.Error(w, "save failed: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -298,7 +298,7 @@ func handleTemplateEditPost(ref *configRef, store *TemplateStore) http.HandlerFu
 			return
 		}
 		store.Upsert(id, name, color, kind, body)
-		if err := store.Save(cfg.TemplatesFile); err != nil {
+		if err := store.Save(cfg.TemplatesFile, templateAuthor(r)); err != nil {
 			log.Printf("[ERROR] save templates: %v", err)
 			http.Error(w, "save failed: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -333,7 +333,7 @@ func handleTemplateDelete(ref *configRef, store *TemplateStore) http.HandlerFunc
 		cfg := ref.Load()
 		id := r.PathValue("id")
 		store.Delete(id)
-		if err := store.Save(cfg.TemplatesFile); err != nil {
+		if err := store.Save(cfg.TemplatesFile, templateAuthor(r)); err != nil {
 			log.Printf("[ERROR] save templates: %v", err)
 			http.Error(w, "save failed: "+err.Error(), http.StatusInternalServerError)
 			return

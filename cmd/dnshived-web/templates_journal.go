@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"dnshived/internal/cfgjournal"
 	"dnshived/internal/changeset"
@@ -219,6 +220,20 @@ func (sh *templateShare) save(store *TemplateStore, author string) error {
 	}
 	sh.base = cur
 	return nil
+}
+
+// templateAuthor names the logged-in user as the author of a template change.
+func templateAuthor(r *http.Request) string {
+	u, ok := userFromContext(r)
+	if !ok || u.Name == "" {
+		return "web"
+	}
+	name := u.Name
+	for len(name) > 255 {
+		_, size := utf8.DecodeLastRuneInString(name)
+		name = name[:len(name)-size]
+	}
+	return name
 }
 
 // useTemplateShare connects the shared templates to the cluster nodes and follows them in the background.

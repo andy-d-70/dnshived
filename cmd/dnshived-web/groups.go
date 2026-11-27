@@ -106,7 +106,7 @@ func handleScopeGroupNew(ref *configRef, store *TemplateStore) http.HandlerFunc 
 			return
 		}
 		id := store.UpsertScopeGroup("", name, color, members, source)
-		if err := store.Save(cfg.TemplatesFile); err != nil {
+		if err := store.Save(cfg.TemplatesFile, templateAuthor(r)); err != nil {
 			http.Error(w, "save failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -171,7 +171,7 @@ func handleScopeGroupEdit(ref *configRef, store *TemplateStore) http.HandlerFunc
 			return
 		}
 		store.UpsertScopeGroup(id, name, color, members, source)
-		if err := store.Save(cfg.TemplatesFile); err != nil {
+		if err := store.Save(cfg.TemplatesFile, templateAuthor(r)); err != nil {
 			http.Error(w, "save failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -184,7 +184,7 @@ func handleScopeGroupDelete(ref *configRef, store *TemplateStore) http.HandlerFu
 		cfg := ref.Load()
 		id := r.PathValue("id")
 		store.DeleteScopeGroup(id)
-		if err := store.Save(cfg.TemplatesFile); err != nil {
+		if err := store.Save(cfg.TemplatesFile, templateAuthor(r)); err != nil {
 			http.Error(w, "save failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}

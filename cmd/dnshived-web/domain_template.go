@@ -120,7 +120,7 @@ func handleDomainMakeTemplate(ref *configRef, templates *TemplateStore) http.Han
 				return
 			}
 			templates.Upsert("", setName, scopeColorPalette[0], TemplateKindDNS, body)
-			if err := templates.Save(ref.Load().TemplatesFile); err != nil {
+			if err := templates.Save(ref.Load().TemplatesFile, templateAuthor(r)); err != nil {
 				http.Error(w, "save failed: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
