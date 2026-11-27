@@ -170,3 +170,112 @@ func TestTemplateShare_AFailedJoinKeepsTheLocalTemplatesAndRetries(t *testing.T)
 		t.Fatalf("the shared document now holds the template: %v", remote)
 	}
 }
+
+func sharedTpls(t *testing.T, w *templateShare) string {
+	t.Helper()
+	_, remote, err := w.get()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := parseTemplates(remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tplIDs(s)
+}
+
+func TestTemplateShare_EditDuringJoinIsKeptAndShared(t *testing.T) {
+	f := newFakeShared()
+	w := f.share()
+	s := storeWith(Template{ID: "cams", Kind: "dns", Body: "A"})
+	post := w.post
+	once := true
+	w.post = func(author string, changes []cfgjournal.Entry) error {
+		if once {
+			once = false
+			s.Upsert("", "edit", "", "dns", "E")
+		}
+		return post(author, changes)
+	}
+	w.refresh(s)
+	if got := tplIDs(s); !strings.Contains(got, "edit=E") {
+		t.Fatalf("an edit made while joining must stay: %s", got)
+	}
+	w.refresh(s)
+	if !w.joined {
+		t.Fatal("the next refresh joins")
+	}
+	if got := sharedTpls(t, w); !strings.Contains(got, "edit=E") || !strings.Contains(got, "cams=A") {
+		t.Fatalf("the edit reaches the shared document: %s", got)
+	}
+}
+
+func TestTemplateShare_EditDuringFollowIsKeptAndShared(t *testing.T) {
+	f := newFakeShared()
+	w1, w2 := f.share(), f.share()
+	s1, s2 := storeWith(Template{ID: "cams", Kind: "dns", Body: "A"}), &TemplateStore{}
+	w1.refresh(s1)
+	w2.refresh(s2)
+	s2.Upsert("", "other", "", "dns", "O")
+	if err := w2.save(s2, "bob"); err != nil {
+		t.Fatal(err)
+	}
+	get := w1.get
+	w1.get = func() (uint64, any, error) {
+		rev, tree, err := get()
+		s1.Upsert("", "edit", "", "dns", "E")
+		return rev, tree, err
+	}
+	w1.refresh(s1)
+	w1.get = get
+	if got := tplIDs(s1); !strings.Contains(got, "edit=E") {
+		t.Fatalf("an edit made while following must stay: %s", got)
+	}
+	if err := w1.save(s1, "ann"); err != nil {
+		t.Fatal(err)
+	}
+	if got := sharedTpls(t, w1); !strings.Contains(got, "edit=E") || !strings.Contains(got, "other=O") {
+		t.Fatalf("the next save delivers the edit: %s", got)
+	}
+}
+
+func TestTemplateShare_RefusedSaveKeepsEveryChangeThatDoesNotCollide(t *testing.T) {
+	f := newFakeShared()
+	w1, w2 := f.share(), f.share()
+	s1, s2 := storeWith(Template{ID: "cams", Kind: "dns", Body: "A"}), &TemplateStore{}
+	w1.refresh(s1)
+	w2.refresh(s2)
+	s1.Upsert("cams", "", "", "dns", "A2")
+	if err := w1.save(s1, "ann"); err != nil {
+		t.Fatal(err)
+	}
+	s2.Upsert("cams", "", "", "dns", "B2")
+	s2.Upsert("", "mine", "", "dns", "M")
+	post := w2.post
+	once := true
+	w2.post = func(author string, changes []cfgjournal.Entry) error {
+		if once {
+			once = false
+			s2.Upsert("", "late", "", "dns", "L")
+		}
+		return post(author, changes)
+	}
+	if err := w2.save(s2, "bob"); !errors.Is(err, errTemplateConflict) {
+		t.Fatalf("bob's change of cams must collide: %v", err)
+	}
+	if got := tplIDs(s2); !strings.Contains(got, "late=L") || !strings.Contains(got, "mine=M") {
+		t.Fatalf("an edit made during the refused save must stay: %s", got)
+	}
+	if err := w2.save(s2, "bob"); !errors.Is(err, errTemplateConflict) {
+		t.Fatalf("cams still collides: %v", err)
+	}
+	if got := tplIDs(s2); !strings.Contains(got, "cams=A2") || !strings.Contains(got, "late=L") || !strings.Contains(got, "mine=M") {
+		t.Fatalf("the reload shows the shared cams and keeps the other changes: %s", got)
+	}
+	if err := w2.save(s2, "bob"); err != nil {
+		t.Fatal(err)
+	}
+	if got := sharedTpls(t, w2); !strings.Contains(got, "late=L") || !strings.Contains(got, "mine=M") || !strings.Contains(got, "cams=A2") {
+		t.Fatalf("the changes that did not collide reach the shared document: %s", got)
+	}
+}

@@ -42,27 +42,98 @@ var templatesShare = &templateShare{}
 
 func (s *TemplateStore) tree() (any, error) {
 	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.treeLocked()
+}
+
+func (s *TemplateStore) treeLocked() (any, error) {
 	raw, err := json.Marshal(s)
-	s.mu.RUnlock()
 	if err != nil {
 		return nil, err
 	}
 	return cfgjournal.DecodeTree(raw)
 }
 
-func (s *TemplateStore) replaceFrom(tree any) error {
+// swapIf sets the store to tree only while the store still equals expect, in one step under the store lock, so an
+// edit made after expect was read is never replaced.
+func (s *TemplateStore) swapIf(expect, tree any) (bool, error) {
+	n, err := parseTemplates(tree)
+	if err != nil {
+		return false, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, err := s.treeLocked()
+	if err != nil || !reflect.DeepEqual(cur, expect) {
+		return false, err
+	}
+	s.Templates, s.OptionSets, s.ScopeGroups = n.Templates, n.OptionSets, n.ScopeGroups
+	return true, nil
+}
+
+func parseTemplates(tree any) (*TemplateStore, error) {
 	raw, err := json.Marshal(tree)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var n TemplateStore
 	if err := json.Unmarshal(raw, &n); err != nil {
-		return err
+		return nil, err
 	}
-	s.mu.Lock()
-	s.Templates, s.OptionSets, s.ScopeGroups = n.Templates, n.OptionSets, n.ScopeGroups
-	s.mu.Unlock()
-	return nil
+	return &n, nil
+}
+
+// adopt moves the store to the shared tree at rev if the store still equals expect. keep is what the store is set
+// to (the shared tree plus unsent changes); nil means the shared tree itself.
+func (sh *templateShare) adopt(store *TemplateStore, expect any, rev uint64, remote, keep any) bool {
+	n, err := parseTemplates(remote)
+	if err != nil {
+		return false
+	}
+	base, err := n.treeLocked()
+	if err != nil {
+		return false
+	}
+	if keep == nil {
+		keep = remote
+	}
+	if ok, err := store.swapIf(expect, keep); err != nil || !ok {
+		return false
+	}
+	sh.base, sh.rev = base, rev
+	return true
+}
+
+// rebase puts every change item by item onto remote and leaves out only the items that collide there.
+func rebase(remote any, changes []cfgjournal.Entry) any {
+	var order []string
+	byItem := map[string][]cfgjournal.Record{}
+	for _, e := range changes {
+		item := itemPath(e.Path)
+		if _, seen := byItem[item]; !seen {
+			order = append(order, item)
+		}
+		byItem[item] = append(byItem[item], cfgjournal.Record{Entry: e})
+	}
+	out := remote
+	for _, item := range order {
+		cp, err := copyTree(out)
+		if err != nil {
+			continue
+		}
+		if next, err := cfgjournal.Apply(cp, byItem[item]); err == nil {
+			out = next
+		}
+	}
+	return out
+}
+
+func copyTree(v any) (any, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return cfgjournal.DecodeTree(raw)
 }
 
 // refresh follows the shared document. On first contact it contributes the templates only this instance has (a
@@ -112,30 +183,17 @@ func (sh *templateShare) refresh(store *TemplateStore) {
 				return
 			}
 		}
-		if err := store.replaceFrom(remote); err != nil {
-			return
-		}
-		if base, err := store.tree(); err == nil {
-			sh.base, sh.rev, sh.joined = base, rev, true
-		}
+		sh.joined = sh.adopt(store, local, rev, remote, nil)
 		return
 	}
 	if rev == sh.rev {
 		return
 	}
-	cur, err := store.tree()
-	if err != nil || !reflect.DeepEqual(cur, sh.base) {
-		return
-	}
-	if err := store.replaceFrom(remote); err == nil {
-		if base, err := store.tree(); err == nil {
-			sh.base, sh.rev = base, rev
-		}
-	}
+	sh.adopt(store, sh.base, rev, remote, nil)
 }
 
 // save sends what changed in the store since it last matched the shared document. A refused change reloads the store
-// from the shared document and returns errTemplateConflict.
+// from the shared document, keeps every unsent change that does not collide there, and returns errTemplateConflict.
 func (sh *templateShare) save(store *TemplateStore, author string) error {
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
@@ -151,10 +209,8 @@ func (sh *templateShare) save(store *TemplateStore, author string) error {
 		return err
 	}
 	if perr := sh.post(author, changes); perr != nil {
-		if rev, remote, err := sh.get(); err == nil && store.replaceFrom(remote) == nil {
-			if base, err := store.tree(); err == nil {
-				sh.base, sh.rev = base, rev
-			}
+		if rev, remote, err := sh.get(); err == nil {
+			sh.adopt(store, cur, rev, remote, rebase(remote, changes))
 		}
 		if errors.Is(perr, cfgjournal.ErrConflict) {
 			return errTemplateConflict
