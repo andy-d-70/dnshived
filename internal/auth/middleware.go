@@ -46,6 +46,11 @@ var exemptPaths = map[string]bool{
 	"/internal/cfgrepl/append":     true,
 	"/internal/cfgrepl/snapshot":   true,
 	"/internal/cfgjournal/propose": true,
+	// Audit log union replication between the cores, gated the same way in cmd/dnshived.
+	"/internal/audit/hashes": true,
+	"/internal/audit/ids":    true,
+	"/internal/audit/fetch":  true,
+	"/internal/audit/push":   true,
 }
 
 // resolvedToken pairs a config.APIToken with its expiry pre-parsed once at

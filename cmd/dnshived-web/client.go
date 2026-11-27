@@ -1079,17 +1079,18 @@ func pushConfig(node NodeConfig, payload []byte) (status int, respBody []byte, e
 	return resp.StatusCode, respBody, err
 }
 
-// pushAudit records one audit entry on one node via POST /api/v1/audit.
-func pushAudit(node NodeConfig, actor, action, summary string) error {
+// pushAudit records one audit entry on one node via POST /api/v1/audit. replicated reports that the node keeps it
+// in the cores' shared audit log (older nodes keep only their own file).
+func pushAudit(node NodeConfig, actor, action, summary string) (replicated bool, err error) {
 	payload, err := json.Marshal(map[string]string{
 		"actor": actor, "action": action, "summary": summary,
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	req, err := http.NewRequest(http.MethodPost, node.baseURL()+"/api/v1/audit", bytes.NewReader(payload))
 	if err != nil {
-		return err
+		return false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if node.AdminToken != "" {
@@ -1097,13 +1098,17 @@ func pushAudit(node NodeConfig, actor, action, summary string) error {
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("status %d", resp.StatusCode)
+		return false, fmt.Errorf("status %d", resp.StatusCode)
 	}
-	return nil
+	var ans struct {
+		Replicated bool `json:"replicated"`
+	}
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&ans)
+	return ans.Replicated, nil
 }
 
 // manualProbeDef mirrors cmd/dnshived-probe.ManualProbe.

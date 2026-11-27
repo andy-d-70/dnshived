@@ -248,13 +248,19 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login?msg=logout", http.StatusSeeOther)
 }
 
-// auditAll records one event on every core, in the background.
+// auditAll records one event in the background: on the first core that keeps the shared audit log (the cores copy
+// it to each other), and on every older core before it, which keeps only its own file.
 func auditAll(cfg *WebConfig, actor, action, summary string) {
 	nodes := nodesIncludingSelf(cfg)
 	go func() {
 		for _, n := range nodes {
-			if err := pushAudit(n, actor, action, summary); err != nil {
+			replicated, err := pushAudit(n, actor, action, summary)
+			if err != nil {
 				log.Printf("[AUDIT] %s on %s: %v", action, n.Name, err)
+				continue
+			}
+			if replicated {
+				return
 			}
 		}
 	}()

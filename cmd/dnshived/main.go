@@ -1376,15 +1376,25 @@ func main() {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
 			return
 		}
-		if err := auditLogger.Append(req.Actor, self.NodeID, req.Action, req.Summary); err != nil {
+		if err := auditLogger.Append(req.Actor, self.NodeID, req.Action, req.Summary); errors.Is(err, auditlog.ErrFileCopy) {
+			loglevel.Warnf("[AUDIT] %v", err)
+		} else if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "append: " + err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true, "replicated": auditLogger.Store() != nil})
 	}))
 
 	// GET /api/v1/audit — export.
 	mux.HandleFunc("GET /api/v1/audit", func(w http.ResponseWriter, r *http.Request) {
+		if st := auditLogger.Store(); st != nil {
+			w.Header().Set("Content-Type", "application/x-ndjson")
+			w.Header().Set("X-Audit-Merged", "1")
+			if err := st.Export(w); err != nil {
+				loglevel.Warnf("[AUDIT:ERROR] export: %v", err)
+			}
+			return
+		}
 		data, err := auditLogger.ReadAll()
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "read audit log: " + err.Error()})
@@ -1554,6 +1564,7 @@ func main() {
 
 	startDNSStore(mux, authMw, ag, machine, observer, trustedHostsWithFallback)
 	startConfigJournal(mux, *cfgPath, ag, engine, authMw, observer, trustedHostsWithFallback)
+	startAuditStore(mux, auditLogger, observer, trustedHostsWithFallback)
 
 	// Wrap all routes with auth middleware (no-op when api_tokens is empty).
 	handler := authMw.Wrap(mux)

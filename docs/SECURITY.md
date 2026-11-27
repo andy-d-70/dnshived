@@ -202,13 +202,20 @@ scopes' `vrrp_id`s.
 
 ## Audit log
 
-`internal/auditlog`: append-only NDJSON (`{ts, actor, node_id, action,
-summary}`) in `/var/lib/dnshived/audit.log`, rotated past 10 MB. The web
-UI writes an entry after every config change via `POST /api/v1/audit`
-(admin token); `node_id` is set by the receiving daemon, never taken
-from the request. `GET /api/v1/audit` exports it. No cryptographic
-integrity: a node compromised enough to falsify it is already trusted
-for everything else.
+`internal/auditlog`: the web UI writes an entry after every config change
+via `POST /api/v1/audit` (admin token); `id`, `ts` and `node_id` are set
+by the receiving daemon, never taken from the request. On a core with a
+cluster key the entries live in an append-only store under
+`/var/lib/dnshived/auditstore` (CRC32C per record, HMAC chain keyed from
+the cluster PSK, fsync before the request is answered) and the cores
+copy them to each other over `/internal/audit/*` (trusted hosts and a
+token derived from the PSK), so every core holds the whole log. Each
+core also appends the NDJSON line to `/var/lib/dnshived/audit.log`
+(`{id, ts, actor, node_id, action, summary}`); past 10 MB it moves to
+`audit.log.1` and an older `.1` is archived, never deleted.
+`GET /api/v1/audit` exports the whole log in time order. The chain
+detects changed or reordered records; a node compromised enough to hold
+the PSK can still write new ones.
 
 ## Privilege separation
 

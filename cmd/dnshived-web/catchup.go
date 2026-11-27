@@ -46,7 +46,10 @@ func newCatchUp(ref *configRef) *catchUp {
 		statuses: fetchStatuses,
 		fetchCfg: fetchConfigDirect,
 		push:     pushConfig,
-		audit:    pushAudit,
+		audit: func(n NodeConfig, actor, action, summary string) error {
+			_, err := pushAudit(n, actor, action, summary)
+			return err
+		},
 	}
 }
 
