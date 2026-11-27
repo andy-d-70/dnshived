@@ -145,13 +145,6 @@ func conflictText(ce *secretindex.ConflictError) string {
 		itemLabel(ce.Key), what, ce.Entry.By, ce.Entry.At)
 }
 
-// pendingUsers is a change sent to the cores and not yet confirmed; it is kept on disk so a crash or a lost answer
-// cannot lose it: once the index names it, it is applied; if the cores never ordered it, it is dropped.
-type pendingUsers struct {
-	Keys  []string                   `json:"keys"`
-	Items map[string]json.RawMessage `json:"items"`
-}
-
 type forcedUsers struct {
 	Keys []string `json:"keys"`
 }
@@ -205,51 +198,20 @@ func (a *authSync) strictChange(fn func(d *webauth.Store) error) error {
 	if err != nil {
 		return err
 	}
-	keys := secretindex.Changed(before, after)
-	if len(keys) == 0 {
+	if len(secretindex.Changed(before, after)) == 0 {
 		return nil
 	}
-	tree, err := a.strict.getIndex()
-	if err != nil {
-		return fmt.Errorf("not saved: user changes need a majority of the cores, and their change order cannot be reached (%v)", err)
-	}
-	es, err := secretindex.Plan(tree, usersIndexPart, before, after, keys, a.selfName(), a.strict.now(), false)
+	applied, err := orderChange(a.strict, a.pendingPath(), usersIndexPart, a.selfName(), before, after)
 	var ce *secretindex.ConflictError
 	if errors.As(err, &ce) {
 		a.auditRejected(ce)
 		return errors.New(conflictText(ce))
 	}
-	if err != nil {
+	if !applied {
 		return err
 	}
-	p := pendingUsers{Keys: keys, Items: map[string]json.RawMessage{}}
-	for _, k := range keys {
-		p.Items[k] = json.RawMessage(after[k])
-	}
-	raw, err := json.Marshal(p)
-	if err != nil {
-		return err
-	}
-	if err := writeMarker(a.pendingPath(), raw); err != nil {
-		return fmt.Errorf("not saved: keep the change on disk before sending it: %w", err)
-	}
-	perr := a.strict.post(a.selfName(), es)
-	switch {
-	case perr == nil:
-		a.store.Install(next)
-		_ = os.Remove(a.pendingPath())
-		return a.persist()
-	case errors.Is(perr, cfgjournal.ErrConflict):
-		_ = os.Remove(a.pendingPath())
-		if tree, err := a.strict.getIndex(); err == nil {
-			if _, err := secretindex.Plan(tree, usersIndexPart, before, after, keys, a.selfName(), a.strict.now(), false); errors.As(err, &ce) {
-				a.auditRejected(ce)
-				return errors.New(conflictText(ce))
-			}
-		}
-		return errors.New("not saved: someone changed this at the same moment. Reload and enter the change again if it is still needed.")
-	}
-	return fmt.Errorf("not confirmed by the cores yet (%v): the change is kept and applied as soon as they confirm it, or dropped if they refuse it", perr)
+	a.store.Install(next)
+	return a.persist()
 }
 
 func (a *authSync) auditRejected(ce *secretindex.ConflictError) {
@@ -308,8 +270,8 @@ func (a *authSync) strictAdopt(remote *webauth.Store, from string) (adopted, spr
 	return true, len(refused) > 0, nil
 }
 
-// settle applies a change the cores confirmed after its answer was lost, drops one they never ordered, and orders
-// console resets. It runs after every comparison while strict mode is on.
+// settle applies a change the cores confirmed after its answer was lost, sends again one they have not answered,
+// drops one they refused, and orders console resets. It runs after every comparison while strict mode is on.
 func (a *authSync) settle() {
 	a.strict.refresh()
 	if !a.strict.active() {
@@ -317,59 +279,31 @@ func (a *authSync) settle() {
 	}
 	a.strictMu.Lock()
 	defer a.strictMu.Unlock()
-	var p pendingUsers
-	hasPending, perr := readJSONFile(a.pendingPath(), &p)
-	forced := a.forcedKeys()
-	if !hasPending && len(forced) == 0 {
-		return
-	}
-	tree, err := a.strict.getIndex()
+	p, outcome, err := settlePendingChange(a.strict, a.pendingPath())
 	if err != nil {
-		return
+		log.Printf("[AUTHSYNC] %v", err)
 	}
-	if perr != nil {
-		log.Printf("[AUTHSYNC] unreadable %s, kept for inspection: %v", a.pendingPath(), perr)
-	} else if hasPending {
-		a.settlePending(tree, p)
+	switch outcome {
+	case settleApply:
+		a.applyPending(p)
+	case settleDropped:
+		msg := fmt.Sprintf("dropped a change on %s that the cores refused: someone else changed it first", a.selfName())
+		log.Printf("[AUTHSYNC] %s", msg)
+		go auditAll(a.ref.Load(), "system", "users.rejected", msg)
 	}
-	if len(forced) > 0 {
-		a.orderForced(tree, forced)
+	if forced := a.forcedKeys(); len(forced) > 0 {
+		if tree, err := a.strict.getIndex(); err == nil {
+			a.orderForced(tree, forced)
+		}
 	}
 }
 
-func (a *authSync) settlePending(tree any, p pendingUsers) {
-	idx, err := secretindex.Parse(tree, usersIndexPart)
-	if err != nil {
-		return
-	}
-	confirmed := true
-	for _, k := range p.Keys {
-		raw, ok := p.Items[k]
-		e := idx[k]
-		if !ok || string(raw) == "null" {
-			confirmed = confirmed && e.Deleted
-		} else {
-			confirmed = confirmed && !e.Deleted && e.Hash == secretindex.Hash(raw)
-		}
-	}
-	if !confirmed {
-		_ = os.Remove(a.pendingPath())
-		msg := fmt.Sprintf("dropped an unconfirmed change on %s: the cores never ordered it", a.selfName())
-		log.Printf("[AUTHSYNC] %s", msg)
-		go auditAll(a.ref.Load(), "system", "users.rejected", msg)
-		return
-	}
+func (a *authSync) applyPending(p *pendingChange) {
 	cur, err := a.store.Items()
 	if err != nil {
 		return
 	}
-	for _, k := range p.Keys {
-		if raw := p.Items[k]; raw == nil || string(raw) == "null" {
-			delete(cur, k)
-		} else {
-			cur[k] = raw
-		}
-	}
+	p.applyItems(cur)
 	next, err := a.store.WithItems(cur)
 	if err != nil {
 		log.Printf("[AUTHSYNC] confirmed change not applied: %v", err)
@@ -382,7 +316,7 @@ func (a *authSync) settlePending(tree any, p pendingUsers) {
 		log.Printf("[AUTHSYNC] save confirmed change: %v", err)
 		return
 	}
-	log.Printf("[AUTHSYNC] applied a change the cores confirmed after its answer was lost")
+	log.Printf("[AUTHSYNC] applied a change the cores confirmed after it was sent")
 }
 
 func (a *authSync) orderForced(tree any, forced map[string]bool) {

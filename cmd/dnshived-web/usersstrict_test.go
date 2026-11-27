@@ -212,14 +212,35 @@ func TestUsersStrict_ALostAnswerIsAppliedOnceTheCoresConfirm(t *testing.T) {
 	}
 }
 
-func TestUsersStrict_AChangeTheCoresNeverOrderedIsDropped(t *testing.T) {
+func TestUsersStrict_AnUnansweredChangeIsSentAgainAndAppliedOnceAccepted(t *testing.T) {
 	idx, seed := newFakeIndex(), seedUsers(t)
 	a := strictInstance(t, idx, "core1", seed)
+	idx.fail = true
+	if err := a.change(setRole("bob", "admin")); !errors.Is(err, errNotConfirmed) {
+		t.Fatalf("not confirmed: %v", err)
+	}
+	a.settle()
+	if _, err := os.Stat(a.pendingPath()); err != nil || roleOf(a, "bob") != "scopeadmin" {
+		t.Fatalf("kept while the cores do not answer: bob %s", roleOf(a, "bob"))
+	}
+	idx.fail = false
+	a.settle()
+	if _, err := os.Stat(a.pendingPath()); !os.IsNotExist(err) || roleOf(a, "bob") != "admin" {
+		t.Fatalf("sent again and applied once accepted: bob %s", roleOf(a, "bob"))
+	}
+}
+
+func TestUsersStrict_AnUnansweredChangeIsDroppedWhenSomeoneElseWasFirst(t *testing.T) {
+	idx, seed := newFakeIndex(), seedUsers(t)
+	a, b := strictInstance(t, idx, "core1", seed), strictInstance(t, idx, "core2", seed)
 	idx.fail = true
 	if err := a.change(setRole("bob", "admin")); err == nil {
 		t.Fatal("not confirmed")
 	}
 	idx.fail = false
+	if err := b.change(setRole("bob", "readonly")); err != nil {
+		t.Fatal(err)
+	}
 	a.settle()
 	if _, err := os.Stat(a.pendingPath()); !os.IsNotExist(err) || roleOf(a, "bob") != "scopeadmin" {
 		t.Fatalf("dropped, nothing applied: bob %s", roleOf(a, "bob"))

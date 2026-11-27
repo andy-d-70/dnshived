@@ -361,10 +361,9 @@ func executeReplaceProbe(cfgPath string, ref *configRef, userName string, op pen
 		removed := append([]NodeConfig{}, cfg.ProbeHosts...)
 		newCfg := *cfg
 		newCfg.ProbeHosts = nil
-		if err := saveWebConfig(cfgPath, &newCfg); err != nil {
+		if err := saveProbeHostsChange(cfgPath, ref, cfg, &newCfg); err != nil {
 			return "", fmt.Errorf("removing the current probe host failed: %w", err)
 		}
-		ref.Store(&newCfg)
 		cfg = &newCfg
 		for _, old := range removed {
 			if note := pushProbeSelfDecommission(old); note != "" {
@@ -412,12 +411,9 @@ func executeReplaceProbe(cfgPath string, ref *configRef, userName string, op pen
 	}
 	newCfg := *cfg
 	newCfg.ProbeHosts = append(append([]NodeConfig{}, cfg.ProbeHosts...), entry)
-	if err := saveWebConfig(cfgPath, &newCfg); err != nil {
-		return "", fmt.Errorf("probe adopted, but saving local web.json failed: %w", err)
+	if err := saveProbeHostsChange(cfgPath, ref, cfg, &newCfg); err != nil {
+		return "", fmt.Errorf("probe adopted, but it is not listed yet: %w", err)
 	}
-	// Publishes live for every subsequent request on THIS instance — no
-	// restart needed (see configref.go).
-	ref.Store(&newCfg)
 
 	fanoutErrs := append([]string{}, removeErrs...)
 	for _, n := range siblingNodes(cfg) {
@@ -470,11 +466,10 @@ func removeProbeFormHandler(cfgPath string, ref *configRef) http.HandlerFunc {
 
 		newCfg := *cfg
 		newCfg.ProbeHosts = kept
-		if err := saveWebConfig(cfgPath, &newCfg); err != nil {
-			renderNodesError(w, cfg, "saving local web.json failed: "+err.Error(), "/probes")
+		if err := saveProbeHostsChange(cfgPath, ref, cfg, &newCfg); err != nil {
+			renderNodesError(w, cfg, "the probe host was told to leave, but the list was not changed: "+err.Error(), "/probes")
 			return
 		}
-		ref.Store(&newCfg)
 
 		var fanoutErrs []string
 		for _, n := range siblingNodes(cfg) {
@@ -563,6 +558,10 @@ func applyProbeAddHandler(cfgPath string, ref *configRef) http.HandlerFunc {
 			writeJSONWeb(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
+		if probeHostsShared.pullFromSiblings() {
+			writeJSONWeb(w, http.StatusOK, map[string]bool{"ok": true})
+			return
+		}
 		for _, h := range cfg.ProbeHosts {
 			if h.Addr == entry.Addr {
 				writeJSONWeb(w, http.StatusOK, map[string]bool{"ok": true}) // already present — idempotent, not an error
@@ -590,6 +589,10 @@ func applyProbeRemoveHandler(cfgPath string, ref *configRef) http.HandlerFunc {
 		var entry NodeConfig
 		if err := json.NewDecoder(r.Body).Decode(&entry); err != nil || entry.Addr == "" {
 			writeJSONWeb(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		if probeHostsShared.pullFromSiblings() {
+			writeJSONWeb(w, http.StatusOK, map[string]bool{"ok": true})
 			return
 		}
 		var kept []NodeConfig
@@ -1026,11 +1029,10 @@ func renameNodeFormHandler(cfgPath string, ref *configRef) http.HandlerFunc {
 				newCfg.SelfColor = *color
 			}
 		}
-		if err := saveWebConfig(cfgPath, &newCfg); err != nil {
-			renderNodesError(w, cfg, "saving local web.json failed: "+err.Error(), back)
+		if err := saveProbeHostsChange(cfgPath, ref, cfg, &newCfg); err != nil {
+			renderNodesError(w, cfg, "not saved: "+err.Error(), back)
 			return
 		}
-		ref.Store(&newCfg)
 
 		var fanoutErrs []string
 		for _, n := range siblingNodes(cfg) {
@@ -1195,6 +1197,10 @@ func applyRenameHandler(cfgPath string, ref *configRef) http.HandlerFunc {
 		var entry renameRequest
 		if err := json.NewDecoder(r.Body).Decode(&entry); err != nil || entry.Addr == "" || (entry.Color != nil && *entry.Color != "" && !validNodeColor(*entry.Color)) {
 			writeJSONWeb(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		if isProbeHostAddr(cfg, entry.Addr) && probeHostsShared.pullFromSiblings() {
+			writeJSONWeb(w, http.StatusOK, map[string]bool{"ok": true})
 			return
 		}
 		newCfg := *cfg

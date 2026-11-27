@@ -174,12 +174,17 @@ its own admin token. It never writes `cluster.json` itself.
   change names, per user, reset link and setting, the sha256 of the
   version it was based on; the first change wins and a later one from
   the same version is refused with the name of who changed it. A change
-  is kept on disk until the cores confirm it. Without a majority of the
-  cores no user change is accepted. A received document is taken item by
-  item, only where it holds what the index names. The journal holds the
-  hashes only, never the content. `dnshived-web -reset-user` on the
-  console stays possible without a majority and is ordered as a forced
-  change once the cores answer.
+  is kept on disk until the cores confirm it, sent again while they do
+  not answer, and dropped only when they refused it because another
+  change was first. Without a majority of the cores no user change is
+  accepted. A received document is taken item by item, only where it
+  holds what the index names. The probe-host list follows the same rule
+  per probe host (address): adding, removing, renaming and pinning a
+  probe host are ordered by the cores, and a sibling's direct change is
+  answered by fetching the ordered list. The journal holds the hashes
+  only, never the content. `dnshived-web -reset-user` on the console
+  stays possible without a majority and is ordered as a forced change
+  once the cores answer.
 - **Sessions:** a login form issues an HMAC-SHA256-signed cookie
   (`HttpOnly`, `SameSite=Lax`, `Secure` over TLS) naming the user and a
   per-user session epoch; it is valid on every core (shared key), for

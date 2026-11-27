@@ -38,8 +38,12 @@ type probeHostsDoc struct {
 	cfgPath string
 	self    func() string
 
-	// writeMu serialises this document's own writers (adopt, drift, first revision).
+	// writeMu serialises this document's own writers (adopt, drift, first revision, ordered changes).
 	writeMu sync.Mutex
+
+	strict *usersStrict
+	push   func()
+	sync   func()
 }
 
 func newProbeHostsDoc(ref *configRef, cfgPath string, self func() string) *probeHostsDoc {
@@ -140,6 +144,9 @@ func (d *probeHostsDoc) Adopt(raw []byte, from string) (adopted, spread bool, er
 	if err := validateProbeHosts(in.ProbeHosts); err != nil {
 		return false, false, invalidDocError{err.Error()}
 	}
+	if d.strictOn() {
+		return d.strictAdopt(in, from)
+	}
 	d.writeMu.Lock()
 	defer d.writeMu.Unlock()
 	cfg := d.ref.Load()
@@ -228,6 +235,7 @@ func newProbeHostsSyncer(ref *configRef, doc *probeHostsDoc, self func() string)
 		Do:         replDo(ref),
 		DecodeMeta: decodeMeta,
 		OnConflict: replConflict(ref, "probe-hosts"),
+		AfterPass:  doc.settle,
 		Logf:       log.Printf,
 	}
 }

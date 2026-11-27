@@ -108,6 +108,8 @@ func main() {
 	runNotifier(context.Background(), store, ref, repl.selfName)
 	probeDoc := newProbeHostsDoc(ref, *cfgPath, repl.selfName)
 	probeSync := newProbeHostsSyncer(ref, probeDoc, repl.selfName)
+	probeDoc.strict, probeDoc.push, probeDoc.sync = repl.strict, probeSync.PushAll, probeSync.SyncOnce
+	probeHostsShared = probeDoc
 	runProbeHostsSync(context.Background(), probeSync)
 	probeDocHandlers := probeDoc.handlers(probeSync.PushAll)
 	selfNameFn = repl.selfName

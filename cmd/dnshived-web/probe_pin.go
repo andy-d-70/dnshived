@@ -152,11 +152,10 @@ func handleProbePin(cfgPath string, ref *configRef) http.HandlerFunc {
 		hosts[idx] = host
 		newCfg := *cfg
 		newCfg.ProbeHosts = hosts
-		if err := saveWebConfig(cfgPath, &newCfg); err != nil {
-			http.Error(w, "save web config: "+err.Error(), http.StatusInternalServerError)
+		if err := saveProbeHostsChange(cfgPath, ref, cfg, &newCfg); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
-		ref.Store(&newCfg)
 		http.Redirect(w, r, "/probes", http.StatusSeeOther)
 	}
 }
@@ -188,11 +187,10 @@ func handleProbeUnpin(cfgPath string, ref *configRef) http.HandlerFunc {
 		hosts[idx].TLSFingerprint = ""
 		newCfg := *cfg
 		newCfg.ProbeHosts = hosts
-		if err := saveWebConfig(cfgPath, &newCfg); err != nil {
-			http.Error(w, "save web config: "+err.Error(), http.StatusInternalServerError)
+		if err := saveProbeHostsChange(cfgPath, ref, cfg, &newCfg); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
-		ref.Store(&newCfg)
 		http.Redirect(w, r, "/probes", http.StatusSeeOther)
 	}
 }

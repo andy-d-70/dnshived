@@ -252,10 +252,9 @@ func replaceProbeHost(cfgPath string, ref *configRef, host NodeConfig) error {
 	}
 	newCfg := *cfg
 	newCfg.ProbeHosts = hosts
-	if err := saveWebConfig(cfgPath, &newCfg); err != nil {
+	if err := saveProbeHostsChange(cfgPath, ref, cfg, &newCfg); err != nil {
 		return err
 	}
-	ref.Store(&newCfg)
 	return nil
 }
 
@@ -410,11 +409,10 @@ func handleProbeCertUpload(cfgPath string, ref *configRef) http.HandlerFunc {
 		}
 		newCfg := *cfg
 		newCfg.ProbeHosts = hosts
-		if err := saveWebConfig(cfgPath, &newCfg); err != nil {
-			http.Error(w, "save web config: "+err.Error(), http.StatusInternalServerError)
+		if err := saveProbeHostsChange(cfgPath, ref, cfg, &newCfg); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
-		ref.Store(&newCfg)
 		pushAudit(host, user.Name, "probe.tls_upload", fmt.Sprintf("certificate of %s replaced, new fingerprint %s", host.Name, fp))
 		http.Redirect(w, r, "/probes#tab-hosts", http.StatusSeeOther)
 	}
