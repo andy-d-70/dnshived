@@ -211,7 +211,11 @@ func (a *authSync) strictChange(fn func(d *webauth.Store) error) error {
 		return err
 	}
 	a.store.Install(next)
-	return a.persist()
+	if err := a.persist(); err != nil {
+		return err
+	}
+	_ = os.Remove(a.pendingPath())
+	return nil
 }
 
 func (a *authSync) auditRejected(ce *secretindex.ConflictError) {

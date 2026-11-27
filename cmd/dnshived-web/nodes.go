@@ -15,9 +15,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"dnshived/internal/config"
@@ -245,7 +247,52 @@ func saveWebConfig(path string, cfg *WebConfig) error {
 	if err != nil {
 		return fmt.Errorf("marshal web config: %w", err)
 	}
-	return os.WriteFile(path, data, 0o640)
+	return webConfigWriter(path, data, 0o640)
+}
+
+// webConfigWriter is writeFileAtomic, replaceable in tests.
+var webConfigWriter = writeFileAtomic
+
+// writeFileAtomic replaces path with data so a crash leaves either the old or the new file, never a part: a temp
+// file in the same directory, fsync, rename, fsync of the directory. The file keeps the owner and group of the old
+// one when the process may set them.
+func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		tmp.Close()
+		return err
+	}
+	if fi, err := os.Stat(path); err == nil {
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+			_ = tmp.Chown(int(st.Uid), int(st.Gid))
+		}
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		return err
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
 
 // nodesSharedToken authenticates the fan-out calls one dnshived-web
@@ -766,10 +813,9 @@ func executeReplaceNode(cfgPath string, ref *configRef, userName string, op pend
 	}
 	newCfg := *cfg
 	newCfg.Nodes = nodes
-	if err := saveWebConfig(cfgPath, &newCfg); err != nil {
-		return fmt.Sprintf("%s adopted as %s via %s, but saving local web.json failed: %s\n", addr, role, survivor.Name, err), nil
+	if err := saveWebChange(cfgPath, ref, cfg, &newCfg); err != nil {
+		return fmt.Sprintf("%s adopted as %s via %s, but the node list was not changed: %s\n", addr, role, survivor.Name, err), nil
 	}
-	ref.Store(&newCfg)
 
 	var fanoutErrs []string
 	for _, n := range siblingNodes(cfg) {
@@ -936,10 +982,9 @@ func executeOffboardNode(ref *configRef, cfgPath string, userName string, op pen
 	}
 	newCfg := *cfg
 	newCfg.Nodes = kept
-	if err := saveWebConfig(cfgPath, &newCfg); err != nil {
-		return fmt.Sprintf("Offboarded %s (%s), but saving local web.json failed: %s\n", role, targetAddr, err), nil
+	if err := saveWebChange(cfgPath, ref, cfg, &newCfg); err != nil {
+		return fmt.Sprintf("Offboarded %s (%s), but the node list was not changed: %s\n", role, targetAddr, err), nil
 	}
-	ref.Store(&newCfg)
 
 	var fanoutErrs []string
 	for _, n := range siblingNodes(cfg) {
@@ -1029,8 +1074,8 @@ func renameNodeFormHandler(cfgPath string, ref *configRef) http.HandlerFunc {
 				newCfg.SelfColor = *color
 			}
 		}
-		if err := saveProbeHostsChange(cfgPath, ref, cfg, &newCfg); err != nil {
-			renderNodesError(w, cfg, "not saved: "+err.Error(), back)
+		if err := saveWebChange(cfgPath, ref, cfg, &newCfg); err != nil {
+			renderNodesError(w, cfg, err.Error(), back)
 			return
 		}
 
@@ -1052,6 +1097,16 @@ func renameNodeFormHandler(cfgPath string, ref *configRef) http.HandlerFunc {
 		}
 		fmt.Fprintf(w, `<p><a href="%s">back</a></p>`, back)
 	}
+}
+
+// isNodeAddr reports whether addr belongs to a core node of the replicated node list.
+func isNodeAddr(cfg *WebConfig, addr string) bool {
+	for _, n := range cfg.Nodes {
+		if n.Addr == addr {
+			return true
+		}
+	}
+	return false
 }
 
 // isProbeHostAddr reports whether addr belongs to a configured probe host
@@ -1199,7 +1254,7 @@ func applyRenameHandler(cfgPath string, ref *configRef) http.HandlerFunc {
 			writeJSONWeb(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
-		if isProbeHostAddr(cfg, entry.Addr) && probeHostsShared.pullFromSiblings() {
+		if isProbeHostAddr(cfg, entry.Addr) && probeHostsShared.pullFromSiblings() || isNodeAddr(cfg, entry.Addr) && nodesShared.pullFromSiblings() {
 			writeJSONWeb(w, http.StatusOK, map[string]bool{"ok": true})
 			return
 		}
@@ -1239,6 +1294,10 @@ func applyNodeRemoveHandler(cfgPath string, ref *configRef) http.HandlerFunc {
 			writeJSONWeb(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 			return
 		}
+		if nodesShared.pullFromSiblings() {
+			writeJSONWeb(w, http.StatusOK, map[string]bool{"ok": true})
+			return
+		}
 		var kept []NodeConfig
 		changed := false
 		for _, n := range cfg.Nodes {
@@ -1275,6 +1334,10 @@ func applyNodeReplaceHandler(cfgPath string, ref *configRef) http.HandlerFunc {
 		var entry NodeConfig
 		if err := json.NewDecoder(r.Body).Decode(&entry); err != nil || entry.Name == "" || entry.Addr == "" {
 			writeJSONWeb(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+			return
+		}
+		if nodesShared.pullFromSiblings() {
+			writeJSONWeb(w, http.StatusOK, map[string]bool{"ok": true})
 			return
 		}
 		nodes := append([]NodeConfig{}, cfg.Nodes...)

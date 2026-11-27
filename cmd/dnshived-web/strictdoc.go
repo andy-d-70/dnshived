@@ -27,9 +27,11 @@ type pendingChange struct {
 
 var errNotConfirmed = errors.New("not confirmed by the cores yet")
 
-// orderChange orders the change from before to after. applied is true when the cores accepted it now; err is a
-// *secretindex.ConflictError when someone else changed an item first, wraps errNotConfirmed when the change is kept
-// pending, and is any other error when nothing was sent.
+// orderChange orders the change from before to after. applied is true when the cores accepted it now; the pending
+// file then stays until the caller has saved the change locally and removes it, so a failed save is applied by the
+// next settle instead of leaving the cores naming content no instance holds. err is a *secretindex.ConflictError
+// when someone else changed an item first, wraps errNotConfirmed when the change is kept pending, and is any other
+// error when nothing was sent.
 func orderChange(s *usersStrict, pendingPath, part, by string, before, after map[string][]byte) (applied bool, err error) {
 	keys := secretindex.Changed(before, after)
 	if len(keys) == 0 {
@@ -59,7 +61,6 @@ func orderChange(s *usersStrict, pendingPath, part, by string, before, after map
 	perr := s.post(by, es)
 	switch {
 	case perr == nil:
-		_ = os.Remove(pendingPath)
 		return true, nil
 	case errors.Is(perr, cfgjournal.ErrConflict):
 		_ = os.Remove(pendingPath)

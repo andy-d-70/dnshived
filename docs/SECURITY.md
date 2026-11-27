@@ -181,8 +181,11 @@ its own admin token. It never writes `cluster.json` itself.
   holds what the index names. The probe-host list follows the same rule
   per probe host (address): adding, removing, renaming and pinning a
   probe host are ordered by the cores, and a sibling's direct change is
-  answered by fetching the ordered list. The journal holds the hashes
-  only, never the content. `dnshived-web -reset-user` on the console
+  answered by fetching the ordered list. The web's core node list
+  (role, address, admin token, display name) is replicated the same way
+  over `/internal/docs/nodes` and follows the same rule per role.
+  `web.json` is written atomically (temp file, fsync, rename). The
+  journal holds the hashes only, never the content. `dnshived-web -reset-user` on the console
   stays possible without a majority and is ordered as a forced change
   once the cores answer.
 - **Sessions:** a login form issues an HMAC-SHA256-signed cookie

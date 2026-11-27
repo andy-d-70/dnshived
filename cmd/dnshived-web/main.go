@@ -112,6 +112,12 @@ func main() {
 	probeHostsShared = probeDoc
 	runProbeHostsSync(context.Background(), probeSync)
 	probeDocHandlers := probeDoc.handlers(probeSync.PushAll)
+	nodesDoc := newNodesDoc(ref, *cfgPath, repl.selfName)
+	nodesSync := newListSyncer(ref, nodesDoc, repl.selfName)
+	nodesDoc.strict, nodesDoc.push, nodesDoc.sync = repl.strict, nodesSync.PushAll, nodesSync.SyncOnce
+	nodesShared = nodesDoc
+	runNodesSync(context.Background(), nodesSync)
+	nodesDocHandlers := nodesDoc.handlers(nodesSync.PushAll)
 	selfNameFn = repl.selfName
 	newCatchUp(ref).run(context.Background())
 
@@ -300,6 +306,9 @@ func main() {
 	mux.HandleFunc("POST /internal/docs/probe-hosts", probeDocHandlers.post)
 	mux.HandleFunc("GET /internal/docs/probe-hosts/meta", probeDocHandlers.meta)
 	mux.HandleFunc("GET /internal/docs/probe-hosts", probeDocHandlers.get)
+	mux.HandleFunc("POST /internal/docs/nodes", nodesDocHandlers.post)
+	mux.HandleFunc("GET /internal/docs/nodes/meta", nodesDocHandlers.meta)
+	mux.HandleFunc("GET /internal/docs/nodes", nodesDocHandlers.get)
 
 	mux.HandleFunc("POST /nodes/probe/add", requirePermission(store, webauth.PermEditConfig, addProbeFormHandler(*cfgPath, ref)))
 	mux.HandleFunc("POST /nodes/probe/remove", requirePermission(store, webauth.PermEditConfig, removeProbeFormHandler(*cfgPath, ref)))

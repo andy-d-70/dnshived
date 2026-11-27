@@ -66,6 +66,13 @@ type WebConfig struct {
 	ProbeHostsOrigin    string `json:"probe_hosts_origin,omitempty"`
 	ProbeHostsHash      string `json:"probe_hosts_hash,omitempty"`
 
+	// NodesVersion and the three fields after it are the revision stamp of the replicated core node list
+	// (nodesdoc.go); version 0 means never replicated.
+	NodesVersion   int64  `json:"nodes_version,omitempty"`
+	NodesUpdatedAt string `json:"nodes_updated_at,omitempty"`
+	NodesOrigin    string `json:"nodes_origin,omitempty"`
+	NodesHash      string `json:"nodes_hash,omitempty"`
+
 	CoordinatorNode *NodeConfig `json:"coordinator,omitempty"`
 
 	SelfAdminToken string `json:"self_admin_token,omitempty"`
