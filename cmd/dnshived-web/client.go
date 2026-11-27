@@ -450,6 +450,16 @@ func fetchClusterSnapshot(entry NodeConfig) (clusterSnapshotResponse, bool) {
 	return fetchClusterSnapshotFresh(entry)
 }
 
+// cachedClusterSnapshot returns the cached snapshot when it is younger than maxAge, without fetching.
+func cachedClusterSnapshot(maxAge time.Duration) (clusterSnapshotResponse, bool) {
+	clusterSnapshotCacheMu.Lock()
+	defer clusterSnapshotCacheMu.Unlock()
+	if !clusterSnapshotCacheOK || time.Since(clusterSnapshotCacheAt) >= maxAge {
+		return clusterSnapshotResponse{}, false
+	}
+	return clusterSnapshotCacheResp, true
+}
+
 func fetchClusterSnapshotFresh(entry NodeConfig) (clusterSnapshotResponse, bool) {
 	var resp clusterSnapshotResponse
 	start := time.Now()

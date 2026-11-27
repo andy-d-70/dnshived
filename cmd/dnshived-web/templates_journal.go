@@ -236,10 +236,45 @@ func templateAuthor(r *http.Request) string {
 	return name
 }
 
+const templateSnapshotMaxAge = 15 * time.Second
+
+// templateJournalActive answers journalActive cheaply: from the UI's cluster snapshot when it is fresh, else from
+// this web's own core, and asks every node only when that core does not answer.
+func templateJournalActive(cfg *WebConfig) bool {
+	if snap, ok := cachedClusterSnapshot(templateSnapshotMaxAge); ok {
+		if reportsJournal(snap.Self.Status) {
+			return true
+		}
+		for _, p := range snap.Peers {
+			if reportsJournal(p.Status) {
+				return true
+			}
+		}
+		return false
+	}
+	if self, ok := selfNodeConfig(cfg); ok {
+		if st, err := statusFetcher(self); err == nil {
+			return journalOn(st.ConfigJournal)
+		}
+	}
+	return journalActive(nodesIncludingSelf(cfg))
+}
+
+func reportsJournal(status json.RawMessage) bool {
+	var st struct {
+		ConfigJournal json.RawMessage `json:"config_journal"`
+	}
+	if len(status) == 0 || json.Unmarshal(status, &st) != nil {
+		return false
+	}
+	return journalOn(st.ConfigJournal)
+}
+
 // useTemplateShare connects the shared templates to the cluster nodes and follows them in the background.
-func useTemplateShare(store *TemplateStore, nodes func() []NodeConfig) {
+func useTemplateShare(store *TemplateStore, ref *configRef) {
 	sh := templatesShare
-	sh.active = func() bool { return journalActive(nodes()) }
+	nodes := func() []NodeConfig { return nodesIncludingSelf(ref.Load()) }
+	sh.active = func() bool { return templateJournalActive(ref.Load()) }
 	sh.get = func() (uint64, any, error) { return fetchSharedDoc(nodes(), templatesDocName) }
 	sh.post = func(author string, changes []cfgjournal.Entry) error {
 		return postSharedDocChanges(nodes(), templatesDocName, author, changes)

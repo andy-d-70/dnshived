@@ -970,12 +970,14 @@ func sortedScopeKeys(m map[string]config.ScopeConfig) []string {
 // journalActive reports whether the cores keep the configuration in the configuration journal.
 func journalActive(nodes []NodeConfig) bool {
 	for _, st := range fetchStatuses(nodes) {
-		if len(st.ConfigJournal) > 0 && string(st.ConfigJournal) != "null" {
+		if journalOn(st.ConfigJournal) {
 			return true
 		}
 	}
 	return false
 }
+
+func journalOn(state json.RawMessage) bool { return len(state) > 0 && string(state) != "null" }
 
 // commitThroughJournal commits the staged items (all, or the user's own) on the cores: the first core commits them
 // through the journal, each core saves its own staged secret and identity fields. A refused item (someone changed it

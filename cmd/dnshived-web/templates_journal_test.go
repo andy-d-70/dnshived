@@ -12,7 +12,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"dnshived/internal/cfgjournal"
@@ -312,5 +314,43 @@ func TestTemplateShare_ChangesCarryTheLoggedInUser(t *testing.T) {
 	r = r.WithContext(context.WithValue(r.Context(), userContextKey{}, webauth.User{Name: long}))
 	if got := templateAuthor(r); len(got) > 255 || !utf8.ValidString(got) || !strings.HasPrefix(long, got) {
 		t.Fatalf("a long name is cut to 255 bytes on a character boundary: %d bytes", len(got))
+	}
+}
+
+func TestTemplateJournalActive_UsesAFreshSnapshotWithoutAsking(t *testing.T) {
+	resetClusterSnapshotCache()
+	t.Cleanup(resetClusterSnapshotCache)
+	orig := statusFetcher
+	t.Cleanup(func() { statusFetcher = orig })
+	var calls atomic.Int32
+	on := json.RawMessage(`{"role":"leader"}`)
+	statusFetcher = func(NodeConfig) (nodeStatus, error) {
+		calls.Add(1)
+		return nodeStatus{ConfigJournal: on}, nil
+	}
+	cfg := &WebConfig{Nodes: []NodeConfig{{Name: "core-1", Addr: "127.0.0.1:1"}, {Name: "core-2", Addr: "127.0.0.1:2"}}}
+
+	clusterSnapshotCacheMu.Lock()
+	clusterSnapshotCacheAt, clusterSnapshotCacheOK = time.Now(), true
+	clusterSnapshotCacheResp = clusterSnapshotResponse{
+		Self:  clusterSnapshotNode{Status: json.RawMessage(`{"config_journal":null}`)},
+		Peers: map[string]clusterSnapshotNode{"b": {Status: json.RawMessage(`{"config_journal":{"role":"follower"}}`)}},
+	}
+	clusterSnapshotCacheMu.Unlock()
+	if !templateJournalActive(cfg) || calls.Load() != 0 {
+		t.Fatalf("a fresh snapshot answers without a request: calls=%d", calls.Load())
+	}
+	clusterSnapshotCacheMu.Lock()
+	clusterSnapshotCacheResp.Peers = nil
+	clusterSnapshotCacheMu.Unlock()
+	if templateJournalActive(cfg) || calls.Load() != 0 {
+		t.Fatalf("no core reports the journal in the snapshot: calls=%d", calls.Load())
+	}
+
+	clusterSnapshotCacheMu.Lock()
+	clusterSnapshotCacheAt = time.Now().Add(-templateSnapshotMaxAge - time.Second)
+	clusterSnapshotCacheMu.Unlock()
+	if !templateJournalActive(cfg) || calls.Load() == 0 {
+		t.Fatalf("a stale snapshot falls back to asking: calls=%d", calls.Load())
 	}
 }

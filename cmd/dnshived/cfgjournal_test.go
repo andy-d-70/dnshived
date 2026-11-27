@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -311,5 +312,69 @@ func TestSharedDoc_TemplatesMergeByItemAndCollideOnTheSameOne(t *testing.T) {
 	j.handleDocGet(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatal("documents with secrets are never served through the journal")
+	}
+}
+
+func TestSharedDoc_AnswerComesFromMemoryUntilTheJournalMoves(t *testing.T) {
+	path := writeBaseConfig(t)
+	j := singleCoreJournal(t, path)
+	get := func() docAnswer {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/journal/docs/templates", nil)
+		req.SetPathValue("name", "templates")
+		rec := httptest.NewRecorder()
+		j.handleDocGet(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET: %d %s", rec.Code, rec.Body)
+		}
+		var ans docAnswer
+		if err := json.Unmarshal(rec.Body.Bytes(), &ans); err != nil {
+			t.Fatal(err)
+		}
+		return ans
+	}
+	withTemplate := func(id string) any {
+		return map[string]any{"templates": []any{map[string]any{"id": id, "name": id, "kind": "dns", "body": "A"}}, "option_sets": []any{}, "scope_groups": []any{}}
+	}
+	a, _ := cfgjournal.FromChange(templatesDoc, emptyTemplates(), withTemplate("cams"), 0)
+	raw, _ := json.Marshal(docChangeRequest{Author: "ann", Changes: a})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/journal/docs/templates/changes", bytes.NewReader(raw))
+	req.SetPathValue("name", "templates")
+	rec := httptest.NewRecorder()
+	j.handleDocChange(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("change: %d %s", rec.Code, rec.Body)
+	}
+	first := get()
+
+	file := j.templatesDoc.Path
+	saved, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if again := get(); again.Rev != first.Rev || !bytes.Equal(again.Tree, first.Tree) {
+		t.Fatalf("an idle journal answers from memory: %s", again.Tree)
+	}
+	if err := os.WriteFile(file, saved, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	b, _ := cfgjournal.FromChange(templatesDoc, withTemplate("cams"), map[string]any{"templates": []any{
+		map[string]any{"id": "cams", "name": "cams", "kind": "dns", "body": "A"},
+		map[string]any{"id": "mics", "name": "mics", "kind": "dns", "body": "M"},
+	}, "option_sets": []any{}, "scope_groups": []any{}}, 0)
+	raw, _ = json.Marshal(docChangeRequest{Author: "bob", Changes: b})
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/journal/docs/templates/changes", bytes.NewReader(raw))
+	req.SetPathValue("name", "templates")
+	rec = httptest.NewRecorder()
+	j.handleDocChange(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second change: %d %s", rec.Code, rec.Body)
+	}
+	if after := get(); after.Rev <= first.Rev || !bytes.Contains(after.Tree, []byte(`"mics"`)) {
+		t.Fatalf("a change moves the journal and the next answer shows it: rev %d -> %d %s", first.Rev, after.Rev, after.Tree)
 	}
 }

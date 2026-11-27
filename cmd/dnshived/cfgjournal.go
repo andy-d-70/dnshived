@@ -83,6 +83,11 @@ type cfgJournalRuntime struct {
 	// seenRev is the journal revision the last successful sync covered; a sync with nothing newer is skipped, so an
 	// idle core never reads its configuration files. Guarded by cfgWriteMu.
 	seenRev uint64
+	// docCache is the last templates answer and the journal head it was read at, set only right after a successful
+	// sync. Guarded by cfgWriteMu.
+	docCache     docAnswer
+	docCacheHead uint64
+	docCacheOK   bool
 }
 
 // cfgJournalStatus is the journal's part of /api/v1/status; nil while the journal is off. It reads only values kept

@@ -35,20 +35,38 @@ func (j *cfgJournalRuntime) handleDocGet(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such shared document"})
 		return
 	}
-	cfgWriteMu.Lock()
-	_, _ = j.syncLocked()
-	tree, rev, _, err := j.templatesDoc.Load()
-	cfgWriteMu.Unlock()
+	ans, err := j.templatesAnswer()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	writeJSON(w, http.StatusOK, ans)
+}
+
+// templatesAnswer reads the templates document only when the journal moved since the last answer; an idle cluster
+// answers every web's refresh from memory.
+func (j *cfgJournalRuntime) templatesAnswer() (docAnswer, error) {
+	cfgWriteMu.Lock()
+	defer cfgWriteMu.Unlock()
+	_, serr := j.syncLocked()
+	head := j.store.View().Rev()
+	if serr == nil && j.docCacheOK && j.docCacheHead == head {
+		return j.docCache, nil
+	}
+	j.docCacheOK = false
+	tree, rev, _, err := j.templatesDoc.Load()
+	if err != nil {
+		return docAnswer{}, err
 	}
 	raw, err := json.Marshal(tree)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+		return docAnswer{}, err
 	}
-	writeJSON(w, http.StatusOK, docAnswer{Rev: rev, Tree: raw})
+	ans := docAnswer{Rev: rev, Tree: raw}
+	if serr == nil {
+		j.docCache, j.docCacheHead, j.docCacheOK = ans, head, true
+	}
+	return ans, nil
 }
 
 type docChangeRequest struct {
